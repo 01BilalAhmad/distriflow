@@ -1,0 +1,561 @@
+// ============================================================
+// DMS (Distributor Management System) - Prisma Schema
+// FMCG Secondary Sales & Distribution Automation
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============ USERS & DISTRIBUTION HIERARCHY ============
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String   @default("demo123")
+  role      String // MEGA_ADMIN (software seller) | DISTRIBUTOR (subscriber) | SALESMAN (order booker)
+  phone     String?
+  region    String?
+  parentId  String?
+  parent    User?    @relation("Hierarchy", fields: [parentId], references: [id])
+  children  User[]   @relation("Hierarchy")
+  createdAt DateTime @default(now())
+  // Mega Admin subscription control — DISTRIBUTOR accounts par apply hota hai.
+  // MEGA_ADMIN in flags ko toggle karta hai; inactive/expired par distributor + uski team login nahi kar sakti.
+  // MEGA_ADMIN ko business data ka access NAHI hai — ye fields sirf account management ke liye hain.
+  isActive           Boolean   @default(true)
+  subscriptionStart  DateTime?
+  subscriptionExpiry DateTime?
+
+  profile        DistributorProfile?
+  outlets        Outlet[]            @relation("OutletSalesman")
+  orders         Order[]             @relation("OrderSalesman")
+  pjpPlans       PJPPlan[]
+  targets        SalesTarget[]
+  adjustments     StockAdjustment[]
+  collections    Collection[]
+  recoveries     Recovery[]          @relation("RecoveryBooker")
+  summaries      DeliverySummary[]   @relation("SummarySalesman")
+  companyId      String?
+  company        Company?            @relation("CompanySalesmen", fields: [companyId], references: [id])
+  // Distributor-controlled "All Routes" access — ON hone par booker apni login mein
+  // sab route shops dekh sakta hai (end-of-month max recovery). OFF = sirf day-wise.
+  allRoutesOpen  Boolean             @default(false)
+}
+
+model DistributorProfile {
+  id           String       @id @default(cuid())
+  userId       String       @unique
+  businessName String
+  city         String
+  region       String
+  creditLimit  Float        @default(500000)
+  tier         String       @default("PRIMARY") // PRIMARY | SUB
+  user         User         @relation(fields: [userId], references: [id])
+  warehouses   Warehouse[]
+  outlets      Outlet[]
+  orders       Order[]
+  claims       Claim[]
+  summaries    DeliverySummary[]
+  // Task 23: tenant-owned catalog — har distributor ka apna catalog/schemes/companies
+  brands          Brand[]
+  products        Product[]
+  companies       Company[]
+  schemes         Scheme[]
+  purchaseInvoices PurchaseInvoice[]
+  ledgerEntries   CompanyLedgerEntry[]
+  appSettings     AppSetting[]
+}
+
+// ============ PRODUCT CATALOG ============
+
+model Company {
+  id            String    @id @default(cuid())
+  name          String
+  // Task 23: company per-tenant (procurement suppliers har distributor ke apne)
+  distributorId String
+  distributor   DistributorProfile @relation(fields: [distributorId], references: [id])
+  shortCode     String?
+  contactPerson String?
+  phone         String?
+  email         String?
+  address       String?
+  notes         String?
+  logo          String? // base64 data URL (uploaded logo)
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  products         Product[]
+  salesmen         User[]              @relation("CompanySalesmen")
+  purchaseInvoices PurchaseInvoice[]
+  ledgerEntries    CompanyLedgerEntry[]
+  @@unique([name, distributorId])
+}
+
+model Brand {
+  id            String              @id @default(cuid())
+  name          String
+  // Task 23: brand per-tenant — do distributors ka same naam allowed (Al-Madina ka 'Tapal' alag, Karam ka 'Tapal' alag)
+  distributorId String
+  distributor   DistributorProfile @relation(fields: [distributorId], references: [id])
+  products      Product[]
+  @@unique([name, distributorId])
+}
+
+model Product {
+  id             String       @id @default(cuid())
+  sku            String
+  name           String
+  brandId        String
+  brand          Brand        @relation(fields: [brandId], references: [id])
+  companyId      String?
+  company        Company?     @relation(fields: [companyId], references: [id])
+  // Task 23: tenant owner — naya distributor ka catalog bilkul khali hota hai
+  distributorId  String
+  distributor    DistributorProfile @relation(fields: [distributorId], references: [id])
+  category       String // Beverages, Tea, Dairy, Snacks, Home Care, Personal Care
+  unit           String       @default("CARTON")
+  unitsPerCarton Int          @default(12) // pieces per carton (base unit = PIECE)
+  boxesPerCarton Int          @default(0) // boxes per carton (0 = no box level, sirf ctn/pcs)
+  pcsPerBox      Int          @default(0) // pieces per box (boxesPerCarton > 0 ho to unitsPerCarton = boxes * pcs)
+  purchasePrice  Float? // company se kharidne ka rate (per carton)
+  tradePrice     Float // per carton (order rate per piece = tradePrice / unitsPerCarton)
+  consumerPrice  Float? // per piece
+  isActive       Boolean      @default(true)
+  orderItems     OrderItem[]
+  stockBatches   StockBatch[]
+  schemes        Scheme[]
+  returnItems    ReturnItem[]
+  deliveryItems  DeliveryItem[]
+  adjustments    StockAdjustment[]
+  purchaseItems  PurchaseInvoiceItem[]
+  @@unique([sku, distributorId])
+}
+
+// ============ PROCUREMENT (Purchase Invoices from Companies) ============
+
+model PurchaseInvoice {
+  id                String   @id @default(cuid())
+  invoiceNo         String   @unique // PIN-7001
+  companyId         String
+  company           Company  @relation(fields: [companyId], references: [id])
+  // Task 23: tenant scope — invoice sirf usi distributor ka jo company ka malik hai
+  distributorId     String
+  distributor       DistributorProfile @relation(fields: [distributorId], references: [id])
+  supplierInvoiceNo String? // company ka apna bill number
+  date              DateTime @default(now())
+  subtotal          Float    @default(0)
+  discount          Float    @default(0)
+  total             Float    @default(0)
+  paidAmount        Float    @default(0) // advance + ledger payments against this invoice
+  status            String   @default("UNPAID") // UNPAID | PARTIAL | PAID
+  notes             String?
+  createdAt         DateTime @default(now())
+  items             PurchaseInvoiceItem[]
+  ledgerEntries     CompanyLedgerEntry[]
+}
+
+model PurchaseInvoiceItem {
+  id            String          @id @default(cuid())
+  invoiceId     String
+  invoice       PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product         @relation(fields: [productId], references: [id])
+  batchNo       String
+  expDate       DateTime?
+  cartons       Int
+  unitsPerCarton Int
+  units         Int
+  purchasePrice Float // per carton snapshot
+  lineTotal     Float
+}
+
+// Company (supplier) payable ledger:
+// credit = hum par qarz barha (purchase invoice) | debit = kam hua (payment / debit note)
+// Balance = SUM(credit) - SUM(debit)  =>  positive = company ko dena hai
+model CompanyLedgerEntry {
+  id          String           @id @default(cuid())
+  companyId   String
+  company     Company          @relation(fields: [companyId], references: [id])
+  // Task 23: tenant scope
+  distributorId String
+  distributor   DistributorProfile @relation(fields: [distributorId], references: [id])
+  date        DateTime         @default(now())
+  type        String // PURCHASE | PAYMENT | DEBIT_NOTE | CREDIT_NOTE | ADJUSTMENT
+  description String
+  refNo       String?
+  invoiceId   String?
+  invoice     PurchaseInvoice? @relation(fields: [invoiceId], references: [id])
+  debit       Float            @default(0)
+  credit      Float            @default(0)
+  createdAt   DateTime         @default(now())
+}
+
+// ============ OUTLETS (Retailers) ============
+
+model Outlet {
+  id            String       @id @default(cuid())
+  code          String       @unique
+  name          String
+  ownerName     String?
+  phone         String?
+  address       String?
+  city          String
+  channel       String       @default("GENERAL") // KIRYANA | SUPERMARKET | WHOLESALE | GENERAL
+  lat           Float?
+  lng           Float?
+  creditDays    Int          @default(7)
+  // Filer / Non-Filer (advance tax WHT): NTN ho to FILER warna NON_FILER
+  ntn           String?
+  cnic          String? // shop owner ka CNIC — bill par shop ke apne NTN/CNIC print hote hain
+  filerStatus   String       @default("NON_FILER") // FILER | NON_FILER
+  // Visit schedule — comma separated day codes: "MON,WED,SAT" | empty = har roz visit
+  visitDays     String       @default("")
+  isActive      Boolean      @default(true)
+  distributorId String
+  distributor   DistributorProfile @relation(fields: [distributorId], references: [id])
+  salesmanId    String?
+  salesman      User?        @relation("OutletSalesman", fields: [salesmanId], references: [id])
+  orders        Order[]
+  visits        Visit[]
+  returns       SaleReturn[]
+  collections   Collection[]
+  settlements   SummarySettlement[]
+  ledgerEntries OutletLedger[]
+  recoveries    Recovery[]
+  createdAt     DateTime     @default(now())
+}
+
+// ============ INVENTORY (Multi-warehouse + FIFO/FEFO batches) ============
+
+model Warehouse {
+  id            String           @id @default(cuid())
+  name          String
+  distributorId String
+  distributor   DistributorProfile @relation(fields: [distributorId], references: [id])
+  city          String
+  isPrimary     Boolean          @default(false)
+  stockBatches  StockBatch[]
+  adjustments   StockAdjustment[]
+  deliveries    Delivery[]
+  summaries     DeliverySummary[]
+}
+
+model StockBatch {
+  id          String    @id @default(cuid())
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+  productId   String
+  product     Product   @relation(fields: [productId], references: [id])
+  batchNo     String
+  qty         Int       @default(0)
+  mfgDate     DateTime?
+  expDate     DateTime?
+  receivedAt  DateTime  @default(now())
+}
+
+model StockAdjustment {
+  id          String    @id @default(cuid())
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+  productId   String
+  product     Product   @relation(fields: [productId], references: [id])
+  type        String // IN | OUT
+  qty         Int
+  reason      String
+  userId      String?
+  user        User?     @relation(fields: [userId], references: [id])
+  createdAt   DateTime  @default(now())
+}
+
+// ============ SCHEMES & PROMOTIONS ============
+
+model Scheme {
+  id          String       @id @default(cuid())
+  name        String
+  description String?
+  // Task 23: schemes per-tenant — discount har distributor apni khud banata hai
+  distributorId String
+  distributor   DistributorProfile @relation(fields: [distributorId], references: [id])
+  type        String // PERCENT_DISCOUNT | FLAT_DISCOUNT | BUY_X_GET_Y
+  channel     String? // null = all channels
+  productId   String? // null = all products
+  product     Product?     @relation(fields: [productId], references: [id])
+  value       Float // percent or flat amount per carton
+  buyQty      Int          @default(0)
+  freeQty     Int          @default(0)
+  startDate   DateTime     @default(now())
+  endDate     DateTime?
+  isActive    Boolean      @default(true)
+  orderItems  OrderItem[]
+  createdAt   DateTime     @default(now())
+}
+
+// ============ PJP / FIELD FORCE ============
+
+model PJPPlan {
+  id         String   @id @default(cuid())
+  salesmanId String
+  salesman   User     @relation(fields: [salesmanId], references: [id])
+  date       DateTime
+  status     String   @default("PLANNED") // PLANNED | IN_PROGRESS | COMPLETED
+  visits     Visit[]
+  createdAt  DateTime @default(now())
+}
+
+model Visit {
+  id         String    @id @default(cuid())
+  planId     String
+  plan       PJPPlan   @relation(fields: [planId], references: [id])
+  outletId   String
+  outlet     Outlet    @relation(fields: [outletId], references: [id])
+  sequence   Int       @default(1)
+  status     String    @default("PENDING") // PENDING | CHECKED_IN | COMPLETED | MISSED
+  checkInAt  DateTime?
+  checkOutAt DateTime?
+  checkInLat Float?
+  checkInLng Float?
+  notes      String?
+}
+
+// ============ ORDERS (Secondary Sales) ============
+
+model Order {
+  id             String       @id @default(cuid())
+  orderNo        String       @unique
+  outletId       String
+  outlet         Outlet       @relation(fields: [outletId], references: [id])
+  salesmanId     String?
+  salesman       User?        @relation("OrderSalesman", fields: [salesmanId], references: [id])
+  distributorId  String
+  distributor    DistributorProfile @relation(fields: [distributorId], references: [id])
+  channel        String
+  status         String       @default("CONFIRMED") // CONFIRMED | PROCESSING | PARTIALLY_DELIVERED | DELIVERED | CANCELLED
+  subtotal       Float        @default(0)
+  schemeDiscount Float        @default(0)
+  // Manual order-level discount (order booking par % ya flat Rs) — scheme ke ILAWA
+  manualDiscount Float        @default(0)
+  manualDiscType String?      // PERCENT | FLAT | null
+  manualDiscValue Float?      // raw input: 5 = 5% (PERCENT) ya 500 = Rs 500 (FLAT)
+  total          Float        @default(0)
+  // Advance Tax (WHT) snapshot at booking — shop filer 0.5% / non-filer 2.5% (settings se)
+  filerStatus    String?      // FILER | NON_FILER (booking waqt ka snapshot)
+  advanceTaxRate Float?       // % snapshot (rate-preserve principle)
+  advanceTax     Float        @default(0)
+  notes          String?
+  orderDate      DateTime     @default(now())
+  summaryId      String?
+  summary        DeliverySummary? @relation(fields: [summaryId], references: [id])
+  items          OrderItem[]
+  deliveries     Delivery[]
+  returns        SaleReturn[]
+  settlements    SummarySettlement[]
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id])
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  qty       Int
+  freeQty   Int     @default(0)
+  rate      Float
+  discount  Float   @default(0)
+  schemeId  String?
+  scheme    Scheme? @relation(fields: [schemeId], references: [id])
+  lineTotal Float
+}
+
+// ============ DELIVERY (Order Fulfillment, FEFO deduction) ============
+
+model Delivery {
+  id          String         @id @default(cuid())
+  deliveryNo  String         @unique
+  orderId     String
+  order       Order          @relation(fields: [orderId], references: [id])
+  warehouseId String
+  warehouse   Warehouse      @relation(fields: [warehouseId], references: [id])
+  status      String         @default("COMPLETED")
+  date        DateTime       @default(now())
+  items       DeliveryItem[]
+}
+
+model DeliveryItem {
+  id         String   @id @default(cuid())
+  deliveryId String
+  delivery   Delivery @relation(fields: [deliveryId], references: [id])
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+  qty        Int
+}
+
+// ============ DELIVERY SUMMARIES (Order Processing -> Van Out -> Settlement) ============
+
+model DeliverySummary {
+  id            String              @id @default(cuid())
+  summaryNo     String              @unique
+  salesmanId    String
+  salesman      User                @relation("SummarySalesman", fields: [salesmanId], references: [id])
+  warehouseId   String
+  warehouse     Warehouse           @relation(fields: [warehouseId], references: [id])
+  distributorId String
+  distributor   DistributorProfile  @relation(fields: [distributorId], references: [id])
+  orderDate     DateTime
+  deliveryDate  DateTime
+  status        String              @default("UNSETTLED") // UNSETTLED | SETTLED
+  subtotal      Float               @default(0)
+  settledCash   Float               @default(0)
+  settledCredit Float               @default(0)
+  settledReturns Float              @default(0)
+  settledAt     DateTime?
+  settledByName String?
+  notes         String?
+  orders        Order[]
+  settlements   SummarySettlement[]
+  createdAt     DateTime            @default(now())
+}
+
+model SummarySettlement {
+  id           String          @id @default(cuid())
+  summaryId    String
+  summary      DeliverySummary @relation(fields: [summaryId], references: [id])
+  outletId     String
+  outlet       Outlet          @relation(fields: [outletId], references: [id])
+  orderId      String          @unique
+  order        Order           @relation(fields: [orderId], references: [id])
+  billAmount   Float
+  returnAmount Float    @default(0)
+  advanceTax   Float    @default(0) // WHT snapshot (order se)
+  cashAmount   Float
+  creditAmount Float
+  status       String // CASH | PARTIAL | CREDIT
+  notes        String?
+  createdAt    DateTime        @default(now())
+}
+
+// Per-tenant settings (Task 23) — har distributor ke apne tax/GST rates
+model AppSetting {
+  id        String   @id @default(cuid())
+  key       String
+  value     String
+  distributorId String
+  distributor   DistributorProfile @relation(fields: [distributorId], references: [id])
+  updatedAt DateTime @updatedAt
+  @@unique([key, distributorId])
+}
+
+model OutletLedger {
+  id        String   @id @default(cuid())
+  outletId  String
+  outlet    Outlet   @relation(fields: [outletId], references: [id])
+  date      DateTime @default(now())
+  type      String // DEBIT (invoice / udhaar) | CREDIT (cash received)
+  amount    Float
+  refType   String // INVOICE | CASH | RETURN | OPENING
+  refNo     String
+  note      String?
+  createdAt DateTime @default(now())
+}
+
+// ============ SALE RETURNS ============
+
+model SaleReturn {
+  id         String       @id @default(cuid())
+  returnNo   String       @unique
+  outletId   String
+  outlet     Outlet       @relation(fields: [outletId], references: [id])
+  orderId    String?
+  order      Order?       @relation(fields: [orderId], references: [id])
+  type       String // DAMAGED | EXPIRED | UNSOLD
+  status     String       @default("PENDING") // PENDING | APPROVED | REJECTED
+  totalValue Float        @default(0)
+  reason     String?
+  createdAt  DateTime     @default(now())
+  items      ReturnItem[]
+}
+
+model ReturnItem {
+  id           String     @id @default(cuid())
+  returnId     String
+  saleReturn   SaleReturn @relation(fields: [returnId], references: [id])
+  productId    String
+  product      Product    @relation(fields: [productId], references: [id])
+  qty          Int
+  rate         Float
+  value        Float
+}
+
+// ============ CLAIMS (Hierarchical approval) ============
+
+model Claim {
+  id            String             @id @default(cuid())
+  claimNo       String             @unique
+  distributorId String
+  distributor   DistributorProfile @relation(fields: [distributorId], references: [id])
+  type          String // SCHEME_CLAIM | DAMAGED | RETURN_CLAIM | OTHER
+  amount        Float
+  status        String             @default("PENDING") // PENDING | APPROVED | REJECTED
+  approvedBy    String?
+  reason        String?
+  createdAt     DateTime           @default(now())
+}
+
+// ============ COLLECTIONS (Payments from outlets) ============
+
+model Collection {
+  id            String   @id @default(cuid())
+  receiptNo     String   @unique
+  outletId      String
+  outlet        Outlet   @relation(fields: [outletId], references: [id])
+  amount        Float
+  method        String   @default("CASH") // CASH | BANK | CHEQUE
+  collectedById String?
+  collectedBy   User?    @relation(fields: [collectedById], references: [id])
+  date          DateTime @default(now())
+}
+
+// ============ RECOVERY (Order-booker wise udhaar wasooli) ============
+// Booker route par shops se purana udhaar wasool karta hai — har entry par:
+// Recovery voucher (RCV-) + OutletLedger CREDIT (RECOVERY) + Collection receipt (RCP-)
+
+model Recovery {
+  id            String   @id @default(cuid())
+  recoveryNo    String   @unique // RCV-4001
+  outletId      String
+  outlet        Outlet   @relation(fields: [outletId], references: [id])
+  bookerId      String? // null = unassigned shop (koi booker route mein nahi)
+  booker        User?    @relation("RecoveryBooker", fields: [bookerId], references: [id])
+  distributorId String?
+  amount        Float
+  method        String   @default("CASH") // CASH | CHEQUE | BANK
+  reference     String? // cheque no / bank slip no
+  note          String?
+  recoveredAt   DateTime @default(now()) // wasooli ki date (editable)
+  postedByName  String? // kis ne entry post ki (admin/distributor)
+  // Approval workflow — booker ki wasooli sirf APPROVE ke baad ledger mein jati hai
+  status        String       @default("APPROVED") // PENDING | APPROVED | REJECTED (admin direct post = APPROVED)
+  originalAmount Float?      // admin ne amount edit kiya to booker ki asli entry (audit)
+  editedAmount  Boolean      @default(false) // admin ne amount change kiya?
+  approvedById  String?      // kis ne approve/reject kiya
+  approvedByName String?
+  approvedAt    DateTime?
+  reviewNote    String?      // reject reason / approval note
+  createdAt     DateTime @default(now())
+}
+
+// ============ SALES TARGETS (Brand-wise / overall) ============
+
+model SalesTarget {
+  id          String @id @default(cuid())
+  salesmanId  String
+  salesman    User   @relation(fields: [salesmanId], references: [id])
+  brandId     String?
+  month       String // "2026-09"
+  targetValue Float
+}
