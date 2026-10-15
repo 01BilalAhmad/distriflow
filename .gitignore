@@ -69,3 +69,6 @@ server.log
 .agents/
 agent/
 skills-lock.json
+
+# DB snapshots (user data) — git par nahi
+scripts/db-snapshots/

@@ -44,6 +44,7 @@ export function BackupView() {
   // normal state hai. cloudMode par info panel dikhta hai, red toast nahi.
   const [cloudMode, setCloudMode] = useState(false)
   const [cloudMsg, setCloudMsg] = useState('')
+  const [downloading, setDownloading] = useState(false)
 
   const load = async () => {
     if (!user) return
@@ -96,6 +97,37 @@ export function BackupView() {
     }
   }
 
+  // Task 42: cloud par bhi poora data JSON file me download ho sakta hai —
+  // user apna data khud apne paas safe rakhe (har hafte / bare change se pehle)
+  const downloadJson = async () => {
+    if (!user) return
+    setDownloading(true)
+    try {
+      const res = await fetch(`/api/backup/export?userId=${user.id}`)
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || 'Backup download failed')
+      }
+      const blob = await res.blob()
+      const cd = res.headers.get('Content-Disposition') || ''
+      const m = cd.match(/filename="?([^";]+)"?/)
+      const name = m?.[1] || `distriflow-backup-${Date.now()}.json`
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = name
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      toast({ title: 'Backup download ho gaya ✓', description: `${name} — ise apne paas (email/Drive) safe rakhein` })
+    } catch (e) {
+      toast({ title: 'Backup download fail', description: e instanceof Error ? e.message : 'Unknown error', variant: 'destructive' })
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
       <Card>
@@ -128,7 +160,7 @@ export function BackupView() {
               <div className="flex items-start gap-3 text-sm text-sky-900 bg-sky-50 border border-sky-200 rounded-lg px-4 py-3">
                 <CloudCheck className="h-5 w-5 text-sky-600 shrink-0 mt-0.5" />
                 <div className="space-y-1.5">
-                  <p className="font-semibold">Backup cloud par Neon khud sambhalta hai — koi manual backup ki zaroorat nahi</p>
+                  <p className="font-semibold">Cloud database (Neon Postgres) — deploy/hot-reload se data par asar nahi padta</p>
                   <p className="text-sky-800 leading-relaxed">{cloudMsg}</p>
                   <a
                     href="https://console.neon.tech"
@@ -140,8 +172,15 @@ export function BackupView() {
                   </a>
                 </div>
               </div>
-              <div className="text-center py-8 text-slate-400 text-sm">
-                Manual snapshot (file download) sirf local SQLite deployment par available hai.
+              <div className="flex items-start justify-between gap-3 flex-wrap bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
+                <div className="text-sm text-emerald-900">
+                  <p className="font-semibold">Apna data khud bhi safe rakhein (recommended)</p>
+                  <p className="text-emerald-800 leading-relaxed mt-0.5">Neeche button se poora database JSON file me download hota hai. Har hafte ya koi bhi bara kaam shuru karne se pehle ek backup download karke apne paas (email/Drive/USB) rakh lein.</p>
+                </div>
+                <Button onClick={downloadJson} disabled={downloading} className="bg-emerald-600 hover:bg-emerald-700 shrink-0">
+                  {downloading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
+                  {downloading ? 'Download ho raha hai...' : 'Download Backup (JSON)'}
+                </Button>
               </div>
             </>
           ) : (
