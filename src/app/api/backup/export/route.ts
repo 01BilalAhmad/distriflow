@@ -78,7 +78,10 @@ export async function GET(req: Request) {
       headers: {
         'Content-Type': 'application/json',
         'Content-Disposition': `attachment; filename="${filename}"`,
-        'Content-Length': String(body.length),
+        // Content-Length BYTE hona chahiye (chars nahi) — user data me •/Urdu multi-byte
+        // chars hote hain: body.length (UTF-16 chars) < byte length → client body truncate
+        // kar deta tha (backup adhoora download — Task 45 me pakra gaya)
+        'Content-Length': String(Buffer.byteLength(body, 'utf8')),
       },
     })
   } catch (e) {
