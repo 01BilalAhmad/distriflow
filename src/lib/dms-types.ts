@@ -185,6 +185,9 @@ export interface ProductDTO {
   purchasePrice: number | null
   tradePrice: number
   consumerPrice: number | null
+  // Task 37: per-product GST — bill isi rate se print hota hai (false = is product par GST nahi)
+  gstEnabled: boolean
+  gstRate: number
   stock: number // PIECES base
   available: number // Task 26: ATP pcs = stock − CONFIRMED (unprocessed) bills ki booked qty — booking limit
 }

@@ -31,12 +31,13 @@ const PRODUCT_IMPORT_COLUMNS: BulkColumn[] = [
   { key: 'purchasePrice', label: 'Purchase Rs/Ctn', hint: 'Optional' },
   { key: 'tradePrice', label: 'Trade Rs/Ctn', required: true },
   { key: 'consumerPrice', label: 'Consumer Rs/Pc', hint: 'Optional' },
+  { key: 'gstRate', label: 'GST %', hint: 'Khali = 18% — "no" likho to is product par GST nahi' },
 ]
 
 const PRODUCT_SAMPLE_ROWS = [
-  ['LU-CND-672', 'LU Candi Biscuits 672g', 'LU', 'English Biscuit Manufacturers', 'Snacks', '24', '', '', '2100', '2600', '130'],
-  ['TAP-CHS-440', 'Tapal Chai Family Pack 440g', 'Tapal', 'Tapal Tea', 'Tea', '', '12', '24', '1980', '2400', '120'],
-  ['NRP-JUI-1000', 'Nurpur Juice 1000ml', 'Nurpur', 'Nurpur Foods', 'Dairy', '12', '', '', '1440', '1800', '180'],
+  ['LU-CND-672', 'LU Candi Biscuits 672g', 'LU', 'English Biscuit Manufacturers', 'Snacks', '24', '', '', '2100', '2600', '130', '18'],
+  ['TAP-CHS-440', 'Tapal Chai Family Pack 440g', 'Tapal', 'Tapal Tea', 'Tea', '', '12', '24', '1980', '2400', '120', ''],
+  ['NRP-JUI-1000', 'Nurpur Juice 1000ml', 'Nurpur', 'Nurpur Foods', 'Dairy', '12', '', '', '1440', '1800', '180', 'no'],
 ]
 
 interface ProductForm {
@@ -51,12 +52,15 @@ interface ProductForm {
   purchasePrice: string
   tradePrice: string
   consumerPrice: string
+  gstOn: boolean
+  gstRate: string
 }
 
 const EMPTY_FORM: ProductForm = {
   sku: '', name: '', brand: '', company: '', category: 'Snacks',
   unitsPerCarton: '24', boxesPerCarton: '', pcsPerBox: '',
   purchasePrice: '', tradePrice: '', consumerPrice: '',
+  gstOn: true, gstRate: '18',
 }
 
 function formFromProduct(p: ProductDTO): ProductForm {
@@ -68,6 +72,7 @@ function formFromProduct(p: ProductDTO): ProductForm {
     purchasePrice: p.purchasePrice != null ? String(p.purchasePrice) : '',
     tradePrice: String(p.tradePrice),
     consumerPrice: p.consumerPrice != null ? String(p.consumerPrice) : '',
+    gstOn: p.gstEnabled, gstRate: String(p.gstRate),
   }
 }
 
@@ -105,7 +110,7 @@ export function ProductsView() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-slate-900">Product Catalog (SKUs)</h2>
-          <p className="text-sm text-slate-500">{companies.length} companies • {products.length} SKUs — edit, rates update aur pack sizes (Ctn/Box/Pcs)</p>
+          <p className="text-sm text-slate-500">{companies.length} companies • {products.length} SKUs — edit, rates, pack sizes aur per-product GST</p>
         </div>
         <div className="flex gap-2">
           {user?.role !== 'SALESMAN' && (
@@ -152,6 +157,7 @@ export function ProductsView() {
                     <TableHead className="text-right">Pack (Ctn/Box/Pcs)</TableHead>
                     <TableHead className="text-right">Purchase</TableHead>
                     <TableHead className="text-right">Trade</TableHead>
+                    <TableHead className="text-right">GST</TableHead>
                     <TableHead className="hidden md:table-cell text-right">GP/Crtn</TableHead>
                     <TableHead className="text-right">Stock</TableHead>
                     {user?.role !== 'SALESMAN' && <TableHead className="text-right">Edit</TableHead>}
@@ -180,6 +186,13 @@ export function ProductsView() {
                         </TableCell>
                         <TableCell className="text-right text-slate-600">{p.purchasePrice != null ? fmtPKR(p.purchasePrice) : '—'}</TableCell>
                         <TableCell className="text-right font-semibold">{fmtPKR(p.tradePrice)}</TableCell>
+                        <TableCell className="text-right">
+                          {p.gstEnabled ? (
+                            <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700 text-[10px]">{Math.round(p.gstRate * 100) / 100}%</Badge>
+                          ) : (
+                            <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-400 text-[10px]">No GST</Badge>
+                          )}
+                        </TableCell>
                         <TableCell className="hidden md:table-cell text-right">{gp != null ? <span className={gp > 0 ? 'text-emerald-600 font-medium' : 'text-red-500'}>+{fmtNum(gp)}</span> : '—'}</TableCell>
                         <TableCell className="text-right whitespace-nowrap">
                           <span className={lowStock ? 'text-red-500 font-semibold' : 'text-slate-700 font-medium'}>{fmtQty(p.stock, p.unitsPerCarton, p.pcsPerBox)}</span>
@@ -233,6 +246,11 @@ function parseProductRow(r: Record<string, string>): ParseOutcome<Record<string,
   const sku = (r.sku ?? '').trim(), name = (r.name ?? '').trim(), brand = (r.brand ?? '').trim(), trade = (r.tradePrice ?? '').trim()
   if (!sku || !name || !brand || !trade) return { ok: false, error: 'SKU, Product Name, Brand aur Trade Price zaroori hain' }
   if (!Number.isFinite(Number(trade)) || Number(trade) <= 0) return { ok: false, error: `Trade price ghalat: "${trade}"` }
+  // Task 37: GST % optional — khali = default 18; number 0-100 = rate; no/off = GST nahi
+  const gst = (r.gstRate ?? '').trim().toLowerCase()
+  if (gst && !['no', 'off', 'nai', 'none', 'nahi'].includes(gst) && (!Number.isFinite(Number(gst)) || Number(gst) < 0 || Number(gst) > 100)) {
+    return { ok: false, error: `GST % ghalat: "${r.gstRate}" — number (0-100) ya no/off likhein` }
+  }
   for (const k of ['unitsPerCarton', 'boxesPerCarton', 'pcsPerBox', 'purchasePrice', 'consumerPrice'] as const) {
     const v = (r[k] ?? '').trim()
     if (v && !Number.isFinite(Number(v))) return { ok: false, error: `${k} number hona chahiye: "${v}"` }
@@ -283,6 +301,10 @@ function ProductFormDialog({ open, onOpenChange, onSaved, companies, product }: 
     if (!editing && !form.company) {
       toast({ title: 'Company select karein', description: 'Product kis company ka hai — pehle select karein', variant: 'destructive' }); return
     }
+    const gr = Number(form.gstRate)
+    if (form.gstOn && (!Number.isFinite(gr) || gr < 0 || gr > 100)) {
+      toast({ title: 'Invalid GST rate', description: 'GST rate 0 se 100 ke beech hona chahiye', variant: 'destructive' }); return
+    }
     if (editing && !product) return
     setSaving(true)
     try {
@@ -294,10 +316,13 @@ function ProductFormDialog({ open, onOpenChange, onSaved, companies, product }: 
         purchasePrice: form.purchasePrice ? Number(form.purchasePrice) : null,
         tradePrice: Number(form.tradePrice),
         consumerPrice: form.consumerPrice ? Number(form.consumerPrice) : null,
+        // Task 37: per-product GST
+        gstEnabled: form.gstOn,
+        gstRate: form.gstOn ? gr : (Number.isFinite(gr) ? gr : 18),
       })
       if (editing && product) {
         await api(`/api/products/${product.id}`, { method: 'PATCH', body })
-        toast({ title: 'Product Updated ✓', description: `${form.name} — rates/pack save ho gaye (naye orders par lagein ge)` })
+        toast({ title: 'Product Updated ✓', description: `${form.name} — rates/pack/GST save ho gaye (naye orders par lagein ge)` })
       } else {
         await api('/api/products', { method: 'POST', body })
         toast({ title: 'Product Added ✓', description: form.name })
@@ -389,6 +414,30 @@ function ProductFormDialog({ open, onOpenChange, onSaved, companies, product }: 
           <p className="text-[11px] text-slate-400">
             Order rate per piece = {fmtPKR((Number(form.tradePrice) || 0) / Math.max(1, Number(form.unitsPerCarton) || 1))} — {packHint(Number(form.unitsPerCarton) || 12, boxes, pcsBox)}
           </p>
+          {/* Task 37: GST — per product (global Tax Settings se yahan move hua) */}
+          <div className="rounded-lg border border-blue-200 bg-blue-50/40 p-2.5">
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <p className="text-[11px] font-semibold text-slate-700">GST (Sales Tax) — is product par?</p>
+              <div className="grid grid-cols-2 gap-1 rounded-lg border border-slate-200 bg-white p-0.5">
+                <button type="button" onClick={() => setForm((f) => ({ ...f, gstOn: false }))}
+                  className={`h-7 rounded-md px-3 text-[11px] font-medium transition-colors ${!form.gstOn ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>
+                  No GST
+                </button>
+                <button type="button" onClick={() => setForm((f) => ({ ...f, gstOn: true }))}
+                  className={`h-7 rounded-md px-3 text-[11px] font-medium transition-colors ${form.gstOn ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>
+                  GST On
+                </button>
+              </div>
+            </div>
+            {form.gstOn ? (
+              <div className="flex items-end gap-2">
+                <div className="grid gap-1 w-24"><Label className="text-[11px]">Rate %</Label><Input type="number" min={0} max={100} step={0.5} value={form.gstRate} onChange={(e) => setForm({ ...form, gstRate: e.target.value })} placeholder="18" /></div>
+                <p className="text-[10px] text-slate-500 leading-snug pb-1">Bill par is product ki rows mein "GST @ {form.gstRate || 0}%" hisab isi rate se hoga — doosre products apne apne rate se</p>
+              </div>
+            ) : (
+              <p className="text-[10px] text-slate-500 leading-snug">Is product par GST nahi lagegi — bill par is product ki GST columns mein dash aayega (misal: fresh dairy, exempt items)</p>
+            )}
+          </div>
         </div>
         <DialogFooter>
           <Button onClick={save} disabled={saving} className="w-full bg-emerald-600 hover:bg-emerald-700">

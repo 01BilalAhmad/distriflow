@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -388,36 +387,31 @@ function OutletFormDialog({ open, onOpenChange, onCreated, onSaved, outlet }: {
   )
 }
 
-/** Tax settings — advance tax (filer / non-filer %) + GST (on/off + rate) — Admin / Distributor */
+/** Tax settings — advance tax (filer / non-filer %) — Task 37: GST ab Product Catalog mein per-product set hota hai */
 function TaxSettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const user = useDMS((s) => s.user)
   const [filer, setFiler] = useState('0.5')
   const [nonFiler, setNonFiler] = useState('2.5')
-  const [gstOn, setGstOn] = useState(true)
-  const [gstRate, setGstRate] = useState('18')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (open) {
-      api<{ settings: { filerTaxRate: number; nonFilerTaxRate: number; gstEnabled: boolean; gstRate: number } }>(`/api/settings?userId=${(JSON.parse(localStorage.getItem('dms_session') ?? 'null'))?.id ?? ''}`)
-        .then((r) => { setFiler(String(r.settings.filerTaxRate)); setNonFiler(String(r.settings.nonFilerTaxRate)); setGstOn(r.settings.gstEnabled); setGstRate(String(r.settings.gstRate)) })
+      api<{ settings: { filerTaxRate: number; nonFilerTaxRate: number } }>(`/api/settings?userId=${(JSON.parse(localStorage.getItem('dms_session') ?? 'null'))?.id ?? ''}`)
+        .then((r) => { setFiler(String(r.settings.filerTaxRate)); setNonFiler(String(r.settings.nonFilerTaxRate)) })
         .catch(() => {})
     }
   }, [open])
 
   async function save() {
-    const f = Number(filer), nf = Number(nonFiler), gr = Number(gstRate)
+    const f = Number(filer), nf = Number(nonFiler)
     if (!Number.isFinite(f) || f < 0 || f > 100 || !Number.isFinite(nf) || nf < 0 || nf > 100) {
       toast({ title: 'Invalid rate', description: 'Rates 0 se 100 ke beech honi chahiye', variant: 'destructive' }); return
-    }
-    if (gstOn && (!Number.isFinite(gr) || gr < 0 || gr > 100)) {
-      toast({ title: 'Invalid GST rate', description: 'GST rate 0 se 100 ke beech hona chahiye', variant: 'destructive' }); return
     }
     if (!user) return
     setSaving(true)
     try {
-      await api('/api/settings', { method: 'PUT', body: JSON.stringify({ userId: user.id, filerTaxRate: f, nonFilerTaxRate: nf, gstEnabled: gstOn, gstRate: gstOn ? gr : undefined }) })
-      toast({ title: 'Tax Settings Updated ✓', description: `Adv Tax: Filer ${f}% / Non-Filer ${nf}% • GST: ${gstOn ? `${gr}% (ON)` : 'OFF'} — bill naye settings se print hoga` })
+      await api('/api/settings', { method: 'PUT', body: JSON.stringify({ userId: user.id, filerTaxRate: f, nonFilerTaxRate: nf }) })
+      toast({ title: 'Tax Settings Updated ✓', description: `Adv Tax: Filer ${f}% / Non-Filer ${nf}% — bill naye settings se print hoga (GST ab har product ke apne rate se)` })
       onOpenChange(false)
     } catch (e) {
       toast({ title: 'Failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' })
@@ -431,10 +425,10 @@ function TaxSettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><Settings2 className="h-5 w-5 text-blue-600" /> Tax Settings</DialogTitle>
-          <DialogDescription>Advance tax + GST — bill inhi settings ke hisab se print hota hai</DialogDescription>
+          <DialogDescription>Advance tax rates — bill inhi settings ke hisab se print hota hai (GST ab Product Catalog mein har product ke apne rate se)</DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
-          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">1) Advance Tax (Filer / Non-Filer)</p>
+          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Advance Tax (Filer / Non-Filer)</p>
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-1.5">
               <Label>Filer %</Label>
@@ -451,29 +445,7 @@ function TaxSettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange
             <p><b>Misal:</b> Rs 10,000 ka bill — Filer shop par Rs {(10000 * f / 100).toFixed(0)} add hoga (total Rs {(10000 + 10000 * f / 100).toFixed(0)}), Non-Filer par Rs {(10000 * nf / 100).toFixed(0)} (total Rs {(10000 + 10000 * nf / 100).toFixed(0)}).</p>
             <p className="mt-1">Rate sirf <b>naye orders</b> par lagta hai — purani invoices apne booking-waqt ka rate rakhti hain.</p>
           </div>
-
-          <Separator />
-          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">2) GST (Sales Tax on Bill)</p>
-          <div className="grid grid-cols-2 gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
-            <button type="button" onClick={() => setGstOn(false)}
-              className={`h-8 rounded-md text-xs font-medium transition-colors ${!gstOn ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:bg-white'}`}>
-              GST Off
-            </button>
-            <button type="button" onClick={() => setGstOn(true)}
-              className={`h-8 rounded-md text-xs font-medium transition-colors ${gstOn ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:bg-white'}`}>
-              GST On
-            </button>
-          </div>
-          {gstOn && (
-            <div className="grid gap-1.5">
-              <Label>GST Rate %</Label>
-              <Input type="number" min={0} step={0.5} value={gstRate} onChange={(e) => setGstRate(e.target.value)} placeholder="18" />
-              <p className="text-[10px] text-slate-400">Bill par "GST @ {gstRate || 0}%" columns aur summary isi rate se print hoga — 0 rakho to sirf rate badalta hai, Off karo to GST columns/rows bilkul nahi aayenge</p>
-            </div>
-          )}
-          {!gstOn && (
-            <p className="text-[11px] text-slate-500 rounded-lg bg-slate-50 border border-slate-100 p-2.5">GST Off par bill mein GST columns aur GST summary rows <b>nahi</b> print hongi — sirf Rate, Total Value, RP Value, Gross, Discount, Adv Tax aur Total Invoice Amount aayega.</p>
-          )}
+          <p className="text-[11px] text-slate-500 rounded-lg bg-slate-50 border border-slate-100 p-2.5">GST (sales tax) ab <b>Product Catalog</b> mein har product ke apne form se set hota hai — kis product par kitni % aur kis par bilkul nahi. Wahan se hi bill print hoga.</p>
         </div>
         <DialogFooter>
           <Button onClick={save} disabled={saving} className="w-full bg-blue-600 hover:bg-blue-700">

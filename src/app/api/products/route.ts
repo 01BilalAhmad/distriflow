@@ -55,6 +55,9 @@ export async function GET(req: Request) {
       purchasePrice: p.purchasePrice,
       tradePrice: p.tradePrice,
       consumerPrice: p.consumerPrice,
+      // Task 37: per-product GST
+      gstEnabled: p.gstEnabled,
+      gstRate: p.gstRate,
       stock: p.stockBatches.reduce((s, b) => s + b.qty, 0), // PIECES base
       // Task 26: ATP — stock − CONFIRMED (unprocessed) bills ki booked qty (PROCESSING van-out par deduct ho chuka hota hai).
       // Order booking UI isi ko limit ke tor par show/enforce karta hai.
@@ -71,7 +74,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const body = await req.json()
-    const { sku, name, brand, companyId, category, unitsPerCarton, boxesPerCarton, pcsPerBox, purchasePrice, tradePrice, consumerPrice, userId } = body
+    const { sku, name, brand, companyId, category, unitsPerCarton, boxesPerCarton, pcsPerBox, purchasePrice, tradePrice, consumerPrice, gstEnabled, gstRate, userId } = body
     if (!userId) return jsonError('userId required')
     if (!sku || !name || !brand || !tradePrice) return jsonError('SKU, name, brand aur trade price required hain')
 
@@ -101,6 +104,9 @@ export async function POST(req: Request) {
         purchasePrice: purchasePrice ? Number(purchasePrice) : null,
         tradePrice: Number(tradePrice),
         consumerPrice: consumerPrice ? Number(consumerPrice) : null,
+        // Task 37: per-product GST (rate 0-100, invalid par default 18)
+        gstEnabled: gstEnabled === undefined ? true : Boolean(gstEnabled),
+        gstRate: Number.isFinite(Number(gstRate)) && Number(gstRate) >= 0 && Number(gstRate) <= 100 ? Number(gstRate) : 18,
       },
     })
     return Response.json({ product })

@@ -5,7 +5,7 @@ import { packData } from '../route'
 /**
  * PATCH /api/products/[id] — product edit + rate update (DISTRIBUTOR, apna catalog)
  * Editable: sku, name, brand, companyId, category, pack sizes (unitsPerCarton / boxesPerCarton / pcsPerBox),
- * purchasePrice, tradePrice, consumerPrice, isActive.
+ * purchasePrice, tradePrice, consumerPrice, gstEnabled, gstRate, isActive.
  * Note: rate change sirf NAYE orders par asar karta hai — purani invoices apna rate snapshot rakhti hain.
  * Task 23: sirf APNE tenant ka product edit ho sakta hai.
  */
@@ -25,7 +25,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     // ownership — doosre distributor ka product locked
     if (existing.distributorId !== tenantId) return jsonError('Ye product aap ke catalog ka nahi hai', 403)
 
-    const { sku, name, brand, companyId, category, unitsPerCarton, boxesPerCarton, pcsPerBox, purchasePrice, tradePrice, consumerPrice, isActive } = body
+    const { sku, name, brand, companyId, category, unitsPerCarton, boxesPerCarton, pcsPerBox, purchasePrice, tradePrice, consumerPrice, gstEnabled, gstRate, isActive } = body
 
     // SKU unique rehna chahiye (SIRF apne tenant ke andar)
     if (sku && sku !== existing.sku) {
@@ -63,6 +63,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         ...(tradePrice != null ? { tradePrice: Number(tradePrice) } : {}),
         ...(purchasePrice !== undefined ? { purchasePrice: purchasePrice ? Number(purchasePrice) : null } : {}),
         ...(consumerPrice !== undefined ? { consumerPrice: consumerPrice ? Number(consumerPrice) : null } : {}),
+        // Task 37: per-product GST — dono fields ek sath update hoti hain
+        ...(gstEnabled !== undefined ? { gstEnabled: Boolean(gstEnabled) } : {}),
+        ...(gstRate !== undefined && Number.isFinite(Number(gstRate)) && Number(gstRate) >= 0 && Number(gstRate) <= 100 ? { gstRate: Number(gstRate) } : {}),
         ...(isActive !== undefined ? { isActive: Boolean(isActive) } : {}),
       },
     })

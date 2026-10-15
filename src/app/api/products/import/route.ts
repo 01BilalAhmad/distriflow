@@ -8,6 +8,7 @@ import { packData } from '../../products/route'
 // - brand find-or-create per-tenant (single-add jaisa)
 // - company naam se match — na mile to NAYI company auto-create (shortCode naam se derive)
 // - pack normalize packData() se hi (boxes*pcs = unitsPerCarton enforce)
+// - Task 37: optional 'gstRate' column — khali = 18% default, number = wo rate, no/off = GST nahi
 
 /** Company shortCode naam se: "English Biscuit Manufacturers" -> "EBM" (max 4) */
 function deriveShortCode(name: string): string {
@@ -95,6 +96,20 @@ export async function POST(req: Request) {
           const v = Number(get(k))
           return Number.isFinite(v) && v > 0 ? v : null
         }
+        // Task 37: GST parse — khali = 18% ON; number 0-100 = ON us rate par; no/off/nai = OFF
+        const gstRaw = get('gstRate').toLowerCase()
+        let gstEnabled = true
+        let gstRate = 18
+        if (gstRaw) {
+          if (['no', 'off', 'nai', 'none', 'nahi'].includes(gstRaw)) {
+            gstEnabled = false
+          } else if (Number.isFinite(Number(gstRaw)) && Number(gstRaw) >= 0 && Number(gstRaw) <= 100) {
+            gstRate = Number(gstRaw)
+          } else {
+            skipped.push({ row: rowNum, name, reason: `GST % ghalat: "${get('gstRate')}" — number likhein ya no/off` })
+            continue
+          }
+        }
         const rec = await tx.product.create({
           data: {
             sku,
@@ -107,6 +122,8 @@ export async function POST(req: Request) {
             purchasePrice: num('purchasePrice'),
             tradePrice,
             consumerPrice: num('consumerPrice'),
+            gstEnabled,
+            gstRate,
           },
         })
         created.push({ id: rec.id, sku: rec.sku, name: rec.name })

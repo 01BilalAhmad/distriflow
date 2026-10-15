@@ -126,6 +126,9 @@ model Product {
   purchasePrice  Float? // company se kharidne ka rate (per carton)
   tradePrice     Float // per carton (order rate per piece = tradePrice / unitsPerCarton)
   consumerPrice  Float? // per piece
+  // Task 37: per-product GST (global Tax Settings se yahan move hua) — kis product pr kitni GST
+  gstEnabled     Boolean      @default(true) // false = is product par GST nahi lagti (bill par dash)
+  gstRate        Float        @default(18) // % — retail price isi rate se excl/incl split hota hai
   isActive       Boolean      @default(true)
   orderItems     OrderItem[]
   stockBatches   StockBatch[]

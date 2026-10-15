@@ -429,6 +429,10 @@ export interface InvoiceItemData {
   boxesPerCarton?: number
   pcsPerBox?: number
   consumerPrice?: number | null
+  // Task 37: per-product GST — product ke apne rate se bill print hota hai
+  // (purane data par global Tax Settings fallback hota hai)
+  gstEnabled?: boolean
+  gstRate?: number | null
   qty: number // PIECES (base unit)
   freeQty: number // PIECES
   rate: number // per PIECE
@@ -459,16 +463,21 @@ export interface InvoiceData {
 }
 
 export function CblInvoiceDoc({ inv, gst }: { inv: InvoiceData; gst?: { enabled: boolean; rate: number } }) {
+  // Task 37: PER-PRODUCT GST — har item apne product ke rate se split hota hai (product form se
+  // set hota hai). Global Tax Settings (gst prop) sirf purane data ka fallback hai jab item par
+  // gst fields na hon. gstEnabled=false wale rows par GST columns dash print hote hain.
   const gstOn = gst ? gst.enabled : true // settings na mile to default ON (18%)
   const gstRate = gst?.rate ?? 18
-  const G = gstOn ? gstRate / 100 : 0
-  const K = G / (1 + G)
+  const GFALL = gstOn ? gstRate / 100 : 0
   const rows = inv.items.map((it) => {
     const upc = it.unitsPerCarton ?? 0
     const ppb = it.pcsPerBox && it.pcsPerBox > 0 ? it.pcsPerBox : 0
     const cpp = it.consumerPrice ?? 0 // retail PER PIECE (incl GST)
     const gross = it.qty * it.rate
     const hasRp = cpp > 0
+    // per-row GST fraction — product ka apna rate, warna global fallback
+    const G = it.gstEnabled === false ? 0 : (it.gstRate != null && Number.isFinite(Number(it.gstRate)) ? Number(it.gstRate) / 100 : GFALL)
+    const K = G / (1 + G)
     // qty PIECES hai — CTN / Box / Units breakdown
     const ctn = upc > 0 ? Math.floor(it.qty / upc) : 0
     const rem = upc > 0 ? it.qty % upc : 0
@@ -487,9 +496,17 @@ export function CblInvoiceDoc({ inv, gst }: { inv: InvoiceData; gst?: { enabled:
       upc,
       gross,
       ctn, box, pcs,
+      G,
       rpIncl, rpExcl, gstRp, gstBox,
     }
   })
+  // Task 37: bill-level visibility — koi EK bhi row par GST ho to GST columns aayenge.
+  // Sab GST-wale rows ka ek hi rate ho to headers "@ X%" dikhate hain; mixed rates par generic.
+  const gstRows = rows.filter((r) => r.G > 0)
+  const anyGst = gstRows.length > 0
+  const rateLabel = (pct: number) => String(Math.round(pct * 100) / 100)
+  const rateSet = new Set(gstRows.map((r) => rateLabel(r.G * 100)))
+  const singleRate = rateSet.size === 1 ? [...rateSet][0] : null
   const S = {
     ctn: rows.reduce((s, r) => s + r.ctn, 0),
     box: rows.reduce((s, r) => s + r.box, 0),
@@ -535,10 +552,10 @@ export function CblInvoiceDoc({ inv, gst }: { inv: InvoiceData; gst?: { enabled:
   addCol(rows.map((r) => numStr(r.it.rate, 2)), 'Rate/ Unit Excl: GST', 'rate')
   addCol([...rows.map((r) => numStr(r.gross, 2, true)), numStr(S.grossExcl, 2, true)], 'Total Value Excl: GST', 'totval')
   addCol([...rows.map((r) => numStr(r.rpExcl, 2, true)), numStr(S.rpExcl, 2, true)], 'RP Value Excl: Gst', 'rpexcl')
-  if (gstOn) {
-    addCol([...rows.map((r) => numStr(r.gstRp, 2, true)), numStr(S.gstRp, 2, true)], 'GST on RP Value @ 18%', 'gstrp')
+  if (anyGst) {
+    addCol([...rows.map((r) => numStr(r.gstRp, 2, true)), numStr(S.gstRp, 2, true)], `GST on RP Value${singleRate ? ` @ ${singleRate}%` : ''}`, 'gstrp')
     addCol([...rows.map((r) => numStr(r.rpIncl, 2, true)), numStr(S.rpIncl, 2, true)], 'RP Value Incl: GST', 'rpincl')
-    addCol([...rows.map((r) => numStr(r.gstBox, 2, true)), numStr(S.gstBox, 2, true)], 'GST @ 18% per Box', 'gstbox')
+    addCol([...rows.map((r) => numStr(r.gstBox, 2, true)), numStr(S.gstBox, 2, true)], singleRate ? `GST @ ${singleRate}% per Box` : 'GST per Box', 'gstbox')
   }
   addCol([...rows.map((r) => numStr(r.gross, 2, true)), numStr(S.gross, 2, true)], 'Gross Amount Incl: GST', 'gross')
   addCol(['-'], 'Advance Tax', 'adv') // items table mein Advance Tax hamesha dash hota hai
@@ -628,13 +645,13 @@ export function CblInvoiceDoc({ inv, gst }: { inv: InvoiceData; gst?: { enabled:
               <th style={{ textAlign: 'left' }}>Item / Product Name</th>
               <th>CTN</th><th>Box</th><th>Pcs</th>
               <th>Free</th>
-              <th>{gstOn ? 'Rate/ Unit Excl: GST' : 'Rate/ Unit'}</th>
-              <th>{gstOn ? 'Total Value Excl: GST' : 'Total Value'}</th>
-              <th>RP Value{gstOn ? ' Excl: Gst' : ''}</th>
-              {gstOn && <th>GST on RP Value @ {gstRate}%</th>}
-              {gstOn && <th>RP Value Incl: GST</th>}
-              {gstOn && <th>GST @ {gstRate}% per Box</th>}
-              <th>{gstOn ? 'Gross Amount Incl: GST' : 'Gross Amount'}</th>
+              <th>{anyGst ? 'Rate/ Unit Excl: GST' : 'Rate/ Unit'}</th>
+              <th>{anyGst ? 'Total Value Excl: GST' : 'Total Value'}</th>
+              <th>RP Value{anyGst ? ' Excl: Gst' : ''}</th>
+              {anyGst && <th>GST on RP Value{singleRate ? ` @ ${singleRate}%` : ''}</th>}
+              {anyGst && <th>RP Value Incl: GST</th>}
+              {anyGst && <th>{singleRate ? `GST @ ${singleRate}% per Box` : 'GST per Box'}</th>}
+              <th>{anyGst ? 'Gross Amount Incl: GST' : 'Gross Amount'}</th>
               <th>Advance Tax</th>
               <th>Total Discount</th>
               <th>Net Amount</th>
@@ -652,9 +669,9 @@ export function CblInvoiceDoc({ inv, gst }: { inv: InvoiceData; gst?: { enabled:
                 <Num v={r.it.rate} dec={2} fit={fitOf('rate')} />
                 <Num v={r.gross} dec={2} compact fit={fitOf('totval')} />
                 <Num v={r.rpExcl} dec={2} compact fit={fitOf('rpexcl')} />
-                {gstOn && <Num v={r.gstRp} dec={2} compact fit={fitOf('gstrp')} />}
-                {gstOn && <Num v={r.rpIncl} dec={2} compact fit={fitOf('rpincl')} />}
-                {gstOn && <Num v={r.gstBox} dec={2} compact fit={fitOf('gstbox')} />}
+                {anyGst && <Num v={r.gstRp} dec={2} compact fit={fitOf('gstrp')} />}
+                {anyGst && <Num v={r.rpIncl} dec={2} compact fit={fitOf('rpincl')} />}
+                {anyGst && <Num v={r.gstBox} dec={2} compact fit={fitOf('gstbox')} />}
                 <Num v={r.gross} dec={2} compact fit={fitOf('gross')} />
                 {dash}
                 <Num v={r.it.discount} dec={2} compact fit={fitOf('disc')} />
@@ -671,9 +688,9 @@ export function CblInvoiceDoc({ inv, gst }: { inv: InvoiceData; gst?: { enabled:
               {dash}
               <Num v={S.grossExcl} dec={2} compact fit={fitOf('totval')} />
               <Num v={S.rpExcl} dec={2} compact fit={fitOf('rpexcl')} />
-              {gstOn && <Num v={S.gstRp} dec={2} compact fit={fitOf('gstrp')} />}
-              {gstOn && <Num v={S.rpIncl} dec={2} compact fit={fitOf('rpincl')} />}
-              {gstOn && <Num v={S.gstBox} dec={2} compact fit={fitOf('gstbox')} />}
+              {anyGst && <Num v={S.gstRp} dec={2} compact fit={fitOf('gstrp')} />}
+              {anyGst && <Num v={S.rpIncl} dec={2} compact fit={fitOf('rpincl')} />}
+              {anyGst && <Num v={S.gstBox} dec={2} compact fit={fitOf('gstbox')} />}
               <Num v={S.gross} dec={2} compact fit={fitOf('gross')} />
               {dash}
               <Num v={S.discount} dec={2} compact fit={fitOf('disc')} />
@@ -722,9 +739,9 @@ export function CblInvoiceDoc({ inv, gst }: { inv: InvoiceData; gst?: { enabled:
           <div style={{ width: '31%' }}>
             <table className="cbl-break-avoid" style={{ fontSize: 10 }}>
               <tbody>
-                <tr><td style={{ textAlign: 'center' }}>{gstOn ? 'Gross Amount Exl GST:' : 'Gross Amount:'}</td><td className="num" style={{ width: 90 }}>{fmt2(S.grossExcl)}</td></tr>
-                {gstOn && <tr><td style={{ textAlign: 'center' }}>{gstRate}% GST:</td><td className="num">{fmt2(S.gstRp)}</td></tr>}
-                {gstOn && <tr><td style={{ textAlign: 'center' }}>Total Amount With GST:</td><td className="num">{fmt2(S.grossExcl + S.gstRp)}</td></tr>}
+                <tr><td style={{ textAlign: 'center' }}>{anyGst ? 'Gross Amount Exl GST:' : 'Gross Amount:'}</td><td className="num" style={{ width: 90 }}>{fmt2(S.grossExcl)}</td></tr>
+                {anyGst && <tr><td style={{ textAlign: 'center' }}>{singleRate ? `${singleRate}% ` : ''}GST:</td><td className="num">{fmt2(S.gstRp)}</td></tr>}
+                {anyGst && <tr><td style={{ textAlign: 'center' }}>Total Amount With GST:</td><td className="num">{fmt2(S.grossExcl + S.gstRp)}</td></tr>}
                 <tr><td style={{ textAlign: 'right', fontWeight: 'bold' }}>Total Discount:</td><td className="num" style={{ fontWeight: 'bold' }}>{fmt2(totalDiscount)}</td></tr>
                 <tr>
                   <td style={{ textAlign: 'right' }}>

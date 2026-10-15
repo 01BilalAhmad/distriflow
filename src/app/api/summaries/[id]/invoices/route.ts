@@ -17,7 +17,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         orders: {
           include: {
             outlet: { select: { name: true, code: true, channel: true, address: true, ownerName: true, ntn: true, cnic: true } },
-            items: { include: { product: { select: { name: true, sku: true, unitsPerCarton: true, boxesPerCarton: true, pcsPerBox: true, consumerPrice: true } }, scheme: { select: { name: true } } } },
+            items: { include: { product: { select: { name: true, sku: true, unitsPerCarton: true, boxesPerCarton: true, pcsPerBox: true, consumerPrice: true, gstEnabled: true, gstRate: true } }, scheme: { select: { name: true } } } },
           },
           orderBy: { orderNo: 'asc' },
         },
@@ -59,6 +59,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         boxesPerCarton: it.product.boxesPerCarton,
         pcsPerBox: it.product.pcsPerBox,
         consumerPrice: it.product.consumerPrice,
+        // Task 37: per-product GST — bill isi rate se print hoga
+        gstEnabled: it.product.gstEnabled,
+        gstRate: it.product.gstRate,
         qty: it.qty,
         freeQty: it.freeQty,
         rate: it.rate,
