@@ -153,8 +153,14 @@ model PurchaseInvoice {
   supplierInvoiceNo String? // company ka apna bill number
   date              DateTime @default(now())
   subtotal          Float    @default(0)
-  discount          Float    @default(0) // TOTAL discount (item-level + bill-level) = subtotal - total
+  discount          Float    @default(0) // TOTAL discount (pass on + trade offer + bill-level) — invoice ke "Total Discount" jaisa
   discountPct       Float    @default(0) // Task 43: bill-level % discount (record; 0 = flat Rs mode tha)
+  // Task 44: real company invoice (Mondelez style) ka tax mechanism — sab configurable, kuch bhi hardcoded nahi
+  taxTotal          Float    @default(0) // Σ line totalTax (Sales Tax + Further Sales Tax) — invoice ka "GST"
+  advanceTaxPct     Float    @default(0.5) // invoice-level Advance Tax 236H % (default 0.5 — editable, per invoice)
+  advanceTaxTotal   Float    @default(0) // Σ line advanceTax 236H
+  tradeOfferTotal   Float    @default(0) // Σ line trade offer (scheme value Rs)
+  // total = subtotal − discount + taxTotal + advanceTaxTotal (Net Invoice Amount, all-tax inclusive)
   total             Float    @default(0)
   paidAmount        Float    @default(0) // advance + ledger payments against this invoice
   status            String   @default("UNPAID") // UNPAID | PARTIAL | PAID
@@ -177,8 +183,18 @@ model PurchaseInvoiceItem {
   units         Int
   purchasePrice Float // per carton snapshot
   lineTotal     Float // gross: cartons x purchasePrice (discount is se minus hota hai)
-  discountPct   Float @default(0) // Task 43: per-item % discount
+  discountPct   Float @default(0) // Task 43: per-item % discount (invoice ka "Pass On")
   discountAmt   Float @default(0) // Task 43: per-item Rs discount (lineTotal x pct/100)
+  // Task 44: invoice-style tax chain snapshot (har value save hoti hai — print/audit ke liye)
+  netAmount     Float @default(0) // lineTotal − discountAmt (Net Amount Excl. Sales Tax)
+  gstRate       Float @default(0) // GST % snapshot (product ka rate, line par override ho sakta hai)
+  salesTax      Float @default(0) // gstRate% x netAmount (invoice ka "Sales Tax")
+  furtherTaxPct Float @default(0) // Further Sales Tax % (invoice column, default 0)
+  furtherTax    Float @default(0) // furtherTaxPct% x netAmount
+  totalTax      Float @default(0) // salesTax + furtherTax (invoice ka "Total Sales Tax")
+  tradeOfferAmt Float @default(0) // Trade Offer Rs (scheme value — net+tax se minus)
+  advanceTax    Float @default(0) // Advance Tax 236H = advPct% x (netAmount + totalTax − tradeOffer)
+  amountInclusive Float @default(0) // netAmount + totalTax − tradeOfferAmt + advanceTax (Amount Inclusive of All Tax)
 }
 
 // Company (supplier) payable ledger:

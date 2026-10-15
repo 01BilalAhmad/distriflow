@@ -36,6 +36,10 @@ export async function GET(req: Request) {
         subtotal: i.subtotal,
         discount: i.discount,
         discountPct: i.discountPct,
+        taxTotal: i.taxTotal,
+        advanceTaxPct: i.advanceTaxPct,
+        advanceTaxTotal: i.advanceTaxTotal,
+        tradeOfferTotal: i.tradeOfferTotal,
         total: i.total,
         paidAmount: i.paidAmount,
         status: i.status,
@@ -54,6 +58,15 @@ export async function GET(req: Request) {
           lineTotal: it.lineTotal,
           discountPct: it.discountPct,
           discountAmt: it.discountAmt,
+          netAmount: it.netAmount,
+          gstRate: it.gstRate,
+          salesTax: it.salesTax,
+          furtherTaxPct: it.furtherTaxPct,
+          furtherTax: it.furtherTax,
+          totalTax: it.totalTax,
+          tradeOfferAmt: it.tradeOfferAmt,
+          advanceTax: it.advanceTax,
+          amountInclusive: it.amountInclusive,
         })),
       })),
     })
@@ -69,8 +82,14 @@ interface ItemBody {
   purchasePrice?: number
   batchNo?: string
   expDate?: string | null
-  /** Task 43: per-item % discount (0-100); lineTotal gross par apply hota hai */
+  /** Task 43: per-item % discount / invoice ka "Pass On" (0-100); lineTotal gross par apply hota hai */
   discountPct?: number
+  /** Task 44: GST % override — na do to product ka gstRate snapshot hoga (gstEnabled false = 0) */
+  gstRate?: number
+  /** Task 44: Further Sales Tax % (invoice column; default 0) */
+  furtherTaxPct?: number
+  /** Task 44: Trade Offer Rs (scheme value — net+tax se minus hota hai) */
+  tradeOfferAmt?: number
 }
 
 interface InvoicePostBody {
@@ -82,6 +101,8 @@ interface InvoicePostBody {
   discount?: number
   /** Task 43: bill-level % discount (subtotal par) — percentage mode */
   discountPct?: number
+  /** Task 44: invoice-level Advance Tax 236H % (default 0.5 — company invoice jaisa; 0 bhejo to band) */
+  advanceTaxPct?: number
   paidNow?: number
   notes?: string
   items?: ItemBody[]
@@ -109,8 +130,16 @@ export async function POST(req: Request) {
     const productIds = [...new Set(b.items.map((i) => i.productId!))]
     const products = await db.product.findMany({ where: { id: { in: productIds }, distributorId: tenantId } })
     const pMap = new Map(products.map((p) => [p.id, p]))
-    const clean: { productId: string; cartons: number; purchasePrice: number; batchNo: string; expDate: Date | null; unitsPerCarton: number; units: number; lineTotal: number; discountPct: number; discountAmt: number }[] = []
+    const clean: {
+      productId: string; cartons: number; purchasePrice: number; batchNo: string; expDate: Date | null
+      unitsPerCarton: number; units: number
+      lineTotal: number; discountPct: number; discountAmt: number
+      netAmount: number; gstRate: number; salesTax: number; furtherTaxPct: number; furtherTax: number
+      totalTax: number; tradeOfferAmt: number; advanceTax: number; amountInclusive: number
+    }[] = []
     let itemIdx = 0
+    // Task 44: invoice-level Advance Tax 236H % — default 0.5 (company invoice ka actual rate)
+    const advPct = Math.min(100, Math.max(0, Number(b.advanceTaxPct ?? 0.5)))
     for (const it of b.items) {
       const p = it.productId ? pMap.get(it.productId) : undefined
       const cartons = Math.floor(Number(it.cartons ?? 0))
@@ -122,10 +151,28 @@ export async function POST(req: Request) {
       const upc = p.unitsPerCarton || 1
       const units = cartons * upc
       itemIdx++
-      // Task 43: per-item % discount — gross (cartons x price) par apply, Rs me snapshot
-      const gross = cartons * price
+      // ---- Task 44: REAL INVOICE CALC CHAIN (har step save hota hai, kuch bhi hardcoded nahi) ----
+      // 1) Gross = Trade Price x Qty
+      const gross = Math.round(cartons * price * 100) / 100
+      // 2) Pass On discount (% ya flat — UI se) -> Net (Excl. Sales Tax)
       const discPct = Math.min(100, Math.max(0, Number(it.discountPct ?? 0) || 0))
       const discAmt = Math.round(gross * discPct) / 100
+      const netAmount = Math.round((gross - discAmt) * 100) / 100
+      // 3) Sales Tax (GST %) — product ka rate (gstEnabled false = 0), UI override allowed
+      const gstRate = it.gstRate != null
+        ? Math.min(100, Math.max(0, Number(it.gstRate) || 0))
+        : (p.gstEnabled ? p.gstRate : 0)
+      const salesTax = Math.round(netAmount * gstRate) / 100
+      // 4) Further Sales Tax % (invoice column)
+      const furtherTaxPct = Math.min(100, Math.max(0, Number(it.furtherTaxPct ?? 0) || 0))
+      const furtherTax = Math.round(netAmount * furtherTaxPct) / 100
+      const totalTax = Math.round((salesTax + furtherTax) * 100) / 100
+      // 5) Trade Offer Rs (scheme value) — net + tax se minus
+      const tradeOfferAmt = Math.min(netAmount + totalTax, Math.max(0, Number(it.tradeOfferAmt ?? 0) || 0))
+      // 6) Advance Tax 236H = advPct% x (net + totalTax − tradeOffer)
+      const advanceTax = Math.round(Math.max(0, netAmount + totalTax - tradeOfferAmt) * advPct) / 100
+      // 7) Amount Inclusive of All Tax
+      const amountInclusive = Math.round((netAmount + totalTax - tradeOfferAmt + advanceTax) * 100) / 100
       clean.push({
         productId: p.id,
         cartons,
@@ -134,22 +181,35 @@ export async function POST(req: Request) {
         expDate: it.expDate ? new Date(it.expDate) : null,
         unitsPerCarton: upc,
         units,
-        lineTotal: Math.round(gross * 100) / 100,
+        lineTotal: gross,
         discountPct: discPct,
         discountAmt: discAmt,
+        netAmount,
+        gstRate,
+        salesTax,
+        furtherTaxPct,
+        furtherTax,
+        totalTax,
+        tradeOfferAmt,
+        advanceTax,
+        amountInclusive,
       })
     }
 
     const subtotal = Math.round(clean.reduce((s, i) => s + i.lineTotal, 0) * 100) / 100
-    // Task 43: discount = item-level (% wise) + bill-level (% ya flat Rs)
-    // Bill % ka base = item discounts ke BAAD wali value (UI preview bhi yehi dikhata hai)
+    // Task 44: discount = Pass On (item %) + Trade Offer + bill-level (% ya flat Rs) — invoice ka "Total Discount"
     const itemDiscount = Math.round(clean.reduce((s, i) => s + i.discountAmt, 0) * 100) / 100
+    const tradeOfferTotal = Math.round(clean.reduce((s, i) => s + i.tradeOfferAmt, 0) * 100) / 100
     const afterItemDisc = Math.round((subtotal - itemDiscount) * 100) / 100
     const billPct = Math.min(100, Math.max(0, Number(b.discountPct ?? 0) || 0))
     const billRs = billPct > 0 ? Math.round(afterItemDisc * billPct) / 100 : Math.max(0, Number(b.discount ?? 0) || 0)
-    const discount = Math.round((itemDiscount + billRs) * 100) / 100
+    const discount = Math.round((itemDiscount + tradeOfferTotal + billRs) * 100) / 100
     if (discount > subtotal) return jsonError('Discount subtotal se zyada nahi ho sakta')
-    const total = Math.round((subtotal - discount) * 100) / 100
+    // Task 44: taxes — GST + Further (Σ totalTax) aur Advance Tax 236H
+    const taxTotal = Math.round(clean.reduce((s, i) => s + i.totalTax, 0) * 100) / 100
+    const advanceTaxTotal = Math.round(clean.reduce((s, i) => s + i.advanceTax, 0) * 100) / 100
+    // Net Invoice Amount = Gross − Total Discount + GST + Advance Tax 236H (invoice ke formula se)
+    const total = Math.round((subtotal - discount + taxTotal + advanceTaxTotal) * 100) / 100
     const paidNow = Math.min(total, Math.max(0, Number(b.paidNow ?? 0)))
 
     let stockWarehouseName = 'warehouse'
@@ -166,6 +226,10 @@ export async function POST(req: Request) {
           subtotal,
           discount,
           discountPct: billPct,
+          taxTotal,
+          advanceTaxPct: advPct,
+          advanceTaxTotal,
+          tradeOfferTotal,
           total,
           paidAmount: paidNow,
           status: paidNow >= total - 0.01 ? 'PAID' : paidNow > 0 ? 'PARTIAL' : 'UNPAID',
@@ -186,6 +250,15 @@ export async function POST(req: Request) {
           lineTotal: i.lineTotal,
           discountPct: i.discountPct,
           discountAmt: i.discountAmt,
+          netAmount: i.netAmount,
+          gstRate: i.gstRate,
+          salesTax: i.salesTax,
+          furtherTaxPct: i.furtherTaxPct,
+          furtherTax: i.furtherTax,
+          totalTax: i.totalTax,
+          tradeOfferAmt: i.tradeOfferAmt,
+          advanceTax: i.advanceTax,
+          amountInclusive: i.amountInclusive,
         })),
       })
 
@@ -239,7 +312,7 @@ export async function POST(req: Request) {
           distributorId: tenantId,
           date: b.date ? new Date(b.date) : new Date(),
           type: 'PURCHASE',
-          description: `Stock purchase — ${clean.length} item${clean.length > 1 ? 's' : ''}, ${clean.reduce((s, i) => s + i.cartons, 0)} cartons${discount > 0 ? `, discount ${billPct > 0 ? `${billPct}%` : fmtRs(discount)}` : ''}`,
+          description: `Stock purchase — ${clean.length} item${clean.length > 1 ? 's' : ''}, ${clean.reduce((s, i) => s + i.cartons, 0)} cartons${discount > 0 ? `, discount ${billPct > 0 ? `${billPct}%` : fmtRs(discount)}` : ''}${taxTotal > 0 ? `, GST ${fmtRs(taxTotal)}` : ''}${advanceTaxTotal > 0 ? `, Adv 236H ${fmtRs(advanceTaxTotal)}` : ''}`,
           refNo: invoiceNo,
           invoiceId: inv.id,
           credit: total,
@@ -265,7 +338,7 @@ export async function POST(req: Request) {
       return inv
     })
 
-    return Response.json({ invoice: { id: invoice.id, invoiceNo: invoice.invoiceNo, total: invoice.total, discount: invoice.discount, discountPct: invoice.discountPct, subtotal: invoice.subtotal }, warehouseName: stockWarehouseName })
+    return Response.json({ invoice: { id: invoice.id, invoiceNo: invoice.invoiceNo, total: invoice.total, discount: invoice.discount, discountPct: invoice.discountPct, subtotal: invoice.subtotal, taxTotal: invoice.taxTotal, advanceTaxTotal: invoice.advanceTaxTotal }, warehouseName: stockWarehouseName })
   } catch (e) {
     console.error(e)
     return jsonError('Purchase invoice failed', 500)

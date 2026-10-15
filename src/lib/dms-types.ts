@@ -122,9 +122,19 @@ export interface PurchaseItemDTO {
   units: number
   purchasePrice: number
   lineTotal: number
-  /** Task 43: per-item % discount snapshot */
+  /** Task 43: per-item % discount (invoice ka Pass On) snapshot */
   discountPct: number
   discountAmt: number
+  /** Task 44: real invoice tax chain snapshot */
+  netAmount: number
+  gstRate: number
+  salesTax: number
+  furtherTaxPct: number
+  furtherTax: number
+  totalTax: number
+  tradeOfferAmt: number
+  advanceTax: number
+  amountInclusive: number
 }
 
 export interface PurchaseInvoiceDTO {
@@ -140,6 +150,11 @@ export interface PurchaseInvoiceDTO {
   discount: number
   /** Task 43: bill-level % discount record (0 = flat Rs mode) */
   discountPct: number
+  /** Task 44: real company invoice (Mondelez style) tax mechanism */
+  taxTotal: number
+  advanceTaxPct: number
+  advanceTaxTotal: number
+  tradeOfferTotal: number
   total: number
   paidAmount: number
   status: string

@@ -586,7 +586,8 @@ function CompanyDetailDialog({ company, products, onClose, onEdit, onDataChanged
 
 // ==================== PURCHASE INVOICE DIALOG ====================
 
-interface DraftItem { key: number; productId: string; cartons: string; price: string; disc: string; batchNo: string; expDate: string }
+// Task 44: draft item me poora tax chain inputs — Disc % (Pass On), Trade Offer Rs, GST %, Further Tax %
+interface DraftItem { key: number; productId: string; cartons: string; price: string; disc: string; to: string; gst: string; fur: string; batchNo: string; expDate: string }
 
 let draftKeySeq = 1
 function newDraftItem(p?: ProductDTO): DraftItem {
@@ -596,6 +597,9 @@ function newDraftItem(p?: ProductDTO): DraftItem {
     cartons: '',
     price: p?.purchasePrice ? String(p.purchasePrice) : '',
     disc: '',
+    to: '',
+    gst: p ? (p.gstEnabled ? String(p.gstRate) : '0') : '',
+    fur: '',
     batchNo: `B-${Date.now().toString(36).toUpperCase().slice(-5)}${draftKeySeq}`,
     expDate: plusYearISO(),
   }
@@ -614,6 +618,8 @@ function PurchaseInvoiceDialog({ fixedCompany, companies, products, onClose, onS
   const [discount, setDiscount] = useState('')
   // Task 43: bill discount % ya flat Rs — default % (supplier offers aksar % me aate hain)
   const [discMode, setDiscMode] = useState<'pct' | 'rs'>('pct')
+  // Task 44: Advance Tax 236H % — invoice-level, default 0.5 (company invoice ka rate; editable = hardcoded nahi)
+  const [advTaxPct, setAdvTaxPct] = useState('0.5')
   const [paidNow, setPaidNow] = useState('')
   const [notes, setNotes] = useState('')
   const [items, setItems] = useState<DraftItem[]>(() => fixedCompany ? [newDraftItem()] : [])
@@ -625,20 +631,35 @@ function PurchaseInvoiceDialog({ fixedCompany, companies, products, onClose, onS
   )
   const company = companies.find((c) => c.id === companyId)
 
-  // Task 43: per-item % discount math — gross -> discRs -> net
+  // Task 44: REAL INVOICE calc chain — Gross -> Pass On -> Net -> GST + Further -> Trade Offer -> Adv 236H -> Inclusive
   const itemCalc = useMemo(() => items.map((it) => {
-    const gross = (Number(it.cartons) || 0) * (Number(it.price) || 0)
+    const gross = Math.round((Number(it.cartons) || 0) * (Number(it.price) || 0) * 100) / 100
     const pct = Math.min(100, Math.max(0, Number(it.disc) || 0))
     const discRs = Math.round(gross * pct) / 100
-    return { key: it.key, gross, pct, discRs, net: Math.round((gross - discRs) * 100) / 100 }
-  }), [items])
+    const net = Math.round((gross - discRs) * 100) / 100
+    const gstRate = Math.min(100, Math.max(0, Number(it.gst) || 0))
+    const salesTax = Math.round(net * gstRate) / 100
+    const furPct = Math.min(100, Math.max(0, Number(it.fur) || 0))
+    const furTax = Math.round(net * furPct) / 100
+    const totalTax = Math.round((salesTax + furTax) * 100) / 100
+    const toRs = Math.min(net + totalTax, Math.max(0, Number(it.to) || 0))
+    const advPct = Math.min(100, Math.max(0, Number(advTaxPct) || 0))
+    const advTax = Math.round(Math.max(0, net + totalTax - toRs) * advPct) / 100
+    const inclusive = Math.round((net + totalTax - toRs + advTax) * 100) / 100
+    return { key: it.key, gross, pct, discRs, net, gstRate, salesTax, furPct, furTax, totalTax, toRs, advTax, inclusive }
+  }), [items, advTaxPct])
   const calcMap = useMemo(() => new Map(itemCalc.map((c) => [c.key, c])), [itemCalc])
   const subtotal = itemCalc.reduce((s, c) => s + c.gross, 0)
   const itemDiscTotal = Math.round(itemCalc.reduce((s, c) => s + c.discRs, 0) * 100) / 100
+  const toTotal = Math.round(itemCalc.reduce((s, c) => s + c.toRs, 0) * 100) / 100
+  const taxTotal = Math.round(itemCalc.reduce((s, c) => s + c.totalTax, 0) * 100) / 100
+  const advTaxTotal = Math.round(itemCalc.reduce((s, c) => s + c.advTax, 0) * 100) / 100
   const afterItemDisc = Math.round((subtotal - itemDiscTotal) * 100) / 100
   const billPct = discMode === 'pct' ? Math.min(100, Math.max(0, Number(discount) || 0)) : 0
   const billDiscRs = discMode === 'pct' ? Math.round(afterItemDisc * billPct) / 100 : (Number(discount) || 0)
-  const total = Math.max(0, Math.round((afterItemDisc - billDiscRs) * 100) / 100)
+  const totalDiscount = Math.round((itemDiscTotal + toTotal + billDiscRs) * 100) / 100
+  // Task 44: Net Invoice Amount = Gross − Total Discount + GST + Advance Tax 236H (company invoice ka formula)
+  const total = Math.max(0, Math.round((subtotal - totalDiscount + taxTotal + advTaxTotal) * 100) / 100)
   const remaining = total - (Number(paidNow) || 0)
 
   function setItem(key: number, patch: Partial<DraftItem>) {
@@ -650,6 +671,9 @@ function PurchaseInvoiceDialog({ fixedCompany, companies, products, onClose, onS
       productId,
       price: p?.purchasePrice ? String(p.purchasePrice) : '',
       disc: '', // product badla to purana % nahi chalnie chahiye
+      to: '',
+      fur: '',
+      gst: p ? (p.gstEnabled ? String(p.gstRate) : '0') : '', // Task 44: GST % product se prefill
       batchNo: `B-${Date.now().toString(36).toUpperCase().slice(-5)}${key % 1000}`,
       expDate: plusYearISO(),
     })
@@ -664,7 +688,7 @@ function PurchaseInvoiceDialog({ fixedCompany, companies, products, onClose, onS
     if ((Number(paidNow) || 0) > total) { toast({ title: 'Paid amount total se zyada nahi ho sakta', variant: 'destructive' }); return }
     setSaving(true)
     try {
-      const r = await api<{ invoice: { invoiceNo: string; total: number }; warehouseName?: string }>('/api/purchase-invoices', {
+      const r = await api<{ invoice: { invoiceNo: string; total: number; taxTotal: number; advanceTaxTotal: number }; warehouseName?: string }>('/api/purchase-invoices', {
         method: 'POST',
         body: JSON.stringify({
           userId: (JSON.parse(localStorage.getItem('dms_session') ?? 'null'))?.id,
@@ -673,6 +697,7 @@ function PurchaseInvoiceDialog({ fixedCompany, companies, products, onClose, onS
           supplierInvoiceNo,
           discount: discMode === 'pct' ? 0 : Number(discount) || 0,
           discountPct: discMode === 'pct' ? Number(discount) || 0 : 0,
+          advanceTaxPct: Number(advTaxPct) || 0,
           paidNow: Number(paidNow) || 0,
           notes,
           items: cleanItems.map((it) => ({
@@ -680,6 +705,9 @@ function PurchaseInvoiceDialog({ fixedCompany, companies, products, onClose, onS
             cartons: Number(it.cartons),
             purchasePrice: Number(it.price),
             discountPct: Number(it.disc) || 0,
+            gstRate: it.gst === '' ? undefined : Number(it.gst),
+            furtherTaxPct: Number(it.fur) || 0,
+            tradeOfferAmt: Number(it.to) || 0,
             batchNo: it.batchNo,
             expDate: it.expDate || null,
           })),
@@ -687,7 +715,7 @@ function PurchaseInvoiceDialog({ fixedCompany, companies, products, onClose, onS
       })
       toast({
         title: `${r.invoice.invoiceNo} booked — Stock IN`,
-        description: `${company?.name ?? 'Company'} • Total ${fmtPKR(r.invoice.total)} • Stock "${r.warehouseName ?? 'warehouse'}" mein add ho gaya, ledger me payable add hua`,
+        description: `${company?.name ?? 'Company'} • Net Invoice ${fmtPKR(r.invoice.total)}${r.invoice.taxTotal > 0 ? ` • GST ${fmtPKR(r.invoice.taxTotal)}` : ''}${r.invoice.advanceTaxTotal > 0 ? ` • Adv Tax ${fmtPKR(r.invoice.advanceTaxTotal)}` : ''} • Stock "${r.warehouseName ?? 'warehouse'}" mein add ho gaya`,
       })
       onSaved()
     } catch (e) {
@@ -765,12 +793,12 @@ function PurchaseInvoiceDialog({ fixedCompany, companies, products, onClose, onS
                 <Input type="number" min="1" className="h-9 bg-white" value={it.price} onChange={(e) => setItem(it.key, { price: e.target.value })} placeholder="0" />
               </div>
               <div className="col-span-4 sm:col-span-2 space-y-0.5">
-                <Label className="text-[10px] text-emerald-600">Disc %</Label>
+                <Label className="text-[10px] text-emerald-600">Disc % (Pass On)</Label>
                 <Input type="number" min="0" max="100" step="0.01" className="h-9 bg-white" value={it.disc} onChange={(e) => setItem(it.key, { disc: e.target.value })} placeholder="0" />
               </div>
-              <div className="col-span-12 sm:col-span-2 space-y-0.5">
-                <Label className="text-[10px] text-slate-400">Expiry</Label>
-                <Input type="date" className="h-9 bg-white" value={it.expDate} onChange={(e) => setItem(it.key, { expDate: e.target.value })} />
+              <div className="col-span-4 sm:col-span-2 space-y-0.5">
+                <Label className="text-[10px] text-amber-600">Trade Offer Rs</Label>
+                <Input type="number" min="0" className="h-9 bg-white" value={it.to} onChange={(e) => setItem(it.key, { to: e.target.value })} placeholder="0" />
               </div>
               <button className="absolute top-1.5 right-1.5 h-6 w-6 rounded-md flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50" onClick={() => setItems((arr) => arr.filter((x) => x.key !== it.key))} title="Item remove">
                 <X className="h-3.5 w-3.5" />
@@ -779,17 +807,35 @@ function PurchaseInvoiceDialog({ fixedCompany, companies, products, onClose, onS
                 <Label className="text-[10px] text-slate-400">Batch #</Label>
                 <Input className="h-9 bg-white" value={it.batchNo} onChange={(e) => setItem(it.key, { batchNo: e.target.value })} />
               </div>
-              <div className="col-span-6 sm:col-span-9 text-right text-xs text-slate-500 self-end pb-1">
+              <div className="col-span-6 sm:col-span-2 space-y-0.5">
+                <Label className="text-[10px] text-slate-400">Expiry</Label>
+                <Input type="date" className="h-9 bg-white" value={it.expDate} onChange={(e) => setItem(it.key, { expDate: e.target.value })} />
+              </div>
+              <div className="col-span-4 sm:col-span-2 space-y-0.5">
+                <Label className="text-[10px] text-sky-600">GST %</Label>
+                <Input type="number" min="0" max="100" step="0.01" className="h-9 bg-white" value={it.gst} onChange={(e) => setItem(it.key, { gst: e.target.value })} placeholder="18" />
+              </div>
+              <div className="col-span-4 sm:col-span-2 space-y-0.5">
+                <Label className="text-[10px] text-sky-600">Further Tax %</Label>
+                <Input type="number" min="0" max="100" step="0.01" className="h-9 bg-white" value={it.fur} onChange={(e) => setItem(it.key, { fur: e.target.value })} placeholder="0" />
+              </div>
+              <div className="col-span-12 sm:col-span-3 text-right text-[11px] text-slate-500 self-end pb-1 leading-relaxed">
                 {(() => {
                   const c = calcMap.get(it.key)
                   const p = companyProducts.find((x) => x.id === it.productId)
                   if (!c) return null
                   return (
                     <>
-                      Rs {fmtNum(c.gross)}
-                      {c.pct > 0 && <> − Rs {fmtNum(c.discRs)} ({c.pct}%) = <span className="font-semibold text-emerald-700">Rs {fmtNum(c.net)}</span></>}
-                      {c.pct === 0 && <> = <span className="font-semibold text-slate-700">Rs {fmtNum(c.gross)}</span></>}
-                      {p ? ` • ${fmtNum((Number(it.cartons) || 0) * p.unitsPerCarton)} units` : ''}
+                      Gross Rs {fmtNum(c.gross)}
+                      {c.pct > 0 && <> − Rs {fmtNum(c.discRs)} ({c.pct}%)</>}
+                      = Net <span className="font-semibold text-slate-700">Rs {fmtNum(c.net)}</span>
+                      <br />
+                      {c.gstRate > 0 && <span>GST@{c.gstRate}% Rs {fmtNum(c.salesTax)} • </span>}
+                      {c.furPct > 0 && <span>Fur@{c.furPct}% Rs {fmtNum(c.furTax)} • </span>}
+                      {c.toRs > 0 && <span className="text-amber-700">TO − Rs {fmtNum(c.toRs)} • </span>}
+                      {c.advTax > 0 && <span>Adv 236H Rs {fmtNum(c.advTax)} • </span>}
+                      <span className="font-semibold text-red-600">Incl Rs {fmtNum(c.inclusive)}</span>
+                      {p ? <span className="text-slate-400"> • {fmtNum((Number(it.cartons) || 0) * p.unitsPerCarton)} units</span> : null}
                     </>
                   )
                 })()}
@@ -798,10 +844,20 @@ function PurchaseInvoiceDialog({ fixedCompany, companies, products, onClose, onS
           ))}
         </div>
 
-        {/* totals */}
+        {/* totals — Task 44: company invoice jaisi summary (Gross − Discount + GST + Adv 236H = Net) */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-lg border bg-slate-50/70 p-3">
-          <div><p className="text-[10px] text-slate-400 uppercase font-semibold">Subtotal (gross)</p><p className="text-sm font-bold">{fmtPKR(subtotal)}</p></div>
-          <div><p className="text-[10px] text-slate-400 uppercase font-semibold">Item Discounts</p><p className={`text-sm font-bold ${itemDiscTotal > 0 ? 'text-emerald-700' : 'text-slate-300'}`}>{itemDiscTotal > 0 ? `− ${fmtPKR(itemDiscTotal)}` : '—'}</p></div>
+          <div><p className="text-[10px] text-slate-400 uppercase font-semibold">Gross Amount</p><p className="text-sm font-bold">{fmtPKR(subtotal)}</p></div>
+          <div>
+            <p className="text-[10px] text-slate-400 uppercase font-semibold">Total Discount</p>
+            <p className={`text-sm font-bold ${totalDiscount > 0 ? 'text-emerald-700' : 'text-slate-300'}`}>{totalDiscount > 0 ? `− ${fmtPKR(totalDiscount)}` : '—'}</p>
+            {totalDiscount > 0 && <p className="text-[10px] text-slate-400">Item {fmtNum(itemDiscTotal)} • TO {fmtNum(toTotal)} • Bill {fmtNum(billDiscRs)}</p>}
+          </div>
+          <div><p className="text-[10px] text-slate-400 uppercase font-semibold">Sales Tax (GST)</p><p className={`text-sm font-bold ${taxTotal > 0 ? 'text-slate-700' : 'text-slate-300'}`}>{taxTotal > 0 ? `+ ${fmtPKR(taxTotal)}` : '—'}</p></div>
+          <div className="space-y-0.5">
+            <p className="text-[10px] text-slate-400 uppercase font-semibold">Adv Tax 236H %</p>
+            <Input type="number" min="0" max="100" step="0.01" className="h-8 bg-white" value={advTaxPct} onChange={(e) => setAdvTaxPct(e.target.value)} placeholder="0.5" />
+            {advTaxTotal > 0 && <p className="text-[10px] text-slate-500 font-semibold">= + Rs {fmtNum(advTaxTotal)}</p>}
+          </div>
           <div className="space-y-0.5">
             <div className="flex items-center justify-between gap-1">
               <p className="text-[10px] text-slate-400 uppercase font-semibold">Bill Discount</p>
@@ -813,10 +869,11 @@ function PurchaseInvoiceDialog({ fixedCompany, companies, products, onClose, onS
             <Input type="number" min="0" max={discMode === 'pct' ? 100 : undefined} step="0.01" className="h-8 bg-white" value={discount} onChange={(e) => setDiscount(e.target.value)} placeholder={discMode === 'pct' ? 'e.g. 5' : 'Rs'} />
             {discMode === 'pct' && billPct > 0 && <p className="text-[10px] text-emerald-700 font-semibold">= − Rs {fmtNum(billDiscRs)}</p>}
           </div>
-          <div><p className="text-[10px] text-slate-400 uppercase font-semibold">Total Payable</p><p className="text-sm font-bold text-red-600">{fmtPKR(total)}</p></div>
+          <div><p className="text-[10px] text-red-400 uppercase font-semibold">Net Invoice Amount</p><p className="text-base font-bold text-red-600">{fmtPKR(total)}</p></div>
           <div className="space-y-0.5"><p className="text-[10px] text-slate-400 uppercase font-semibold">Paid Now (advance)</p><Input type="number" min="0" className="h-8 bg-white" value={paidNow} onChange={(e) => setPaidNow(e.target.value)} placeholder="0" /></div>
+          <div><p className="text-[10px] text-slate-400 uppercase font-semibold">Remaining Payable</p><p className="text-sm font-bold text-slate-700">{fmtPKR(Math.max(0, remaining))}</p></div>
           <p className="col-span-2 sm:col-span-4 text-[11px] text-slate-500">
-            Baqi remaining payable: <span className="font-bold text-slate-700">{fmtPKR(remaining)}</span> — ye company ledger me balance banega{itemDiscTotal + billDiscRs > 0 && <> • Total discount: <span className="font-bold text-emerald-700">{fmtPKR(itemDiscTotal + billDiscRs)}</span></>}
+            Company invoice ka formula: <b>Gross − Total Discount + GST + Advance Tax 236H = Net Invoice</b> — yehi amount ledger payable banti hy. GST % har product ka apna (Products page par set hota hy, yahan override bhi kar sakte hain)
           </p>
         </div>
 
@@ -846,39 +903,55 @@ function InvoiceItemsDialog({ invoice, onClose }: { invoice: PurchaseInvoiceDTO;
             {invoice.companyName} • {fmtDate(invoice.date)} {invoice.supplierInvoiceNo ? `• Supplier Bill ${invoice.supplierInvoiceNo}` : ''}
           </DialogDescription>
         </DialogHeader>
-        <div className="rounded-lg border overflow-hidden">
+        <div className="rounded-lg border overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow className="bg-slate-50/70">
                 <TableHead>Product</TableHead>
                 <TableHead>Batch</TableHead>
                 <TableHead className="text-right">Cartons</TableHead>
-                <TableHead className="text-right">Units</TableHead>
                 <TableHead className="text-right">Rate</TableHead>
-                <TableHead className="text-right">Disc</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
+                <TableHead className="text-right">Gross</TableHead>
+                <TableHead className="text-right">Pass On</TableHead>
+                <TableHead className="text-right">Net</TableHead>
+                <TableHead className="text-right">GST</TableHead>
+                <TableHead className="text-right">TO</TableHead>
+                <TableHead className="text-right">Adv 236H</TableHead>
+                <TableHead className="text-right">Inclusive</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {invoice.items.map((it) => (
                 <TableRow key={it.id}>
-                  <TableCell className="text-xs"><span className="font-medium">{it.productName}</span><br /><span className="text-slate-400">{it.sku}</span></TableCell>
+                  <TableCell className="text-xs"><span className="font-medium">{it.productName}</span><br /><span className="text-slate-400">{it.sku} • {fmtNum(it.units)} units</span></TableCell>
                   <TableCell className="text-xs">{it.batchNo}{it.expDate && <><br /><span className="text-slate-400">exp {fmtDate(it.expDate)}</span></>}</TableCell>
                   <TableCell className="text-right text-sm">{fmtNum(it.cartons)}</TableCell>
-                  <TableCell className="text-right text-xs text-slate-500">{fmtNum(it.units)}</TableCell>
                   <TableCell className="text-right text-sm">{fmtNum(it.purchasePrice)}</TableCell>
-                  <TableCell className="text-right text-xs">{it.discountPct > 0 ? <span className="text-emerald-700 font-medium">−{it.discountPct}%<br /><span className="text-[11px]">Rs {fmtNum(it.discountAmt)}</span></span> : <span className="text-slate-300">—</span>}</TableCell>
-                  <TableCell className="text-right text-sm font-semibold">{fmtNum(it.lineTotal)}</TableCell>
+                  <TableCell className="text-right text-sm">{fmtNum(it.lineTotal)}</TableCell>
+                  <TableCell className="text-right text-xs">{it.discountAmt > 0 ? <span className="text-emerald-700 font-medium">−{fmtNum(it.discountAmt)}<br /><span className="text-[11px]">{it.discountPct}%</span></span> : <span className="text-slate-300">—</span>}</TableCell>
+                  <TableCell className="text-right text-xs">{fmtNum(it.netAmount)}</TableCell>
+                  <TableCell className="text-right text-xs">{it.totalTax > 0 ? <span className="text-sky-700 font-medium">+{fmtNum(it.totalTax)}<br /><span className="text-[11px]">@{it.gstRate}{it.furtherTaxPct > 0 ? `+${it.furtherTaxPct}` : ''}%</span></span> : <span className="text-slate-300">—</span>}</TableCell>
+                  <TableCell className="text-right text-xs">{it.tradeOfferAmt > 0 ? <span className="text-amber-700 font-medium">−{fmtNum(it.tradeOfferAmt)}</span> : <span className="text-slate-300">—</span>}</TableCell>
+                  <TableCell className="text-right text-xs">{it.advanceTax > 0 ? <span className="text-slate-600 font-medium">+{fmtNum(it.advanceTax)}</span> : <span className="text-slate-300">—</span>}</TableCell>
+                  <TableCell className="text-right text-sm font-semibold">{fmtNum(it.amountInclusive || it.lineTotal)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         </div>
-        <div className="flex flex-wrap justify-end gap-x-6 gap-y-1 text-sm">
-          <span className="text-slate-500">Subtotal: <b className="text-slate-700">{fmtPKR(invoice.subtotal)}</b></span>
-          {invoice.discount > 0 && <span className="text-slate-500">Discount: <b className="text-emerald-700">−{fmtPKR(invoice.discount)}</b>{invoice.discountPct > 0 ? ` (${invoice.discountPct}% bill)` : ''}</span>}
-          <span className="text-slate-500">Total: <b className="text-red-600">{fmtPKR(invoice.total)}</b></span>
-          <span className="text-slate-500">Paid: <b className="text-emerald-700">{fmtPKR(invoice.paidAmount)}</b></span>
+        {/* Task 44: company invoice jaisi summary — Gross − Discount + GST + Adv 236H = Net */}
+        <div className="ml-auto w-full sm:w-80 space-y-1 rounded-lg border bg-slate-50/70 p-3 text-sm">
+          <div className="flex justify-between"><span className="text-slate-500">Gross Amount</span><b className="text-slate-700">{fmtPKR(invoice.subtotal)}</b></div>
+          {invoice.discount > 0 && (
+            <div className="flex justify-between">
+              <span className="text-slate-500">Total Discount{invoice.tradeOfferTotal > 0 ? ` (TO ${fmtNum(invoice.tradeOfferTotal)} • Rest ${fmtNum(Math.max(0, invoice.discount - invoice.tradeOfferTotal))})` : ''}</span>
+              <b className="text-emerald-700">−{fmtPKR(invoice.discount)}</b>
+            </div>
+          )}
+          {invoice.taxTotal > 0 && <div className="flex justify-between"><span className="text-slate-500">GST</span><b className="text-sky-700">+{fmtPKR(invoice.taxTotal)}</b></div>}
+          {invoice.advanceTaxTotal > 0 && <div className="flex justify-between"><span className="text-slate-500">Advance Tax 236H ({invoice.advanceTaxPct}%)</span><b className="text-slate-700">+{fmtPKR(invoice.advanceTaxTotal)}</b></div>}
+          <div className="flex justify-between border-t pt-1"><span className="text-slate-600 font-semibold">Net Invoice Amount</span><b className="text-red-600 text-base">{fmtPKR(invoice.total)}</b></div>
+          <div className="flex justify-between"><span className="text-slate-500">Paid</span><b className="text-emerald-700">{fmtPKR(invoice.paidAmount)}</b></div>
         </div>
         {invoice.notes && <p className="text-xs text-slate-400 border-l-2 border-slate-200 pl-2">{invoice.notes}</p>}
       </DialogContent>
