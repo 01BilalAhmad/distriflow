@@ -23,6 +23,7 @@ import type {
   CompaniesData, CompanyFullDTO, CompanyLedgerDTO, PurchaseInvoiceDTO, ProductDTO,
 } from '@/lib/dms-types'
 import { CompanyStatementDoc } from './company-print'
+import { SupplierAgingCard } from './supplier-aging'
 import { keepDialogBehind } from './cbl-print'
 import { toast } from '@/hooks/use-toast'
 import {
@@ -135,6 +136,8 @@ export function CompaniesView() {
           </CardContent></Card>
         </div>
       )}
+
+      <SupplierAgingCard refreshKey={refreshKey} />
 
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />

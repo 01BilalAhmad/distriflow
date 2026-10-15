@@ -29,6 +29,8 @@ import { ReturnsClaimsView } from './returns-claims-view'
 import { ReportsView } from './reports-view'
 import { SalesmanApp } from './salesman-app'
 import { MegaAccountsView } from './mega-accounts-view'
+import { BackupView } from './backup-view'
+import { VisitMapView } from './visit-map'
 import { UnprocessedBillsView } from './unprocessed-view'
 import { SummariesView } from './summaries-view'
 import { SettlementView } from './settlement-view'
@@ -38,6 +40,7 @@ import {
   LayoutDashboard, ShoppingCart, Warehouse, Package, Store, Network, Route,
   Users, Gift, Undo2, BarChart3, Package2, LogOut, Building2,
   ClipboardList, FileStack, Wallet, BookText, HandCoins, Landmark,
+  Database, Map as MapIcon,
 } from 'lucide-react'
 
 // group = module ka naam (primary tab) — items us module ke sub-nav tiles isi order mein
@@ -46,6 +49,7 @@ import {
 const NAV: { key: ViewKey; label: string; icon: typeof LayoutDashboard; roles: string[]; group: string }[] = [
   // Mega Admin — sirf account management, koi business view nahi
   { key: 'mega-accounts', label: 'Distributor Accounts', icon: Landmark, roles: ['MEGA_ADMIN'], group: 'Overview' },
+  { key: 'backup', label: 'Backup & Safety', icon: Database, roles: ['MEGA_ADMIN'], group: 'Overview' },
   // Overview
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['DISTRIBUTOR'], group: 'Overview' },
   // Sales — rozana cycle order: booking → bills → van → cash settlement
@@ -66,6 +70,7 @@ const NAV: { key: ViewKey; label: string; icon: typeof LayoutDashboard; roles: s
   { key: 'pjp', label: 'PJP / Routes', icon: Route, roles: ['DISTRIBUTOR', 'SALESMAN'], group: 'Field Operations' },
   { key: 'outlets', label: 'Outlets', icon: Store, roles: ['DISTRIBUTOR', 'SALESMAN'], group: 'Field Operations' },
   { key: 'field-force', label: 'Field Force', icon: Users, roles: ['DISTRIBUTOR'], group: 'Field Operations' },
+  { key: 'visit-map', label: 'Visit Map', icon: MapIcon, roles: ['DISTRIBUTOR'], group: 'Field Operations' },
   // Business Network — company aur distribution tree
   { key: 'companies', label: 'Companies (Procurement)', icon: Building2, roles: ['DISTRIBUTOR'], group: 'Business Network' },
   { key: 'distributors', label: 'My Network', icon: Network, roles: ['DISTRIBUTOR'], group: 'Business Network' },
@@ -246,6 +251,7 @@ export function DMSApp() {
       {/* ============ MAIN — page scroll nahi, har view apna internal layout manage karta hai ============ */}
       <main className="flex-1 min-h-0 w-full max-w-[1500px] mx-auto overflow-hidden px-3 sm:px-5 py-3">
         {activeView === 'mega-accounts' && <MegaAccountsView />}
+        {activeView === 'backup' && <BackupView />}
         {activeView === 'dashboard' && <DashboardView />}
         {activeView === 'orders' && <OrdersView />}
         {activeView === 'unprocessed' && <UnprocessedBillsView />}
@@ -260,6 +266,7 @@ export function DMSApp() {
         {activeView === 'distributors' && <DistributorsView />}
         {activeView === 'pjp' && <PJPView />}
         {activeView === 'field-force' && <FieldForceView />}
+        {activeView === 'visit-map' && <VisitMapView />}
         {activeView === 'schemes' && <SchemesView />}
         {activeView === 'returns' && <ReturnsClaimsView />}
         {activeView === 'reports' && <ReportsView />}
