@@ -22,6 +22,7 @@ import { api, fmtPKR, fmtNum, fmtDate } from '@/lib/dms-api'
 import type {
   CompaniesData, CompanyFullDTO, CompanyLedgerDTO, PurchaseInvoiceDTO, ProductDTO,
 } from '@/lib/dms-types'
+import { useDMS } from '@/lib/dms-store'
 import { CompanyStatementDoc } from './company-print'
 import { SupplierAgingCard } from './supplier-aging'
 import { keepDialogBehind } from './cbl-print'
@@ -43,9 +44,9 @@ const LEDGER_TYPE_LABELS: Record<string, string> = {
   CREDIT_NOTE: 'Credit Note', ADJUSTMENT: 'Adjustment',
 }
 const todayISO = () => new Date().toISOString().slice(0, 10)
-const plusYearISO = () => { const d = new Date(); d.setFullYear(d.getFullYear() + 1); return d.toISOString().slice(0, 10) }
 
-function CompanyLogo({ company, size = 'md' }: { company: Pick<CompanyFullDTO, 'name' | 'shortCode' | 'logo'>; size?: 'sm' | 'md' | 'lg' }) {
+// export: purchase-entry-view bhi yehi logo avatar use karta hai (Task 49)
+export function CompanyLogo({ company, size = 'md' }: { company: Pick<CompanyFullDTO, 'name' | 'shortCode' | 'logo'>; size?: 'sm' | 'md' | 'lg' }) {
   const cls = size === 'sm' ? 'h-8 w-8 text-[10px]' : size === 'lg' ? 'h-16 w-16 text-xl' : 'h-12 w-12 text-sm'
   if (company.logo) {
     return <img src={company.logo} alt={`${company.name} logo`} className={`${cls} rounded-lg border border-slate-200 bg-white object-contain p-0.5 shrink-0`} />
@@ -66,6 +67,7 @@ function BalanceBadge({ balance }: { balance: number }) {
 // ==================== MAIN VIEW ====================
 
 export function CompaniesView() {
+  const openPurchaseEntry = useDMS((s) => s.openPurchaseEntry)
   const [data, setData] = useState<CompaniesData | null>(null)
   const [products, setProducts] = useState<ProductDTO[]>([])
   const [loading, setLoading] = useState(true)
@@ -73,7 +75,6 @@ export function CompaniesView() {
   const [formOpen, setFormOpen] = useState(false)
   const [editCompany, setEditCompany] = useState<CompanyFullDTO | null>(null)
   const [detailId, setDetailId] = useState<string | null>(null)
-  const [purchaseFor, setPurchaseFor] = useState<CompanyFullDTO | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
 
   async function load() {
@@ -103,7 +104,8 @@ export function CompaniesView() {
 
   function openNew() { setEditCompany(null); setFormOpen(true) }
   function openEdit(c: CompanyFullDTO) { setEditCompany(c); setFormOpen(true) }
-  function openPurchase(c: CompanyFullDTO) { setPurchaseFor(c) }
+  // Task 49: dialog band — ab POORA PAGE khulta hai (purchase-entry view)
+  function openPurchase(c: CompanyFullDTO) { openPurchaseEntry(c.id) }
   function onSaved() { load(); setRefreshKey((k) => k + 1) }
 
   const detailCompany = data?.companies.find((c) => c.id === detailId) ?? null
@@ -215,17 +217,6 @@ export function CompaniesView() {
           onClose={() => setDetailId(null)}
           onEdit={() => openEdit(detailCompany)}
           onDataChanged={onSaved}
-        />
-      )}
-
-      {/* new purchase invoice */}
-      {purchaseFor && (
-        <PurchaseInvoiceDialog
-          fixedCompany={purchaseFor}
-          companies={data?.companies ?? []}
-          products={products}
-          onClose={() => setPurchaseFor(null)}
-          onSaved={() => { setPurchaseFor(null); onSaved() }}
         />
       )}
     </div>
@@ -355,6 +346,7 @@ function CompanyDetailDialog({ company, products, onClose, onEdit, onDataChanged
   onEdit: () => void
   onDataChanged: () => void
 }) {
+  const openPurchaseEntry = useDMS((s) => s.openPurchaseEntry)
   const [tab, setTab] = useState('ledger')
   const [ledger, setLedger] = useState<CompanyLedgerDTO | null>(null)
   const [invoices, setInvoices] = useState<PurchaseInvoiceDTO[] | null>(null)
@@ -362,7 +354,6 @@ function CompanyDetailDialog({ company, products, onClose, onEdit, onDataChanged
   const [entryMode, setEntryMode] = useState<'PAYMENT' | 'ADJUSTMENT' | null>(null)
   const [viewInvoice, setViewInvoice] = useState<PurchaseInvoiceDTO | null>(null)
   const [printOpen, setPrintOpen] = useState(false)
-  const [purchaseOpen, setPurchaseOpen] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -406,7 +397,8 @@ function CompanyDetailDialog({ company, products, onClose, onEdit, onDataChanged
           <span className="text-xs text-slate-400">{company.productCount} products • {company.salesmanCount ?? 0} bookers assigned</span>
           <div className="ml-auto flex flex-wrap gap-2">
             <Button size="sm" variant="outline" className="h-8" onClick={onEdit}><Pencil className="h-3.5 w-3.5 mr-1" /> Edit</Button>
-            <Button size="sm" className="h-8 bg-emerald-600 hover:bg-emerald-700" onClick={() => setPurchaseOpen(true)}><Truck className="h-3.5 w-3.5 mr-1" /> New Purchase</Button>
+            {/* Task 49: dialog band — poora page khulta hai (koi overlay click-loss nahi) */}
+            <Button size="sm" className="h-8 bg-emerald-600 hover:bg-emerald-700" onClick={() => openPurchaseEntry(company.id)}><Truck className="h-3.5 w-3.5 mr-1" /> New Purchase</Button>
           </div>
         </div>
 
@@ -489,7 +481,7 @@ function CompanyDetailDialog({ company, products, onClose, onEdit, onDataChanged
           <TabsContent value="purchases" className="space-y-3 mt-3">
             <div className="flex items-center justify-between">
               <p className="text-sm text-slate-500">Stock purchase invoices — book hote hi warehouse stock barh jata hai</p>
-              <Button size="sm" className="h-8 bg-emerald-600 hover:bg-emerald-700" onClick={() => setPurchaseOpen(true)}><Plus className="h-3.5 w-3.5 mr-1" /> New Purchase</Button>
+              <Button size="sm" className="h-8 bg-emerald-600 hover:bg-emerald-700" onClick={() => openPurchaseEntry(company.id)}><Plus className="h-3.5 w-3.5 mr-1" /> New Purchase</Button>
             </div>
             <div className="rounded-lg border bg-white overflow-hidden">
               <div className="max-h-[400px] overflow-auto">
@@ -540,17 +532,6 @@ function CompanyDetailDialog({ company, products, onClose, onEdit, onDataChanged
           </TabsContent>
         </Tabs>
 
-        {/* new purchase (andar se — save par tabs refresh) */}
-        {purchaseOpen && (
-          <PurchaseInvoiceDialog
-            fixedCompany={company}
-            companies={[company]}
-            products={products}
-            onClose={() => setPurchaseOpen(false)}
-            onSaved={() => { setPurchaseOpen(false); bump() }}
-          />
-        )}
-
         {/* payment / adjustment dialog */}
         {entryMode && (
           <LedgerEntryDialog
@@ -582,310 +563,6 @@ function CompanyDetailDialog({ company, products, onClose, onEdit, onDataChanged
       toast({ title: 'Error', description: e instanceof Error ? e.message : 'Reverse failed', variant: 'destructive' })
     }
   }
-}
-
-// ==================== PURCHASE INVOICE DIALOG ====================
-
-// Task 44: draft item me poora tax chain inputs — Disc % (Pass On), Trade Offer Rs, GST %, Further Tax %
-interface DraftItem { key: number; productId: string; cartons: string; price: string; disc: string; to: string; gst: string; fur: string; batchNo: string; expDate: string }
-
-let draftKeySeq = 1
-function newDraftItem(p?: ProductDTO): DraftItem {
-  return {
-    key: draftKeySeq++,
-    productId: p?.id ?? '',
-    cartons: '',
-    price: p?.purchasePrice ? String(p.purchasePrice) : '',
-    disc: '',
-    to: '',
-    gst: p ? (p.gstEnabled ? String(p.gstRate) : '0') : '',
-    fur: '',
-    batchNo: `B-${Date.now().toString(36).toUpperCase().slice(-5)}${draftKeySeq}`,
-    expDate: plusYearISO(),
-  }
-}
-
-function PurchaseInvoiceDialog({ fixedCompany, companies, products, onClose, onSaved }: {
-  fixedCompany: CompanyFullDTO | null
-  companies: CompanyFullDTO[]
-  products: ProductDTO[]
-  onClose: () => void
-  onSaved: () => void
-}) {
-  const [companyId, setCompanyId] = useState(fixedCompany?.id ?? '')
-  const [date, setDate] = useState(todayISO())
-  const [supplierInvoiceNo, setSupplierInvoiceNo] = useState('')
-  const [discount, setDiscount] = useState('')
-  // Task 43: bill discount % ya flat Rs — default % (supplier offers aksar % me aate hain)
-  const [discMode, setDiscMode] = useState<'pct' | 'rs'>('pct')
-  // Task 44: Advance Tax 236H % — invoice-level, default 0.5 (company invoice ka rate; editable = hardcoded nahi)
-  const [advTaxPct, setAdvTaxPct] = useState('0.5')
-  const [paidNow, setPaidNow] = useState('')
-  const [notes, setNotes] = useState('')
-  const [items, setItems] = useState<DraftItem[]>(() => fixedCompany ? [newDraftItem()] : [])
-  const [saving, setSaving] = useState(false)
-
-  const companyProducts = useMemo(
-    () => products.filter((p) => p.company?.id === companyId),
-    [products, companyId],
-  )
-  const company = companies.find((c) => c.id === companyId)
-
-  // Task 44: REAL INVOICE calc chain — Gross -> Pass On -> Net -> GST + Further -> Trade Offer -> Adv 236H -> Inclusive
-  const itemCalc = useMemo(() => items.map((it) => {
-    const gross = Math.round((Number(it.cartons) || 0) * (Number(it.price) || 0) * 100) / 100
-    const pct = Math.min(100, Math.max(0, Number(it.disc) || 0))
-    const discRs = Math.round(gross * pct) / 100
-    const net = Math.round((gross - discRs) * 100) / 100
-    const gstRate = Math.min(100, Math.max(0, Number(it.gst) || 0))
-    const salesTax = Math.round(net * gstRate) / 100
-    const furPct = Math.min(100, Math.max(0, Number(it.fur) || 0))
-    const furTax = Math.round(net * furPct) / 100
-    const totalTax = Math.round((salesTax + furTax) * 100) / 100
-    const toRs = Math.min(net + totalTax, Math.max(0, Number(it.to) || 0))
-    const advPct = Math.min(100, Math.max(0, Number(advTaxPct) || 0))
-    const advTax = Math.round(Math.max(0, net + totalTax - toRs) * advPct) / 100
-    const inclusive = Math.round((net + totalTax - toRs + advTax) * 100) / 100
-    return { key: it.key, gross, pct, discRs, net, gstRate, salesTax, furPct, furTax, totalTax, toRs, advTax, inclusive }
-  }), [items, advTaxPct])
-  const calcMap = useMemo(() => new Map(itemCalc.map((c) => [c.key, c])), [itemCalc])
-  const subtotal = itemCalc.reduce((s, c) => s + c.gross, 0)
-  const itemDiscTotal = Math.round(itemCalc.reduce((s, c) => s + c.discRs, 0) * 100) / 100
-  const toTotal = Math.round(itemCalc.reduce((s, c) => s + c.toRs, 0) * 100) / 100
-  const taxTotal = Math.round(itemCalc.reduce((s, c) => s + c.totalTax, 0) * 100) / 100
-  const advTaxTotal = Math.round(itemCalc.reduce((s, c) => s + c.advTax, 0) * 100) / 100
-  const afterItemDisc = Math.round((subtotal - itemDiscTotal) * 100) / 100
-  const billPct = discMode === 'pct' ? Math.min(100, Math.max(0, Number(discount) || 0)) : 0
-  const billDiscRs = discMode === 'pct' ? Math.round(afterItemDisc * billPct) / 100 : (Number(discount) || 0)
-  const totalDiscount = Math.round((itemDiscTotal + toTotal + billDiscRs) * 100) / 100
-  // Task 44: Net Invoice Amount = Gross − Total Discount + GST + Advance Tax 236H (company invoice ka formula)
-  const total = Math.max(0, Math.round((subtotal - totalDiscount + taxTotal + advTaxTotal) * 100) / 100)
-  const remaining = total - (Number(paidNow) || 0)
-
-  function setItem(key: number, patch: Partial<DraftItem>) {
-    setItems((arr) => arr.map((it) => (it.key === key ? { ...it, ...patch } : it)))
-  }
-  function onProductChange(key: number, productId: string) {
-    const p = companyProducts.find((x) => x.id === productId)
-    setItem(key, {
-      productId,
-      price: p?.purchasePrice ? String(p.purchasePrice) : '',
-      disc: '', // product badla to purana % nahi chalnie chahiye
-      to: '',
-      fur: '',
-      gst: p ? (p.gstEnabled ? String(p.gstRate) : '0') : '', // Task 44: GST % product se prefill
-      batchNo: `B-${Date.now().toString(36).toUpperCase().slice(-5)}${key % 1000}`,
-      expDate: plusYearISO(),
-    })
-  }
-
-  async function save() {
-    if (!companyId) { toast({ title: 'Company select karein', variant: 'destructive' }); return }
-    const cleanItems = items.filter((it) => it.productId && Number(it.cartons) > 0)
-    if (cleanItems.length === 0) { toast({ title: 'Kam az kam ek product + cartons add karein', variant: 'destructive' }); return }
-    if (cleanItems.some((it) => !(Number(it.price) > 0))) { toast({ title: 'Har item ka purchase price enter karein', variant: 'destructive' }); return }
-    if (billDiscRs > afterItemDisc) { toast({ title: 'Bill discount item discounts ke baad wali value se zyada nahi ho sakta', variant: 'destructive' }); return }
-    if ((Number(paidNow) || 0) > total) { toast({ title: 'Paid amount total se zyada nahi ho sakta', variant: 'destructive' }); return }
-    setSaving(true)
-    try {
-      const r = await api<{ invoice: { invoiceNo: string; total: number; taxTotal: number; advanceTaxTotal: number }; warehouseName?: string }>('/api/purchase-invoices', {
-        method: 'POST',
-        body: JSON.stringify({
-          userId: (JSON.parse(localStorage.getItem('dms_session') ?? 'null'))?.id,
-          companyId,
-          date,
-          supplierInvoiceNo,
-          discount: discMode === 'pct' ? 0 : Number(discount) || 0,
-          discountPct: discMode === 'pct' ? Number(discount) || 0 : 0,
-          advanceTaxPct: Number(advTaxPct) || 0,
-          paidNow: Number(paidNow) || 0,
-          notes,
-          items: cleanItems.map((it) => ({
-            productId: it.productId,
-            cartons: Number(it.cartons),
-            purchasePrice: Number(it.price),
-            discountPct: Number(it.disc) || 0,
-            gstRate: it.gst === '' ? undefined : Number(it.gst),
-            furtherTaxPct: Number(it.fur) || 0,
-            tradeOfferAmt: Number(it.to) || 0,
-            batchNo: it.batchNo,
-            expDate: it.expDate || null,
-          })),
-        }),
-      })
-      toast({
-        title: `${r.invoice.invoiceNo} booked — Stock IN`,
-        description: `${company?.name ?? 'Company'} • Net Invoice ${fmtPKR(r.invoice.total)}${r.invoice.taxTotal > 0 ? ` • GST ${fmtPKR(r.invoice.taxTotal)}` : ''}${r.invoice.advanceTaxTotal > 0 ? ` • Adv Tax ${fmtPKR(r.invoice.advanceTaxTotal)}` : ''} • Stock "${r.warehouseName ?? 'warehouse'}" mein add ho gaya`,
-      })
-      onSaved()
-    } catch (e) {
-      toast({ title: 'Error', description: e instanceof Error ? e.message : 'Purchase failed', variant: 'destructive' })
-    } finally { setSaving(false) }
-  }
-
-  return (
-    <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-[calc(100%-2rem)] sm:max-w-2xl max-h-[92vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>New Purchase Invoice (Stock In)</DialogTitle>
-          <DialogDescription>
-            Company se stock aane par invoice enter karein — warehouse stock barhega aur isi value ki payable ledger me credit hogi
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="space-y-1 sm:col-span-2">
-            <Label>Company *</Label>
-            {fixedCompany ? (
-              <div className="flex items-center gap-2 h-9 px-3 rounded-md border bg-slate-50">
-                <CompanyLogo company={fixedCompany} size="sm" />
-                <span className="text-sm font-medium truncate">{fixedCompany.name}</span>
-              </div>
-            ) : (
-              <Select value={companyId} onValueChange={(v) => { setCompanyId(v); setItems([]) }}>
-                <SelectTrigger className="w-full"><SelectValue placeholder="Company select karein" /></SelectTrigger>
-                <SelectContent>
-                  {companies.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      <span className="flex items-center gap-2"><CompanyLogo company={c} size="sm" /> {c.name}</span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-          <div className="space-y-1"><Label>Date</Label><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
-          <div className="space-y-1"><Label>Supplier Bill #</Label><Input value={supplierInvoiceNo} onChange={(e) => setSupplierInvoiceNo(e.target.value)} placeholder="Company ka bill no" /></div>
-        </div>
-
-        {/* items */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label>Items ({companyProducts.length} products available)</Label>
-            <Button size="sm" variant="outline" className="h-7" disabled={!companyId || companyProducts.length === 0} onClick={() => setItems((arr) => [...arr, newDraftItem()])}>
-              <Plus className="h-3.5 w-3.5 mr-1" /> Add Item
-            </Button>
-          </div>
-          {!companyId && <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">Pehle company select karein — phir usi ke products dikhenge</p>}
-          {companyId && companyProducts.length === 0 && <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">Is company ka koi product catalog me nahi — pehle Products page se add karein</p>}
-          {items.length === 0 && companyId && companyProducts.length > 0 && (
-            <p className="text-xs text-slate-400 text-center py-2 border border-dashed rounded-md">Add Item se product add karein</p>
-          )}
-          {items.map((it, idx) => (
-            <div key={it.key} className="relative grid grid-cols-12 gap-2 items-end rounded-lg border bg-slate-50/50 p-2 pr-8">
-              <div className="col-span-12 sm:col-span-4 space-y-0.5">
-                <Label className="text-[10px] text-slate-400">Product {idx + 1}</Label>
-                <Select value={it.productId} onValueChange={(v) => onProductChange(it.key, v)}>
-                  <SelectTrigger className="h-9 w-full bg-white"><SelectValue placeholder="Product" /></SelectTrigger>
-                  <SelectContent>
-                    {companyProducts.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>{p.sku} — {p.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="col-span-4 sm:col-span-2 space-y-0.5">
-                <Label className="text-[10px] text-slate-400">Cartons *</Label>
-                <Input type="number" min="1" className="h-9 bg-white" value={it.cartons} onChange={(e) => setItem(it.key, { cartons: e.target.value })} placeholder="0" />
-              </div>
-              <div className="col-span-4 sm:col-span-2 space-y-0.5">
-                <Label className="text-[10px] text-slate-400">Rs/Carton *</Label>
-                <Input type="number" min="1" className="h-9 bg-white" value={it.price} onChange={(e) => setItem(it.key, { price: e.target.value })} placeholder="0" />
-              </div>
-              <div className="col-span-4 sm:col-span-2 space-y-0.5">
-                <Label className="text-[10px] text-emerald-600">Disc % (Pass On)</Label>
-                <Input type="number" min="0" max="100" step="0.01" className="h-9 bg-white" value={it.disc} onChange={(e) => setItem(it.key, { disc: e.target.value })} placeholder="0" />
-              </div>
-              <div className="col-span-4 sm:col-span-2 space-y-0.5">
-                <Label className="text-[10px] text-amber-600">Trade Offer Rs</Label>
-                <Input type="number" min="0" className="h-9 bg-white" value={it.to} onChange={(e) => setItem(it.key, { to: e.target.value })} placeholder="0" />
-              </div>
-              <button className="absolute top-1.5 right-1.5 h-6 w-6 rounded-md flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50" onClick={() => setItems((arr) => arr.filter((x) => x.key !== it.key))} title="Item remove">
-                <X className="h-3.5 w-3.5" />
-              </button>
-              <div className="col-span-6 sm:col-span-3 space-y-0.5">
-                <Label className="text-[10px] text-slate-400">Batch #</Label>
-                <Input className="h-9 bg-white" value={it.batchNo} onChange={(e) => setItem(it.key, { batchNo: e.target.value })} />
-              </div>
-              <div className="col-span-6 sm:col-span-2 space-y-0.5">
-                <Label className="text-[10px] text-slate-400">Expiry</Label>
-                <Input type="date" className="h-9 bg-white" value={it.expDate} onChange={(e) => setItem(it.key, { expDate: e.target.value })} />
-              </div>
-              <div className="col-span-4 sm:col-span-2 space-y-0.5">
-                <Label className="text-[10px] text-sky-600">GST %</Label>
-                <Input type="number" min="0" max="100" step="0.01" className="h-9 bg-white" value={it.gst} onChange={(e) => setItem(it.key, { gst: e.target.value })} placeholder="18" />
-              </div>
-              <div className="col-span-4 sm:col-span-2 space-y-0.5">
-                <Label className="text-[10px] text-sky-600">Further Tax %</Label>
-                <Input type="number" min="0" max="100" step="0.01" className="h-9 bg-white" value={it.fur} onChange={(e) => setItem(it.key, { fur: e.target.value })} placeholder="0" />
-              </div>
-              <div className="col-span-12 sm:col-span-3 text-right text-[11px] text-slate-500 self-end pb-1 leading-relaxed">
-                {(() => {
-                  const c = calcMap.get(it.key)
-                  const p = companyProducts.find((x) => x.id === it.productId)
-                  if (!c) return null
-                  return (
-                    <>
-                      Gross Rs {fmtNum(c.gross)}
-                      {c.pct > 0 && <> − Rs {fmtNum(c.discRs)} ({c.pct}%)</>}
-                      = Net <span className="font-semibold text-slate-700">Rs {fmtNum(c.net)}</span>
-                      <br />
-                      {c.gstRate > 0 && <span>GST@{c.gstRate}% Rs {fmtNum(c.salesTax)} • </span>}
-                      {c.furPct > 0 && <span>Fur@{c.furPct}% Rs {fmtNum(c.furTax)} • </span>}
-                      {c.toRs > 0 && <span className="text-amber-700">TO − Rs {fmtNum(c.toRs)} • </span>}
-                      {c.advTax > 0 && <span>Adv 236H Rs {fmtNum(c.advTax)} • </span>}
-                      <span className="font-semibold text-red-600">Incl Rs {fmtNum(c.inclusive)}</span>
-                      {p ? <span className="text-slate-400"> • {fmtNum((Number(it.cartons) || 0) * p.unitsPerCarton)} units</span> : null}
-                    </>
-                  )
-                })()}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* totals — Task 44: company invoice jaisi summary (Gross − Discount + GST + Adv 236H = Net) */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-lg border bg-slate-50/70 p-3">
-          <div><p className="text-[10px] text-slate-400 uppercase font-semibold">Gross Amount</p><p className="text-sm font-bold">{fmtPKR(subtotal)}</p></div>
-          <div>
-            <p className="text-[10px] text-slate-400 uppercase font-semibold">Total Discount</p>
-            <p className={`text-sm font-bold ${totalDiscount > 0 ? 'text-emerald-700' : 'text-slate-300'}`}>{totalDiscount > 0 ? `− ${fmtPKR(totalDiscount)}` : '—'}</p>
-            {totalDiscount > 0 && <p className="text-[10px] text-slate-400">Item {fmtNum(itemDiscTotal)} • TO {fmtNum(toTotal)} • Bill {fmtNum(billDiscRs)}</p>}
-          </div>
-          <div><p className="text-[10px] text-slate-400 uppercase font-semibold">Sales Tax (GST)</p><p className={`text-sm font-bold ${taxTotal > 0 ? 'text-slate-700' : 'text-slate-300'}`}>{taxTotal > 0 ? `+ ${fmtPKR(taxTotal)}` : '—'}</p></div>
-          <div className="space-y-0.5">
-            <p className="text-[10px] text-slate-400 uppercase font-semibold">Adv Tax 236H %</p>
-            <Input type="number" min="0" max="100" step="0.01" className="h-8 bg-white" value={advTaxPct} onChange={(e) => setAdvTaxPct(e.target.value)} placeholder="0.5" />
-            {advTaxTotal > 0 && <p className="text-[10px] text-slate-500 font-semibold">= + Rs {fmtNum(advTaxTotal)}</p>}
-          </div>
-          <div className="space-y-0.5">
-            <div className="flex items-center justify-between gap-1">
-              <p className="text-[10px] text-slate-400 uppercase font-semibold">Bill Discount</p>
-              <div className="flex gap-0.5">
-                <button type="button" onClick={() => setDiscMode('pct')} className={`h-5 px-1.5 rounded text-[10px] font-bold leading-none ${discMode === 'pct' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-400'}`}>%</button>
-                <button type="button" onClick={() => setDiscMode('rs')} className={`h-5 px-1.5 rounded text-[10px] font-bold leading-none ${discMode === 'rs' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-400'}`}>Rs</button>
-              </div>
-            </div>
-            <Input type="number" min="0" max={discMode === 'pct' ? 100 : undefined} step="0.01" className="h-8 bg-white" value={discount} onChange={(e) => setDiscount(e.target.value)} placeholder={discMode === 'pct' ? 'e.g. 5' : 'Rs'} />
-            {discMode === 'pct' && billPct > 0 && <p className="text-[10px] text-emerald-700 font-semibold">= − Rs {fmtNum(billDiscRs)}</p>}
-          </div>
-          <div><p className="text-[10px] text-red-400 uppercase font-semibold">Net Invoice Amount</p><p className="text-base font-bold text-red-600">{fmtPKR(total)}</p></div>
-          <div className="space-y-0.5"><p className="text-[10px] text-slate-400 uppercase font-semibold">Paid Now (advance)</p><Input type="number" min="0" className="h-8 bg-white" value={paidNow} onChange={(e) => setPaidNow(e.target.value)} placeholder="0" /></div>
-          <div><p className="text-[10px] text-slate-400 uppercase font-semibold">Remaining Payable</p><p className="text-sm font-bold text-slate-700">{fmtPKR(Math.max(0, remaining))}</p></div>
-          <p className="col-span-2 sm:col-span-4 text-[11px] text-slate-500">
-            Company invoice ka formula: <b>Gross − Total Discount + GST + Advance Tax 236H = Net Invoice</b> — yehi amount ledger payable banti hy. GST % har product ka apna (Products page par set hota hy, yahan override bhi kar sakte hain)
-          </p>
-        </div>
-
-        <div className="space-y-1"><Label>Notes</Label><Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Freight, scheme, remarks..." /></div>
-
-        <div className="flex justify-end gap-2 pt-1">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button className="bg-emerald-600 hover:bg-emerald-700" onClick={save} disabled={saving}>{saving ? 'Booking...' : 'Book Purchase (Stock In)'}</Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  )
 }
 
 // ==================== INVOICE ITEMS VIEWER ====================

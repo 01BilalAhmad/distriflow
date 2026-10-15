@@ -36,6 +36,7 @@ import { SummariesView } from './summaries-view'
 import { SettlementView } from './settlement-view'
 import { LedgersView } from './ledgers-view'
 import { RecoveryView } from './recovery-view'
+import { PurchaseEntryView } from './purchase-entry-view'
 import {
   LayoutDashboard, ShoppingCart, Warehouse, Package, Store, Network, Route,
   Users, Gift, Undo2, BarChart3, Package2, LogOut, Building2,
@@ -89,8 +90,19 @@ const MODULES: { name: string; icon: typeof LayoutDashboard }[] = [
 ]
 
 export function DMSApp() {
-  const { user, setUser, activeView, setActiveView } = useDMS()
+  const { user, setUser, activeView, setActiveView, purchaseDraftDirty } = useDMS()
   const [mounted, setMounted] = useState(false)
+
+  // Task 49: purchase entry full page par adhoora draft ho to side-nav se jaane
+  // se pehle confirm — ghalati se click se kaam zaya nahi hota (draft waise bhi
+  // auto-save hai, ye double protection hai)
+  function navigate(target: ViewKey) {
+    if (activeView === 'purchase-entry' && target !== 'purchase-entry' && purchaseDraftDirty) {
+      const ok = window.confirm('Purchase invoice form mein adhoora data hai — draft auto-save ho chuka hai, wapas aaoge to poora milega.\n\nPhir bhi page chhorein?')
+      if (!ok) return
+    }
+    setActiveView(target)
+  }
 
   useEffect(() => {
     const s = loadSession()
@@ -115,10 +127,13 @@ export function DMSApp() {
 
   // Task 22: activeView role ke hisab se allowed nahi to allowed view par redirect
   // (render ke andar setState forbidden tha — ye pre-existing React error ka fix hai)
-  const allowedViews = useMemo(
-    () => (user ? NAV.filter((n) => n.roles.includes(user.role)).map((n) => n.key) : []),
-    [user],
-  )
+  // Task 49: 'purchase-entry' NAV mein nahi (full-page form hai) — DISTRIBUTOR ke liye
+  // allowed list mein manually add, warna redirect effect wapas chala jata
+  const allowedViews = useMemo(() => {
+    if (!user) return []
+    const base = NAV.filter((n) => n.roles.includes(user.role)).map((n) => n.key)
+    return user.role === 'DISTRIBUTOR' ? [...base, 'purchase-entry' as ViewKey] : base
+  }, [user])
   useEffect(() => {
     if (user && allowedViews.length > 0 && !allowedViews.includes(activeView)) {
       queueMicrotask(() => setActiveView(allowedViews[0]))
@@ -193,7 +208,7 @@ export function DMSApp() {
             return (
               <button
                 key={m.name}
-                onClick={() => setActiveView(m.items[0].key)}
+                onClick={() => navigate(m.items[0].key)}
                 title={`${m.name} module — ${m.items.length} pages`}
                 className={`relative flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition-all duration-200 ${
                   on
@@ -224,7 +239,7 @@ export function DMSApp() {
             return (
               <button
                 key={n.key}
-                onClick={() => setActiveView(n.key)}
+                onClick={() => navigate(n.key)}
                 className={`group flex w-[104px] shrink-0 flex-col items-center gap-1.5 rounded-2xl border px-1.5 pt-2 pb-1.5 transition-all duration-200 ${
                   on
                     ? 'border-emerald-200 bg-white shadow-md shadow-emerald-600/10 -translate-y-0.5'
@@ -262,6 +277,7 @@ export function DMSApp() {
         {activeView === 'inventory' && <InventoryView />}
         {activeView === 'products' && <ProductsView />}
         {activeView === 'companies' && <CompaniesView />}
+        {activeView === 'purchase-entry' && <PurchaseEntryView />}
         {activeView === 'outlets' && <OutletsView />}
         {activeView === 'distributors' && <DistributorsView />}
         {activeView === 'pjp' && <PJPView />}
