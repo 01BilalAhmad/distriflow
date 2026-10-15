@@ -83,18 +83,46 @@ export async function POST(req: Request) {
 
 export async function PATCH(req: Request) {
   try {
-    const { id, isActive, userId } = await req.json()
+    const { id, isActive, userId, name, description, type, channel, productId, value, buyQty, freeQty, startDate, endDate } = await req.json()
     if (!id) return jsonError('Scheme id required')
     if (!userId) return jsonError('userId required')
 
-    // ownership — sirf apni scheme toggle
+    // ownership — sirf apni scheme edit/toggle
     const t = await distributorTenant(userId)
     if ('error' in t) return t.error
     const existing = await db.scheme.findUnique({ where: { id } })
     if (!existing) return jsonError('Scheme nahi mili', 404)
     if (existing.distributorId !== t.tenantId) return jsonError('Ye scheme aap ki nahi hai', 403)
 
-    await db.scheme.update({ where: { id }, data: { isActive: !!isActive } })
+    // Task 41: toggle-only call (sirf isActive) — purana behavior intact
+    if (name === undefined && type === undefined && value === undefined) {
+      await db.scheme.update({ where: { id }, data: { isActive: !!isActive } })
+      return Response.json({ ok: true })
+    }
+
+    // Task 41: full edit — new orders par naye values lagenge; PURANE bills untouched
+    // (OrderItem snapshot ke saath) — discount jis % par bana, usi par rahega.
+    if (!name || !type) return jsonError('Scheme name aur type required hain')
+    if (productId && productId !== existing.productId) {
+      const prod = await db.product.findFirst({ where: { id: productId, distributorId: t.tenantId } })
+      if (!prod) return jsonError('Product nahi mila (ya aap ke catalog ka nahi hai)', 404)
+    }
+    await db.scheme.update({
+      where: { id },
+      data: {
+        name,
+        description: description ?? null,
+        type,
+        channel: channel || null,
+        productId: productId || null,
+        value: Number(value) || 0,
+        buyQty: Number(buyQty) || 0,
+        freeQty: Number(freeQty) || 0,
+        ...(startDate ? { startDate: new Date(startDate) } : {}),
+        endDate: endDate ? new Date(endDate) : null,
+        ...(isActive !== undefined ? { isActive: !!isActive } : {}),
+      },
+    })
     return Response.json({ ok: true })
   } catch (e) {
     console.error(e)

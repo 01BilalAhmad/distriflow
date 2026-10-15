@@ -14,6 +14,7 @@ export interface CalcProduct {
 
 export interface CalcScheme {
   id: string
+  name?: string
   type: string // BUY_X_GET_Y | PERCENT_DISCOUNT | FLAT_DISCOUNT
   channel: string | null
   productId: string | null
@@ -32,6 +33,10 @@ export interface CalcIncomingItem {
    * edit par purani lines RE-PRICE nahi hotin (Task 17 principle: snapshot rate),
    * sirf nayi add ki hui lines current tradePrice par aati hain. */
   rate?: number
+  /** Task 41: existing line ka BOOKED SCHEME SNAPSHOT — scheme baad me edit ho to
+   * purani lines hamesha booking waqt ke type/value/buyQty/freeQty par re-apply hoti
+   * hain, current scheme se nahi (bill jis % par bana, usi par rahe). */
+  scheme?: { id: string; name?: string; type: string; value: number; buyQty: number; freeQty: number } | null
 }
 
 export interface CalcLine {
@@ -41,6 +46,12 @@ export interface CalcLine {
   rate: number
   discount: number
   schemeId: string | null
+  // Task 41: scheme snapshot — line create/update par OrderItem par persist hota hai
+  schemeType: string | null
+  schemeValue: number | null
+  schemeBuyQty: number | null
+  schemeFreeQty: number | null
+  schemeName: string | null
   lineTotal: number
 }
 
@@ -94,9 +105,17 @@ export function computeOrderLines(
     let discount = 0
     let schemeId: string | null = null
 
-    const applicable = schemes
-      .filter((s) => (!s.productId || s.productId === p.id) && (!s.channel || s.channel === channel))
-      .sort((a, b) => b.value - a.value)
+    // Task 41: booked scheme snapshot (existing line) current schemes se pehle
+    // check hota hai — sirf IS line ke booking waqt ke values re-apply hote hain
+    const snapshot: CalcScheme | null = item.scheme
+      ? { id: item.scheme.id, name: item.scheme.name, type: item.scheme.type, channel: null, productId: null, value: Number(item.scheme.value) || 0, buyQty: Number(item.scheme.buyQty) || 0, freeQty: Number(item.scheme.freeQty) || 0 }
+      : null
+
+    const applicable = snapshot
+      ? [snapshot]
+      : schemes
+          .filter((s) => (!s.productId || s.productId === p.id) && (!s.channel || s.channel === channel))
+          .sort((a, b) => b.value - a.value)
 
     for (const s of applicable) {
       if (s.type === 'BUY_X_GET_Y' && s.buyQty > 0 && ctnEquiv >= s.buyQty) {
@@ -122,10 +141,19 @@ export function computeOrderLines(
       }
     }
 
+    const applied = schemeId ? applicable.find((s) => s.id === schemeId) ?? null : null
     const lineTotal = Math.round(ratePerPc * qty * 100) / 100 - discount
     subtotal += Math.round(ratePerPc * qty * 100) / 100
     schemeDiscount += discount
-    lines.push({ productId: p.id, qty, freeQty, rate: ratePerPc, discount, schemeId, lineTotal })
+    lines.push({
+      productId: p.id, qty, freeQty, rate: ratePerPc, discount, schemeId,
+      schemeType: applied?.type ?? null,
+      schemeValue: applied?.value ?? null,
+      schemeBuyQty: applied?.buyQty ?? null,
+      schemeFreeQty: applied?.freeQty ?? null,
+      schemeName: applied?.name ?? null,
+      lineTotal,
+    })
   }
 
   return { lines, subtotal: Math.round(subtotal * 100) / 100, schemeDiscount }

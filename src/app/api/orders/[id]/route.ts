@@ -60,7 +60,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           rate: it.rate,
           discount: it.discount,
           lineTotal: it.lineTotal,
-          schemeName: it.scheme?.name ?? null,
+          schemeId: it.schemeId,
+          // Task 41: booking waqt ka scheme snapshot (edit-proof)
+          schemeType: it.schemeType,
+          schemeValue: it.schemeValue,
+          schemeBuyQty: it.schemeBuyQty,
+          schemeFreeQty: it.schemeFreeQty,
+          // snapshot naam prefer — scheme rename ho to bhi purana bill sahi
+          schemeName: it.schemeName ?? it.scheme?.name ?? null,
         })),
         deliveries: order.deliveries.map((d) => ({
           id: d.id,
@@ -101,8 +108,29 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       if (order.status !== 'CONFIRMED') {
         return jsonError(`Bill ${order.orderNo} edit nahi ho sakta (status: ${order.status}) — sirf unprocessed bills editable hain`)
       }
-      const incoming = (body.items ?? []) as CalcIncomingItem[]
-      if (!Array.isArray(incoming)) return jsonError('Items list invalid hai')
+      const incomingRaw = (body.items ?? []) as CalcIncomingItem[]
+      if (!Array.isArray(incomingRaw)) return jsonError('Items list invalid hai')
+
+      // Task 41: SCHEME SNAPSHOT — existing lines par unke BOOKED scheme values attach
+      // hote hain (DB snapshot se). Scheme aaj 10% ho aur bill 5% par bana ho, to edit
+      // ke baad bhi bill 5% par hi re-compute hoga. Legacy lines (snapshot se pehle ki,
+      // schemeId set magar fields null) unke scheme ke CURRENT values first-touch par
+      // freeze ho jate hain.
+      const snapMap = new Map(order.items.filter((i) => i.schemeId).map((i) => [i.productId, i]))
+      const legacySchemeIds = [...new Set(order.items.filter((i) => i.schemeId && !i.schemeType).map((i) => i.schemeId!))]
+      const legacySchemes = legacySchemeIds.length > 0
+        ? await db.scheme.findMany({ where: { id: { in: legacySchemeIds } } })
+        : []
+      const legacyById = new Map(legacySchemes.map((s) => [s.id, s]))
+      const incoming = incomingRaw.map((i) => {
+        const ex = snapMap.get(i.productId)
+        if (!ex?.schemeId) return i
+        if (ex.schemeType) {
+          return { ...i, scheme: { id: ex.schemeId, name: ex.schemeName ?? undefined, type: ex.schemeType, value: ex.schemeValue ?? 0, buyQty: ex.schemeBuyQty ?? 0, freeQty: ex.schemeFreeQty ?? 0 } }
+        }
+        const ls = legacyById.get(ex.schemeId)
+        return ls ? { ...i, scheme: { id: ls.id, name: ls.name, type: ls.type, value: ls.value, buyQty: ls.buyQty, freeQty: ls.freeQty } } : i
+      })
 
       // Task 23: tenant scope — order jis distributor ka, products/schemes usi ke
       const tenantId = order.distributorId

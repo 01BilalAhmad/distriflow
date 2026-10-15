@@ -372,6 +372,14 @@ model OrderItem {
   discount  Float   @default(0)
   schemeId  String?
   scheme    Scheme? @relation(fields: [schemeId], references: [id])
+  // Task 41: scheme snapshot booking waqt ka — scheme baad me edit ho to PURANE bills
+  // par koi asar nahi (discount jis % par bana, usi par rahe). Update/stock-allocation
+  // edit par bhi yehi snapshot values re-apply hoti hain, current scheme se nahi.
+  schemeType    String? // PERCENT_DISCOUNT | FLAT_DISCOUNT | BUY_X_GET_Y
+  schemeValue   Float?
+  schemeBuyQty  Int?
+  schemeFreeQty Int?
+  schemeName    String?
   lineTotal Float
 }
 

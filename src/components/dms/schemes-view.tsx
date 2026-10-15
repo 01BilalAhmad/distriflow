@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useDMS } from '@/lib/dms-store'
 import { api, fmtDate, fmtPKR } from '@/lib/dms-api'
 import type { SchemeDTO, ProductDTO } from '@/lib/dms-types'
-import { Plus, Gift, Percent, Package, Tag, Loader2, CalendarDays } from 'lucide-react'
+import { Plus, Gift, Percent, Package, Tag, Loader2, CalendarDays, Pencil } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
 const TYPE_META: Record<string, { label: string; icon: typeof Gift; color: string }> = {
@@ -25,7 +25,8 @@ const TYPE_META: Record<string, { label: string; icon: typeof Gift; color: strin
 export function SchemesView() {
   const [schemes, setSchemes] = useState<SchemeDTO[]>([])
   const [loading, setLoading] = useState(true)
-  const [createOpen, setCreateOpen] = useState(false)
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [editing, setEditing] = useState<SchemeDTO | null>(null)
 
   async function load() {
     setLoading(true)
@@ -55,7 +56,7 @@ export function SchemesView() {
           <h2 className="text-xl font-bold text-slate-900">Schemes & Promotions</h2>
           <p className="text-sm text-slate-500">Trade offers — order booking ke waqt auto-apply hote hain</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)} className="bg-emerald-600 hover:bg-emerald-700">
+        <Button onClick={() => { setEditing(null); setDialogOpen(true) }} className="bg-emerald-600 hover:bg-emerald-700">
           <Plus className="h-4 w-4 mr-1.5" /> New Scheme
         </Button>
       </div>
@@ -76,7 +77,18 @@ export function SchemesView() {
                       <p className="text-xs text-slate-500 line-clamp-2">{s.description ?? '—'}</p>
                     </div>
                   </div>
-                  <Switch checked={s.isActive} onCheckedChange={() => toggleScheme(s)} />
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 text-slate-400 hover:text-emerald-700 hover:bg-emerald-50"
+                      onClick={() => { setEditing(s); setDialogOpen(true) }}
+                      title="Scheme edit karein"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Switch checked={s.isActive} onCheckedChange={() => toggleScheme(s)} />
+                  </div>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-1.5 mt-3">
@@ -110,12 +122,15 @@ export function SchemesView() {
         })}
       </div>
 
-      <CreateSchemeDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={load} />
+      <SchemeDialog open={dialogOpen} onOpenChange={setDialogOpen} onSaved={load} editScheme={editing} />
     </div>
   )
 }
 
-function CreateSchemeDialog({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (v: boolean) => void; onCreated: () => void }) {
+/** Task 41: ek hi dialog CREATE + EDIT dono ke liye. Edit par sab fields prefill,
+ * PATCH full-fields. IMPORTANT: scheme edit karne se PURANE bills nahi badalte —
+ * order items booking waqt ka scheme snapshot store karte hain. */
+function SchemeDialog({ open, onOpenChange, onSaved, editScheme }: { open: boolean; onOpenChange: (v: boolean) => void; onSaved: () => void; editScheme: SchemeDTO | null }) {
   const [products, setProducts] = useState<ProductDTO[]>([])
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -129,30 +144,47 @@ function CreateSchemeDialog({ open, onOpenChange, onCreated }: { open: boolean; 
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    if (open) {
-      const user = JSON.parse(localStorage.getItem('dms_session') ?? 'null')
-      fetch(`/api/products?userId=${user?.id ?? ''}`).then((r) => r.json()).then((r) => setProducts(r.products ?? [])).catch(() => {})
+    if (!open) return
+    const user = JSON.parse(localStorage.getItem('dms_session') ?? 'null')
+    fetch(`/api/products?userId=${user?.id ?? ''}`).then((r) => r.json()).then((r) => setProducts(r.products ?? [])).catch(() => {})
+    // edit mode: scheme ke values prefill | create mode: defaults reset
+    if (editScheme) {
+      setName(editScheme.name)
+      setDescription(editScheme.description ?? '')
+      setType(editScheme.type)
+      setChannel(editScheme.channel ?? 'ALL')
+      setProductId(editScheme.productId ?? 'ALL')
+      setValue(String(editScheme.value))
+      setBuyQty(String(editScheme.buyQty))
+      setFreeQty(String(editScheme.freeQty))
+      setEndDate(editScheme.endDate ? editScheme.endDate.slice(0, 10) : '')
+    } else {
+      setName(''); setDescription(''); setType('PERCENT_DISCOUNT'); setChannel('ALL'); setProductId('ALL')
+      setValue('5'); setBuyQty('5'); setFreeQty('1'); setEndDate('')
     }
-  }, [open])
+  }, [open, editScheme])
 
   async function save() {
     if (!name) { toast({ title: 'Scheme name required hai', variant: 'destructive' }); return }
     setSaving(true)
     try {
-      await api('/api/schemes', {
-        method: 'POST',
-        body: JSON.stringify({
-          userId: (JSON.parse(localStorage.getItem('dms_session') ?? 'null'))?.id,
-          name, description, type,
-          channel: channel === 'ALL' ? null : channel,
-          productId: productId === 'ALL' ? null : productId,
-          value: Number(value), buyQty: Number(buyQty), freeQty: Number(freeQty),
-          endDate: endDate || null,
-        }),
-      })
-      toast({ title: 'Scheme Created ✓', description: `${name} — ab orders par auto-apply hoga` })
+      const payload = {
+        userId: (JSON.parse(localStorage.getItem('dms_session') ?? 'null'))?.id,
+        name, description, type,
+        channel: channel === 'ALL' ? null : channel,
+        productId: productId === 'ALL' ? null : productId,
+        value: Number(value), buyQty: Number(buyQty), freeQty: Number(freeQty),
+        endDate: endDate || null,
+      }
+      if (editScheme) {
+        await api('/api/schemes', { method: 'PATCH', body: JSON.stringify({ ...payload, id: editScheme.id }) })
+        toast({ title: 'Scheme Update ho gayi ✓', description: `${name} — naye orders par naye values lagenge, purane bills unchanged` })
+      } else {
+        await api('/api/schemes', { method: 'POST', body: JSON.stringify(payload) })
+        toast({ title: 'Scheme Created ✓', description: `${name} — ab orders par auto-apply hoga` })
+      }
       onOpenChange(false)
-      onCreated()
+      onSaved()
     } catch (e) {
       toast({ title: 'Failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' })
     } finally { setSaving(false) }
@@ -162,8 +194,12 @@ function CreateSchemeDialog({ open, onOpenChange, onCreated }: { open: boolean; 
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>New Trade Scheme</DialogTitle>
-          <DialogDescription>Channel ya product specific offer define karein</DialogDescription>
+          <DialogTitle>{editScheme ? 'Edit Scheme' : 'New Trade Scheme'}</DialogTitle>
+          <DialogDescription>
+            {editScheme
+              ? 'Values update karein — sirf NAYE orders par lagenge, purane bills ke discount nahi badlenge'
+              : 'Channel ya product specific offer define karein'}
+          </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
           <div className="grid gap-1.5"><Label>Scheme Name *</Label>
@@ -223,7 +259,7 @@ function CreateSchemeDialog({ open, onOpenChange, onCreated }: { open: boolean; 
         </div>
         <DialogFooter>
           <Button onClick={save} disabled={saving} className="w-full bg-emerald-600 hover:bg-emerald-700">
-            {saving && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />} Create Scheme
+            {saving && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />} {editScheme ? 'Save Changes' : 'Create Scheme'}
           </Button>
         </DialogFooter>
       </DialogContent>
