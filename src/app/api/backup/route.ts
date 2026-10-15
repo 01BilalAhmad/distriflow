@@ -53,8 +53,10 @@ function listBackups() {
 
 export async function GET(req: Request) {
   try {
+    // Task 40: cloud par list-call error NAHI hai — frontend ko cloud-mode batayein
+    // taake Backup view apne aap info panel dikhae (red toast ki jagah).
     if (isCloudDb()) {
-      return jsonError(CLOUD_BACKUP_MSG, 400)
+      return Response.json({ cloudMode: true, message: CLOUD_BACKUP_MSG, backups: [] })
     }
     const { searchParams } = new URL(req.url)
     const guard = await requireMegaAdmin(searchParams.get('userId'))
@@ -86,7 +88,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     if (isCloudDb()) {
-      return jsonError(CLOUD_BACKUP_MSG, 400)
+      return Response.json({ cloudMode: true, error: CLOUD_BACKUP_MSG }, { status: 400 })
     }
     const b = (await req.json()) as { userId?: string }
     const guard = await requireMegaAdmin(b.userId ?? null)
