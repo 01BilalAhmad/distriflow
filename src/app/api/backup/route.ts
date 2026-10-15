@@ -20,6 +20,17 @@ import { jsonError } from '@/lib/dms-scope'
 const BACKUP_DIR = path.join(process.cwd(), 'db', 'backups')
 const NAME_RE = /^distriflow-backup-\d{4}-\d{2}-\d{2}-\d{6}\.db$/
 
+// Task 38: file-based backup (VACUUM INTO) sirf local SQLite deployment par kaam karta hai.
+// Cloud (Neon Postgres on Vercel) par filesystem ephemeral hota hai — wahan Neon ka automatic
+// backup / point-in-time restore built-in hai, is liye ye feature gracefully disable hota hai.
+const CLOUD_BACKUP_MSG =
+  'Backup cloud deployment par available nahi — Neon Postgres ke apne automatic backups aur point-in-time restore use ho rahe hain (Neon Console se manage karein)'
+
+function isCloudDb() {
+  const url = process.env.DATABASE_URL ?? ''
+  return url.startsWith('postgres://') || url.startsWith('postgresql://')
+}
+
 async function requireMegaAdmin(userId: string | null) {
   if (!userId) return { error: jsonError('userId required') }
   const user = await db.user.findUnique({ where: { id: userId } })
@@ -42,6 +53,9 @@ function listBackups() {
 
 export async function GET(req: Request) {
   try {
+    if (isCloudDb()) {
+      return jsonError(CLOUD_BACKUP_MSG, 400)
+    }
     const { searchParams } = new URL(req.url)
     const guard = await requireMegaAdmin(searchParams.get('userId'))
     if ('error' in guard) return guard.error
@@ -71,6 +85,9 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    if (isCloudDb()) {
+      return jsonError(CLOUD_BACKUP_MSG, 400)
+    }
     const b = (await req.json()) as { userId?: string }
     const guard = await requireMegaAdmin(b.userId ?? null)
     if ('error' in guard) return guard.error

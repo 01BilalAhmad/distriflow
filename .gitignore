@@ -65,3 +65,7 @@ server.log
 /dev.pid
 /Caddyfile
 /sams-brochure.pdf
+.vercel
+.agents/
+agent/
+skills-lock.json
