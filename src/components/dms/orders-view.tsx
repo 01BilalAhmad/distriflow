@@ -216,8 +216,8 @@ function OrderDetailDialog({ order, items, onClose }: { order: OrderDTO | null; 
                     <TableHead className="text-right">Free</TableHead>
                     <TableHead className="text-right">Rate/pc</TableHead>
                     <TableHead className="text-right">Discount</TableHead>
-                    <TableHead className="text-right">Trade Offer</TableHead>
                     <TableHead className="text-right">GST</TableHead>
+                    <TableHead className="text-right">Trade Offer</TableHead>
                     <TableHead className="text-right">Line Total</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -232,8 +232,8 @@ function OrderDetailDialog({ order, items, onClose }: { order: OrderDTO | null; 
                       <TableCell className="text-right">{it.freeQty > 0 ? <span className="text-emerald-600 font-semibold">+{fmtQty(it.freeQty, it.unitsPerCarton ?? 1, it.pcsPerBox ?? 0)}</span> : '—'}</TableCell>
                       <TableCell className="text-right text-xs">{fmtPKR(it.rate)}</TableCell>
                       <TableCell className="text-right text-xs">{it.discount > 0 ? `- ${fmtPKR(it.discount)}` : '—'}</TableCell>
-                      <TableCell className="text-right text-xs">{(it.tradeOfferAmt ?? 0) > 0 ? <span className="text-violet-600 font-medium">- {fmtPKR(it.tradeOfferAmt ?? 0)}</span> : '—'}</TableCell>
                       <TableCell className="text-right text-xs">{(it.gstAmt ?? 0) > 0 ? <span className="text-blue-600 font-medium">+ {fmtPKR(it.gstAmt ?? 0)}<span className="text-[10px] text-slate-400"> ({it.gstRate ?? 0}%)</span></span> : '—'}</TableCell>
+                      <TableCell className="text-right text-xs">{(it.tradeOfferAmt ?? 0) > 0 ? <span className="text-violet-600 font-medium">- {fmtPKR(it.tradeOfferAmt ?? 0)}</span> : '—'}</TableCell>
                       <TableCell className="text-right font-semibold">{fmtPKR(it.lineTotal)}</TableCell>
                     </TableRow>
                   ))}
@@ -250,19 +250,19 @@ function OrderDetailDialog({ order, items, onClose }: { order: OrderDTO | null; 
                   <span className="whitespace-nowrap tabular-nums">- {fmtPKR(order.manualDiscount ?? 0)}</span>
                 </div>
               )}
-              {(order.tradeOfferTotal ?? 0) > 0 && (
-                <div className="flex justify-between gap-3 text-sm text-violet-600">
-                  <span>Trade Offer</span>
-                  <span className="whitespace-nowrap tabular-nums">- {fmtPKR(order.tradeOfferTotal ?? 0)}</span>
-                </div>
-              )}
+              <div className="flex justify-between gap-3 font-bold text-lg text-slate-900"><span>Total</span><span className="whitespace-nowrap tabular-nums">{fmtPKR(order.total)}</span></div>
               {(order.gstTotal ?? 0) > 0 && (
                 <div className="flex justify-between gap-3 text-sm text-blue-600">
                   <span>GST (Sales Tax)</span>
                   <span className="whitespace-nowrap tabular-nums">+ {fmtPKR(order.gstTotal ?? 0)}</span>
                 </div>
               )}
-              <div className="flex justify-between gap-3 font-bold text-lg text-slate-900"><span>Total</span><span className="whitespace-nowrap tabular-nums">{fmtPKR(order.total)}</span></div>
+              {(order.tradeOfferTotal ?? 0) > 0 && (
+                <div className="flex justify-between gap-3 text-sm text-violet-600">
+                  <span>Trade Offer</span>
+                  <span className="whitespace-nowrap tabular-nums">- {fmtPKR(order.tradeOfferTotal ?? 0)}</span>
+                </div>
+              )}
               {(order.advanceTax ?? 0) > 0 && (
                 <>
                   <div className="flex justify-between gap-3 text-sm text-blue-600">
@@ -273,7 +273,7 @@ function OrderDetailDialog({ order, items, onClose }: { order: OrderDTO | null; 
               )}
               {(order.tradeOfferTotal ?? 0) > 0 || (order.gstTotal ?? 0) > 0 ? (
                 <div className="flex justify-between gap-3 font-semibold text-sm text-slate-900 border-t pt-1.5">
-                  <span>Grand Total Payable (Total − Trade Offer + GST + Adv Tax)</span>
+                  <span>Grand Total Payable (Total + GST − Trade Offer + Adv Tax)</span>
                   <span className="whitespace-nowrap tabular-nums">{fmtPKR(orderGrandPayable(order))}</span>
                 </div>
               ) : (order.advanceTax ?? 0) > 0 && (
@@ -348,11 +348,11 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
   }
 
   const computed = useMemo(() => {
-    if (!outlet) return { subtotal: 0, discount: 0, gstTotal: 0, toTotal: 0, rows: [] as { name: string; qtyPcs: number; freeQty: number; discount: number; total: number; scheme: string | null; ratePc: number; upc: number; pcsPerBox: number; tradeOffer: number; gstRate: number; gstAmt: number }[] }
+    if (!outlet) return { subtotal: 0, discount: 0, gstTotal: 0, toTotal: 0, rows: [] as { name: string; qtyPcs: number; freeQty: number; discount: number; total: number; gross: number; scheme: string | null; ratePc: number; upc: number; pcsPerBox: number; tradeOffer: number; gstRate: number; gstAmt: number }[] }
     let subtotal = 0, discount = 0, gstTotal = 0, toTotal = 0
     const rows = lines.map((l) => {
       const p = products.find((x) => x.id === l.productId)
-      if (!p) return { name: '', qtyPcs: l.qtyPcs, freeQty: 0, discount: 0, total: 0, scheme: null, ratePc: 0, upc: 1, pcsPerBox: 0, tradeOffer: 0, gstRate: 0, gstAmt: 0 }
+      if (!p) return { name: '', qtyPcs: l.qtyPcs, freeQty: 0, discount: 0, total: 0, gross: 0, scheme: null, ratePc: 0, upc: 1, pcsPerBox: 0, tradeOffer: 0, gstRate: 0, gstAmt: 0 }
       const upc = Math.max(1, p.unitsPerCarton)
       const pcsPerBox = p.pcsPerBox > 0 ? p.pcsPerBox : 0
       const ratePc = p.tradePrice / upc
@@ -380,7 +380,7 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
       discount += disc
       gstTotal += gstAmt
       toTotal += tradeOffer
-      return { name: p.name, qtyPcs: l.qtyPcs, freeQty, discount: disc, total: lineTotal, scheme: schemeName, ratePc, upc, pcsPerBox, tradeOffer, gstRate, gstAmt }
+      return { name: p.name, qtyPcs: l.qtyPcs, freeQty, discount: disc, total: lineTotal, gross, scheme: schemeName, ratePc, upc, pcsPerBox, tradeOffer, gstRate, gstAmt }
     })
     return { subtotal, discount, gstTotal: Math.round(gstTotal * 100) / 100, toTotal: Math.round(toTotal * 100) / 100, rows }
   }, [lines, products, schemes, outlet])
@@ -529,7 +529,8 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
               const lineProduct = products.find((x) => x.id === lines[i]?.productId)
               return (
               <div key={i} className="rounded-lg border p-3 space-y-2 bg-slate-50/50">
-                <div className="flex gap-2 items-start">
+                {/* Task 46: Trade Offer UPPER bill row ka COLUMN hai (invoice PDF ke table jaisa) — neeche sub-row me nahi */}
+                <div className="flex flex-wrap gap-2 items-start">
                   <Select
                     value={lines[i]?.productId}
                     onValueChange={(v) => {
@@ -539,7 +540,7 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
                       setLines(next)
                     }}
                   >
-                    <SelectTrigger className="flex-1 h-9"><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="flex-1 h-9 min-w-[180px]"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {products.map((p) => {
                         const used = lines.some((l, j) => j !== i && l.productId === p.id)
@@ -563,16 +564,9 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
                       setLines(next)
                     }}
                   />
-                  <Button size="sm" variant="ghost" className="h-9 w-9 p-0 text-red-400" onClick={() => setLines(lines.filter((_, j) => j !== i))}>
-                    <XCircle className="h-4 w-4" />
-                  </Button>
-                </div>
-                {/* Task 45: per-SKU Trade Offer (Rs) — discount ke ILAWA, sirf kuch SKUs par; GST auto product rate se */}
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                  <div className="flex items-center gap-1.5">
-                    <Label className="text-[11px] text-slate-500 whitespace-nowrap flex items-center gap-1"><Gift className="h-3 w-3 text-violet-500" />Trade Offer (Rs)</Label>
+                  <div className="flex flex-col items-center gap-0.5">
                     <Input
-                      type="number" min={0} step="0.01"
+                      type="number" min={0} step="0.01" inputMode="decimal"
                       value={lines[i]?.tradeOffer ?? ''}
                       onChange={(e) => {
                         const next = [...lines]
@@ -580,26 +574,30 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
                         setLines(next)
                       }}
                       placeholder="0"
-                      className="h-8 w-28 border-violet-200 focus-visible:ring-violet-300"
+                      aria-label="Trade Offer Rs"
+                      className="h-9 w-24 text-center border-violet-200 focus-visible:ring-violet-300"
                     />
+                    <span className="text-[9px] leading-none text-violet-500 font-medium flex items-center gap-0.5"><Gift className="h-2.5 w-2.5" />Trade Offer</span>
                   </div>
-                  {r.tradeOffer > 0 && <span className="text-[11px] font-semibold text-violet-600">- {fmtPKR(r.tradeOffer)}</span>}
-                  {r.gstAmt > 0 ? (
-                    <span className="text-[11px] font-medium text-blue-600">GST {r.gstRate}% = + {fmtPKR(r.gstAmt)}</span>
-                  ) : (
-                    <span className="text-[11px] text-slate-400">GST nahi lagta</span>
-                  )}
-                  <span className="text-[11px] text-slate-500 ml-auto whitespace-nowrap">Line payable: <b className="text-slate-700">{fmtPKR(Math.max(0, Math.round((r.total - r.tradeOffer + r.gstAmt) * 100) / 100))}</b></span>
+                  <Button size="sm" variant="ghost" className="h-9 w-9 p-0 text-red-400" onClick={() => setLines(lines.filter((_, j) => j !== i))}>
+                    <XCircle className="h-4 w-4" />
+                  </Button>
                 </div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-slate-500">
-                    {lineProduct && <span className="text-slate-400 mr-2">{packHint(lineProduct.unitsPerCarton, lineProduct.boxesPerCarton, lineProduct.pcsPerBox)} • {fmtPKR(r.ratePc)}/pc</span>}
-                    <b className="text-slate-700">= {fmtQty(r.qtyPcs, r.upc, r.pcsPerBox)}</b>
-                    {r.qtyPcs > 0 && <span className="text-slate-500"> • Line total: <b className="text-slate-700">{fmtPKR(r.total)}</b></span>}
-                    {r.freeQty > 0 && <span className="text-emerald-600 font-semibold ml-2">+{fmtQty(r.freeQty, r.upc, r.pcsPerBox)} FREE</span>}
-                    {r.discount > 0 && <span className="text-emerald-600 ml-2">(- {fmtPKR(r.discount)})</span>}
-                  </span>
+                {/* Task 46: chain invoice PDF ke column order me — Gross → Pass On → Net → GST → Trade Offer → Line payable */}
+                <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px]">
+                  {lineProduct && <span className="text-slate-400 whitespace-nowrap">{packHint(lineProduct.unitsPerCarton, lineProduct.boxesPerCarton, lineProduct.pcsPerBox)} • {fmtPKR(r.ratePc)}/pc</span>}
+                  <span className="text-slate-500 whitespace-nowrap">Gross <b className="text-slate-600">{fmtPKR(r.gross)}</b></span>
+                  {r.discount > 0 && <span className="text-emerald-600 font-medium whitespace-nowrap">Pass On − {fmtPKR(r.discount)}</span>}
+                  {r.freeQty > 0 && <span className="text-emerald-600 font-semibold whitespace-nowrap">+{fmtQty(r.freeQty, r.upc, r.pcsPerBox)} FREE</span>}
+                  <span className="text-slate-500 whitespace-nowrap">Net <b className="text-slate-700">{fmtPKR(r.total)}</b></span>
+                  {r.gstAmt > 0 ? (
+                    <span className="text-blue-600 font-medium whitespace-nowrap">GST {r.gstRate}% + {fmtPKR(r.gstAmt)}</span>
+                  ) : (
+                    <span className="text-slate-400 whitespace-nowrap">GST nahi lagta</span>
+                  )}
+                  {r.tradeOffer > 0 && <span className="text-violet-600 font-semibold whitespace-nowrap">TO − {fmtPKR(r.tradeOffer)}</span>}
                   {r.scheme && <Badge className="bg-emerald-100 text-emerald-700 border-0 text-[10px]">🎁 {r.scheme}</Badge>}
+                  <span className="text-slate-500 ml-auto whitespace-nowrap">Line payable: <b className="text-slate-700">{fmtPKR(Math.max(0, Math.round((r.total - r.tradeOffer + r.gstAmt) * 100) / 100))}</b></span>
                 </div>
                 {/* Task 26: available stock guard — requested qty available se bara ho to red warning */}
                 {lineProduct && (
@@ -664,8 +662,8 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
             {computed.discount > 0 && <div className="flex justify-between text-emerald-600 font-medium"><span>Scheme Discount</span><span>- {fmtPKR(computed.discount)}</span></div>}
             {manualDiscount > 0 && <div className="flex justify-between text-emerald-600 font-medium"><span>Manual Discount</span><span>- {fmtPKR(manualDiscount)}</span></div>}
             <div className="flex justify-between font-bold text-slate-900"><span>Net Total</span><span>{fmtPKR(netTotal)}</span></div>
-            {computed.toTotal > 0 && <div className="flex justify-between text-violet-600 font-medium"><span>Trade Offer</span><span>- {fmtPKR(computed.toTotal)}</span></div>}
             {computed.gstTotal > 0 && <div className="flex justify-between text-blue-600 font-medium"><span>GST (Sales Tax)</span><span>+ {fmtPKR(computed.gstTotal)}</span></div>}
+            {computed.toTotal > 0 && <div className="flex justify-between text-violet-600 font-medium"><span>Trade Offer</span><span>- {fmtPKR(computed.toTotal)}</span></div>}
             {outlet && taxRates && advTaxPreview > 0 && (
               <div className="flex justify-between text-blue-600"><span>Advance Tax ({outlet.filerStatus === 'FILER' ? `Filer ${taxRates.filer}` : `Non-Filer ${taxRates.nonFiler}`}%)</span><span>+ {fmtPKR(advTaxPreview)}</span></div>
             )}
