@@ -17,7 +17,8 @@ import { BulkImportDialog, type BulkColumn, type ParseOutcome } from '@/componen
 import { Plus, Search, Loader2, Package, Building2, Pencil, Upload } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
-const CATEGORIES = ['Tea', 'Beverages', 'Dairy', 'Snacks', 'Home Care', 'Personal Care']
+// Task 48: Mondelez/Cadbury confectionery categories (invoice catalog ke mutabiq)
+const CATEGORIES = ['Tea', 'Beverages', 'Dairy', 'Snacks', 'Home Care', 'Personal Care', 'Chocolate', 'Candy', 'Wafer', 'Mints']
 
 const PRODUCT_IMPORT_COLUMNS: BulkColumn[] = [
   { key: 'sku', label: 'SKU', required: true, hint: 'Duplicate SKU skip hoga' },
