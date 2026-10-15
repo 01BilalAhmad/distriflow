@@ -9,28 +9,21 @@ import { Badge } from '@/components/ui/badge'
 import { useDMS, saveSession } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
 import type { SessionUser } from '@/lib/dms-types'
-import { Boxes, Building2, ShieldCheck, Truck, Loader2, MapPin, Package, Route } from 'lucide-react'
+import { Boxes, Loader2, MapPin, Package, Route } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
-
-const DEMO_USERS = [
-  { email: 'admin@dms.pk', role: 'MEGA_ADMIN', label: 'Mega Admin (Software Seller)', desc: 'Distributor accounts banaye — subscription active/inactive + renew', icon: ShieldCheck },
-  { email: 'distributor@dms.pk', role: 'DISTRIBUTOR', label: 'Distributor (Subscriber)', desc: 'Al-Madina Distribution — apna business, apne orderbookers khud banaye', icon: Building2 },
-  { email: 'salesman@dms.pk', role: 'SALESMAN', label: 'Salesman / Order Booker', desc: 'Ali Raza — PJP, order booking, check-in/out', icon: Truck },
-]
 
 export function LoginScreen() {
   const { setUser } = useDMS()
-  const [email, setEmail] = useState('admin@dms.pk')
-  const [password, setPassword] = useState('demo123')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
 
-  async function doLogin(em?: string) {
-    const loginEmail = em ?? email
+  async function doLogin() {
     setLoading(true)
     try {
       const res = await api<{ user: SessionUser }>('/api/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ email: loginEmail, password: em ? 'demo123' : password }),
+        body: JSON.stringify({ email: email.trim(), password }),
       })
       saveSession(res.user)
       setUser(res.user)
@@ -83,9 +76,9 @@ export function LoginScreen() {
             ))}
           </div>
           <div className="flex items-center gap-2 text-sm text-slate-500 flex-wrap">
-            <Badge variant="outline" className="border-emerald-200 text-emerald-700 bg-emerald-50">1500+ Distributors</Badge>
             <Badge variant="outline" className="border-emerald-200 text-emerald-700 bg-emerald-50">FMCG Specialized</Badge>
             <Badge variant="outline" className="border-emerald-200 text-emerald-700 bg-emerald-50">Real-time</Badge>
+            <Badge variant="outline" className="border-emerald-200 text-emerald-700 bg-emerald-50">Multi-tenant</Badge>
           </div>
         </div>
 
@@ -100,46 +93,33 @@ export function LoginScreen() {
             </div>
             <CardTitle className="text-lg">Sign in to your workspace</CardTitle>
             <CardDescription>
-              Demo users — ek click mein login karein (password: <code className="text-emerald-700 font-semibold">demo123</code>)
+              Apne account ki email aur password se login karein
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-2.5">
-              {DEMO_USERS.map((u) => (
-                <button
-                  key={u.email}
-                  onClick={() => doLogin(u.email)}
-                  disabled={loading}
-                  className="w-full text-left rounded-xl border border-slate-200 hover:border-emerald-400 hover:bg-emerald-50/50 transition-all p-3.5 flex items-center gap-3 group disabled:opacity-60"
-                >
-                  <div className="h-10 w-10 rounded-lg bg-emerald-100 group-hover:bg-emerald-600 transition-colors flex items-center justify-center shrink-0">
-                    <u.icon className="h-5 w-5 text-emerald-700 group-hover:text-white transition-colors" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="font-semibold text-sm text-slate-900">{u.label}</p>
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-slate-300 text-slate-500">{u.role}</Badge>
-                    </div>
-                    <p className="text-xs text-slate-500 truncate">{u.desc}</p>
-                  </div>
-                  {loading ? <Loader2 className="h-4 w-4 animate-spin text-emerald-600" /> : <span className="text-emerald-600 text-sm font-medium">Login →</span>}
-                </button>
-              ))}
-            </div>
-
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
-              <div className="relative flex justify-center text-xs"><span className="bg-card px-2 text-slate-400">ya manually login karein</span></div>
-            </div>
-
             <div className="grid gap-3">
               <div className="grid gap-1.5">
                 <Label htmlFor="email">Email</Label>
-                <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="admin@dms.pk" />
+                <Input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="apna@email.com"
+                  autoComplete="username"
+                />
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="password">Password</Label>
-                <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="demo123" />
+                <Input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !loading) doLogin() }}
+                />
               </div>
               <Button onClick={() => doLogin()} disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-700">
                 {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
