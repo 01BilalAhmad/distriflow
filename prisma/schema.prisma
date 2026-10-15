@@ -153,7 +153,8 @@ model PurchaseInvoice {
   supplierInvoiceNo String? // company ka apna bill number
   date              DateTime @default(now())
   subtotal          Float    @default(0)
-  discount          Float    @default(0)
+  discount          Float    @default(0) // TOTAL discount (item-level + bill-level) = subtotal - total
+  discountPct       Float    @default(0) // Task 43: bill-level % discount (record; 0 = flat Rs mode tha)
   total             Float    @default(0)
   paidAmount        Float    @default(0) // advance + ledger payments against this invoice
   status            String   @default("UNPAID") // UNPAID | PARTIAL | PAID
@@ -175,7 +176,9 @@ model PurchaseInvoiceItem {
   unitsPerCarton Int
   units         Int
   purchasePrice Float // per carton snapshot
-  lineTotal     Float
+  lineTotal     Float // gross: cartons x purchasePrice (discount is se minus hota hai)
+  discountPct   Float @default(0) // Task 43: per-item % discount
+  discountAmt   Float @default(0) // Task 43: per-item Rs discount (lineTotal x pct/100)
 }
 
 // Company (supplier) payable ledger:

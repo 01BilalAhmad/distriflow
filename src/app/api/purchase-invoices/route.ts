@@ -35,6 +35,7 @@ export async function GET(req: Request) {
         date: i.date,
         subtotal: i.subtotal,
         discount: i.discount,
+        discountPct: i.discountPct,
         total: i.total,
         paidAmount: i.paidAmount,
         status: i.status,
@@ -51,6 +52,8 @@ export async function GET(req: Request) {
           units: it.units,
           purchasePrice: it.purchasePrice,
           lineTotal: it.lineTotal,
+          discountPct: it.discountPct,
+          discountAmt: it.discountAmt,
         })),
       })),
     })
@@ -66,6 +69,8 @@ interface ItemBody {
   purchasePrice?: number
   batchNo?: string
   expDate?: string | null
+  /** Task 43: per-item % discount (0-100); lineTotal gross par apply hota hai */
+  discountPct?: number
 }
 
 interface InvoicePostBody {
@@ -73,7 +78,10 @@ interface InvoicePostBody {
   companyId?: string
   date?: string
   supplierInvoiceNo?: string
+  /** flat Rs discount (purana mode — discountPct > 0 ho to ye ignore hota hai) */
   discount?: number
+  /** Task 43: bill-level % discount (subtotal par) — percentage mode */
+  discountPct?: number
   paidNow?: number
   notes?: string
   items?: ItemBody[]
@@ -101,7 +109,7 @@ export async function POST(req: Request) {
     const productIds = [...new Set(b.items.map((i) => i.productId!))]
     const products = await db.product.findMany({ where: { id: { in: productIds }, distributorId: tenantId } })
     const pMap = new Map(products.map((p) => [p.id, p]))
-    const clean: { productId: string; cartons: number; purchasePrice: number; batchNo: string; expDate: Date | null; unitsPerCarton: number; units: number; lineTotal: number }[] = []
+    const clean: { productId: string; cartons: number; purchasePrice: number; batchNo: string; expDate: Date | null; unitsPerCarton: number; units: number; lineTotal: number; discountPct: number; discountAmt: number }[] = []
     let itemIdx = 0
     for (const it of b.items) {
       const p = it.productId ? pMap.get(it.productId) : undefined
@@ -114,6 +122,10 @@ export async function POST(req: Request) {
       const upc = p.unitsPerCarton || 1
       const units = cartons * upc
       itemIdx++
+      // Task 43: per-item % discount — gross (cartons x price) par apply, Rs me snapshot
+      const gross = cartons * price
+      const discPct = Math.min(100, Math.max(0, Number(it.discountPct ?? 0) || 0))
+      const discAmt = Math.round(gross * discPct) / 100
       clean.push({
         productId: p.id,
         cartons,
@@ -122,12 +134,20 @@ export async function POST(req: Request) {
         expDate: it.expDate ? new Date(it.expDate) : null,
         unitsPerCarton: upc,
         units,
-        lineTotal: Math.round(cartons * price * 100) / 100,
+        lineTotal: Math.round(gross * 100) / 100,
+        discountPct: discPct,
+        discountAmt: discAmt,
       })
     }
 
     const subtotal = Math.round(clean.reduce((s, i) => s + i.lineTotal, 0) * 100) / 100
-    const discount = Math.max(0, Number(b.discount ?? 0))
+    // Task 43: discount = item-level (% wise) + bill-level (% ya flat Rs)
+    // Bill % ka base = item discounts ke BAAD wali value (UI preview bhi yehi dikhata hai)
+    const itemDiscount = Math.round(clean.reduce((s, i) => s + i.discountAmt, 0) * 100) / 100
+    const afterItemDisc = Math.round((subtotal - itemDiscount) * 100) / 100
+    const billPct = Math.min(100, Math.max(0, Number(b.discountPct ?? 0) || 0))
+    const billRs = billPct > 0 ? Math.round(afterItemDisc * billPct) / 100 : Math.max(0, Number(b.discount ?? 0) || 0)
+    const discount = Math.round((itemDiscount + billRs) * 100) / 100
     if (discount > subtotal) return jsonError('Discount subtotal se zyada nahi ho sakta')
     const total = Math.round((subtotal - discount) * 100) / 100
     const paidNow = Math.min(total, Math.max(0, Number(b.paidNow ?? 0)))
@@ -145,6 +165,7 @@ export async function POST(req: Request) {
           date: b.date ? new Date(b.date) : new Date(),
           subtotal,
           discount,
+          discountPct: billPct,
           total,
           paidAmount: paidNow,
           status: paidNow >= total - 0.01 ? 'PAID' : paidNow > 0 ? 'PARTIAL' : 'UNPAID',
@@ -163,6 +184,8 @@ export async function POST(req: Request) {
           units: i.units,
           purchasePrice: i.purchasePrice,
           lineTotal: i.lineTotal,
+          discountPct: i.discountPct,
+          discountAmt: i.discountAmt,
         })),
       })
 
@@ -209,14 +232,14 @@ export async function POST(req: Request) {
         })
       }
 
-      // Ledger: purchase = payable barha (credit)
+      // Ledger: purchase = payable barha (credit) — net total (discount ke baad)
       await tx.companyLedgerEntry.create({
         data: {
           companyId: b.companyId!,
           distributorId: tenantId,
           date: b.date ? new Date(b.date) : new Date(),
           type: 'PURCHASE',
-          description: `Stock purchase — ${clean.length} item${clean.length > 1 ? 's' : ''}, ${clean.reduce((s, i) => s + i.cartons, 0)} cartons`,
+          description: `Stock purchase — ${clean.length} item${clean.length > 1 ? 's' : ''}, ${clean.reduce((s, i) => s + i.cartons, 0)} cartons${discount > 0 ? `, discount ${billPct > 0 ? `${billPct}%` : fmtRs(discount)}` : ''}`,
           refNo: invoiceNo,
           invoiceId: inv.id,
           credit: total,
@@ -242,9 +265,13 @@ export async function POST(req: Request) {
       return inv
     })
 
-    return Response.json({ invoice: { id: invoice.id, invoiceNo: invoice.invoiceNo, total: invoice.total }, warehouseName: stockWarehouseName })
+    return Response.json({ invoice: { id: invoice.id, invoiceNo: invoice.invoiceNo, total: invoice.total, discount: invoice.discount, discountPct: invoice.discountPct, subtotal: invoice.subtotal }, warehouseName: stockWarehouseName })
   } catch (e) {
     console.error(e)
     return jsonError('Purchase invoice failed', 500)
   }
+}
+
+function fmtRs(n: number): string {
+  return `Rs ${n.toLocaleString('en-PK')}`
 }

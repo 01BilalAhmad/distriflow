@@ -122,6 +122,9 @@ export interface PurchaseItemDTO {
   units: number
   purchasePrice: number
   lineTotal: number
+  /** Task 43: per-item % discount snapshot */
+  discountPct: number
+  discountAmt: number
 }
 
 export interface PurchaseInvoiceDTO {
@@ -135,6 +138,8 @@ export interface PurchaseInvoiceDTO {
   date: string
   subtotal: number
   discount: number
+  /** Task 43: bill-level % discount record (0 = flat Rs mode) */
+  discountPct: number
   total: number
   paidAmount: number
   status: string
