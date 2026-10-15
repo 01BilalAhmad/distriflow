@@ -58,6 +58,10 @@ export interface OrderItemDTO {
   discount: number
   lineTotal: number
   schemeName?: string | null
+  /** Task 45: booking waqt ke GST + Trade Order snapshots */
+  tradeOfferAmt?: number
+  gstRate?: number | null
+  gstAmt?: number
 }
 
 export interface OrderDTO {
@@ -76,6 +80,10 @@ export interface OrderDTO {
   manualDiscType?: string | null
   manualDiscValue?: number | null
   total: number
+  /** Task 45: GST + Trade Order totals — grand payable = total − TO + GST + advTax */
+  tradeOfferTotal?: number
+  gstTotal?: number
+  payable?: number
   /** Advance Tax snapshot — booking waqt shop ke filer status se (bill par add) */
   filerStatus?: string | null
   advanceTaxRate?: number | null
@@ -485,6 +493,9 @@ export interface SummaryOrderDTO {
   address: string | null
   ownerName?: string | null
   total: number
+  /** Task 45: GST + Trade Order totals (order-level snapshot) */
+  tradeOfferTotal?: number
+  gstTotal?: number
   /** Advance Tax snapshot — filer 0.5% / non-filer 2.5% (settings), bill par add */
   filerStatus?: string | null
   advanceTaxRate?: number | null

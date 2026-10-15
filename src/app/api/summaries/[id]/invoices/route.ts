@@ -47,6 +47,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       manualDiscType: o.manualDiscType,
       manualDiscValue: o.manualDiscValue,
       total: o.total,
+      tradeOfferTotal: o.tradeOfferTotal,
+      gstTotal: o.gstTotal,
       advanceTax: o.advanceTax,
       advanceTaxRate: o.advanceTaxRate,
       filerStatus: o.filerStatus,

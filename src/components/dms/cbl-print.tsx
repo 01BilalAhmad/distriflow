@@ -454,6 +454,9 @@ export interface InvoiceData {
   manualDiscType?: string | null
   manualDiscValue?: number | null
   total: number
+  /** Task 45: GST + Trade Order totals — grand payable = total − TO + GST + advTax */
+  tradeOfferTotal?: number
+  gstTotal?: number
   /** Advance Tax — shop ke filer status ke hisab se (booking snapshot, bill par add) */
   advanceTax?: number
   advanceTaxRate?: number | null
@@ -590,7 +593,11 @@ export function CblInvoiceDoc({ inv, gst }: { inv: InvoiceData; gst?: { enabled:
   const totalDiscount = S.discount + S.manual
   const advTax = inv.advanceTax ?? 0
   const advRate = inv.advanceTaxRate
-  const totalPayable = Math.round((inv.total + advTax) * 100) / 100
+  // Task 45: GST (trade value par — booking snapshot) + Trade Offer (per-SKU, discount ke ilawa)
+  const gstTrade = inv.gstTotal ?? 0
+  const toTotal = inv.tradeOfferTotal ?? 0
+  const totalPayable = Math.round((inv.total - toTotal + gstTrade + advTax) * 100) / 100
+  const hasTaxChain = toTotal > 0 || gstTrade > 0 || advTax > 0
 
   return (
     <div className="cbl-doc">
@@ -743,6 +750,8 @@ export function CblInvoiceDoc({ inv, gst }: { inv: InvoiceData; gst?: { enabled:
                 {anyGst && <tr><td style={{ textAlign: 'center' }}>{singleRate ? `${singleRate}% ` : ''}GST:</td><td className="num">{fmt2(S.gstRp)}</td></tr>}
                 {anyGst && <tr><td style={{ textAlign: 'center' }}>Total Amount With GST:</td><td className="num">{fmt2(S.grossExcl + S.gstRp)}</td></tr>}
                 <tr><td style={{ textAlign: 'right', fontWeight: 'bold' }}>Total Discount:</td><td className="num" style={{ fontWeight: 'bold' }}>{fmt2(totalDiscount)}</td></tr>
+                {toTotal > 0 && <tr><td style={{ textAlign: 'right' }}>Trade Offer:</td><td className="num">- {fmt2(toTotal)}</td></tr>}
+                {gstTrade > 0 && <tr><td style={{ textAlign: 'right' }}>GST (Trade Value):</td><td className="num">+ {fmt2(gstTrade)}</td></tr>}
                 <tr>
                   <td style={{ textAlign: 'right' }}>
                     Advance Tax {advRate != null ? `@ ${advRate}%` : ''}
@@ -750,7 +759,7 @@ export function CblInvoiceDoc({ inv, gst }: { inv: InvoiceData; gst?: { enabled:
                   </td>
                   <td className="num">{advTax > 0 ? `+ ${fmt2(advTax)}` : '0.00'}</td>
                 </tr>
-                <tr><td style={{ textAlign: 'right', fontWeight: 'bold' }}>Total Invoice Amount:</td><td className="num" style={{ fontWeight: 'bold' }}>{fmtI(advTax > 0 ? totalPayable : inv.total)}</td></tr>
+                <tr><td style={{ textAlign: 'right', fontWeight: 'bold' }}>Total Invoice Amount:</td><td className="num" style={{ fontWeight: 'bold' }}>{fmtI(hasTaxChain ? totalPayable : inv.total)}</td></tr>
               </tbody>
             </table>
           </div>

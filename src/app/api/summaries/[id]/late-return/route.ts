@@ -109,16 +109,30 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       const taxReversal = st && st.advanceTax > 0 && order.advanceTax > 0 && order.total > 0
         ? Math.min(round2(order.advanceTax * returnValue / order.total), st.advanceTax)
         : 0
+      // Task 45: GST + Trade Offer — SAME pro-rata pattern. GST wapas milta hai (credit +),
+      // Trade Offer wapas LENA hai (credit −, shop TO benefit returned goods ka kho deta hai)
+      const gstReversal = st && st.gstTotal > 0 && order.gstTotal > 0 && order.total > 0
+        ? Math.min(round2(order.gstTotal * returnValue / order.total), st.gstTotal)
+        : 0
+      const toReversal = st && st.tradeOfferTotal > 0 && order.tradeOfferTotal > 0 && order.total > 0
+        ? Math.min(round2(order.tradeOfferTotal * returnValue / order.total), st.tradeOfferTotal)
+        : 0
 
-      // Shop ledger CREDIT — goods value + tax reversal, balance cum ho jata hai
+      // Shop ledger CREDIT — goods value + tax/GST reversal − TO reversal, balance cum ho jata hai
       await tx.outletLedger.create({
         data: {
           outletId: order.outletId,
           type: 'CREDIT',
-          amount: round2(returnValue + taxReversal),
+          amount: Math.max(0, round2(returnValue + taxReversal + gstReversal - toReversal)),
           refType: 'RETURN',
           refNo: returnNo,
-          note: `Late stock return after settlement (${reason})${taxReversal > 0 ? ` • Adv tax reversal Rs ${taxReversal.toFixed(2)}` : ''} • ${order.orderNo}`,
+          note: [
+            `Late stock return after settlement (${reason})`,
+            taxReversal > 0 ? `Adv tax reversal Rs ${taxReversal.toFixed(2)}` : null,
+            gstReversal > 0 ? `GST reversal Rs ${gstReversal.toFixed(2)}` : null,
+            toReversal > 0 ? `Trade offer reversal Rs ${toReversal.toFixed(2)}` : null,
+            `• ${order.orderNo}`,
+          ].filter(Boolean).join(' • '),
         },
       })
 
@@ -128,7 +142,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       if (st) {
         const newReturn = round2(st.returnAmount + returnValue)
         const newTax = round2(st.advanceTax - taxReversal)
-        const newNet = round2(st.billAmount - newReturn + newTax)
+        const newGst = round2(st.gstTotal - gstReversal)
+        const newTo = round2(st.tradeOfferTotal - toReversal)
+        const newNet = round2(st.billAmount - newReturn + newGst - newTo + newTax)
         newCredit = round2(newNet - st.cashAmount)
         newStatus = st.cashAmount <= 0 ? 'CREDIT' : st.cashAmount >= newNet ? 'CASH' : 'PARTIAL'
         await tx.summarySettlement.update({
@@ -136,6 +152,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           data: {
             returnAmount: newReturn,
             advanceTax: newTax,
+            gstTotal: newGst,
+            tradeOfferTotal: newTo,
             creditAmount: newCredit,
             status: newStatus,
             notes: [st.notes, `Late ${returnNo}`].filter(Boolean).join(' • '),

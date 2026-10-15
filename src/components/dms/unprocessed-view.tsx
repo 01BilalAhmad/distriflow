@@ -73,6 +73,9 @@ interface PreviewTotals {
   schemeDiscount: number
   manualDiscount: number
   total: number
+  tradeOfferTotal?: number
+  gstTotal?: number
+  payable?: number
   advanceTax?: number
   advanceTaxRate?: number | null
   filerStatus?: string | null
@@ -267,7 +270,7 @@ export function UnprocessedBillsView() {
           { method: 'PATCH', body: JSON.stringify({ action: 'PREVIEW_ITEMS', items: lines.map((l) => ({ productId: l.productId, qty: l.qtyPcs, ...(l.isExisting ? { rate: l.rate } : {}) })) }) },
         )
         if (seq !== previewSeq.current) return
-        setPreview({ subtotal: r.preview.subtotal, schemeDiscount: r.preview.schemeDiscount, manualDiscount: r.preview.manualDiscount, total: r.preview.total, advanceTax: r.preview.advanceTax, advanceTaxRate: r.preview.advanceTaxRate, filerStatus: r.preview.filerStatus })
+        setPreview({ subtotal: r.preview.subtotal, schemeDiscount: r.preview.schemeDiscount, manualDiscount: r.preview.manualDiscount, total: r.preview.total, tradeOfferTotal: r.preview.tradeOfferTotal, gstTotal: r.preview.gstTotal, payable: r.preview.payable, advanceTax: r.preview.advanceTax, advanceTaxRate: r.preview.advanceTaxRate, filerStatus: r.preview.filerStatus })
         setLines((prev) => prev.map((l) => {
           const pl = r.preview.lines.find((x) => x.productId === l.productId)
           if (!pl) return l
@@ -623,11 +626,20 @@ export function UnprocessedBillsView() {
                       <div className="flex justify-between gap-8"><span className="text-slate-500">Manual Discount</span><span className="tabular-nums text-rose-600">− {fmtPKR(preview!.manualDiscount)}</span></div>
                     )}
                     <div className="flex justify-between gap-8 border-t border-slate-200 pt-1"><span className="font-medium text-slate-700">Net Payable</span><span className="tabular-nums font-bold text-emerald-700">{preview ? fmtPKR(preview.total) : '…'}</span></div>
+                    {(preview?.tradeOfferTotal ?? 0) > 0 && (
+                      <div className="flex justify-between gap-8"><span className="text-violet-600">Trade Offer (booked snapshot)</span><span className="tabular-nums text-violet-600">− {fmtPKR(preview!.tradeOfferTotal ?? 0)}</span></div>
+                    )}
+                    {(preview?.gstTotal ?? 0) > 0 && (
+                      <div className="flex justify-between gap-8"><span className="text-blue-600">GST (Sales Tax)</span><span className="tabular-nums text-blue-600">+ {fmtPKR(preview!.gstTotal ?? 0)}</span></div>
+                    )}
                     {(preview?.advanceTax ?? 0) > 0 && (
-                      <>
-                        <div className="flex justify-between gap-8"><span className="text-blue-600">Advance Tax ({preview!.filerStatus === 'FILER' ? 'Filer' : 'Non-Filer'}{preview!.advanceTaxRate != null ? ` ${preview!.advanceTaxRate}%` : ''})</span><span className="tabular-nums text-blue-600">+ {fmtPKR(preview!.advanceTax ?? 0)}</span></div>
-                        <div className="flex justify-between gap-8"><span className="font-medium text-slate-700">Total Payable (incl. Adv Tax)</span><span className="tabular-nums font-semibold text-slate-900">{fmtPKR(Math.round((preview!.total + (preview!.advanceTax ?? 0)) * 100) / 100)}</span></div>
-                      </>
+                      <div className="flex justify-between gap-8"><span className="text-blue-600">Advance Tax ({preview!.filerStatus === 'FILER' ? 'Filer' : 'Non-Filer'}{preview!.advanceTaxRate != null ? ` ${preview!.advanceTaxRate}%` : ''})</span><span className="tabular-nums text-blue-600">+ {fmtPKR(preview!.advanceTax ?? 0)}</span></div>
+                    )}
+                    {((preview?.tradeOfferTotal ?? 0) > 0 || (preview?.gstTotal ?? 0) > 0) && (preview?.payable ?? 0) > 0 && (
+                      <div className="flex justify-between gap-8 border-t border-slate-200 pt-1"><span className="font-medium text-slate-700">Grand Total Payable</span><span className="tabular-nums font-semibold text-slate-900">{fmtPKR(preview!.payable ?? 0)}</span></div>
+                    )}
+                    {!(preview?.tradeOfferTotal) && !(preview?.gstTotal) && (preview?.advanceTax ?? 0) > 0 && (
+                      <div className="flex justify-between gap-8"><span className="font-medium text-slate-700">Total Payable (incl. Adv Tax)</span><span className="tabular-nums font-semibold text-slate-900">{fmtPKR(Math.round((preview!.total + (preview!.advanceTax ?? 0)) * 100) / 100)}</span></div>
                     )}
                     <p className="text-[11px] text-slate-400">{previewing ? 'Calculating…' : 'Scheme aur discount server par dobara calculate hoti hai (booking wali hi math)'}</p>
                   </div>

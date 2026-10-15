@@ -87,6 +87,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
           address: o.outlet.address,
           ownerName: o.outlet.ownerName,
           total: o.total,
+          tradeOfferTotal: o.tradeOfferTotal,
+          gstTotal: o.gstTotal,
           filerStatus: o.filerStatus,
           advanceTaxRate: o.advanceTaxRate,
           advanceTax: o.advanceTax,

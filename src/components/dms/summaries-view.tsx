@@ -534,17 +534,34 @@ function InvoiceDialog({ invoiceId, returns = [], onClose }: { invoiceId: string
                 </div>
               )}
               <div className="flex justify-between gap-3 font-bold text-lg text-slate-900"><span>Payable</span><span className="whitespace-nowrap tabular-nums">{fmtPKR(data.total)}</span></div>
+              {(data.tradeOfferTotal ?? 0) > 0 && (
+                <div className="flex justify-between gap-3 text-sm text-violet-600">
+                  <span>Trade Offer</span>
+                  <span className="whitespace-nowrap tabular-nums">- {fmtPKR(data.tradeOfferTotal ?? 0)}</span>
+                </div>
+              )}
+              {(data.gstTotal ?? 0) > 0 && (
+                <div className="flex justify-between gap-3 text-sm text-blue-600">
+                  <span>GST (Sales Tax)</span>
+                  <span className="whitespace-nowrap tabular-nums">+ {fmtPKR(data.gstTotal ?? 0)}</span>
+                </div>
+              )}
               {(data.advanceTax ?? 0) > 0 && (
-                <>
-                  <div className="flex justify-between gap-3 text-sm text-blue-600">
-                    <span>Advance Tax ({data.advanceTaxRate != null ? `${data.advanceTaxRate}%` : ''}{data.filerStatus ? ` — ${data.filerStatus === 'FILER' ? 'Filer' : 'Non-Filer'}` : ''})</span>
-                    <span className="whitespace-nowrap tabular-nums">+ {fmtPKR(data.advanceTax ?? 0)}</span>
-                  </div>
-                  <div className="flex justify-between gap-3 font-semibold text-sm text-slate-900">
-                    <span>Total Payable (incl. Adv Tax)</span>
-                    <span className="whitespace-nowrap tabular-nums">{fmtPKR(Math.round((data.total + (data.advanceTax ?? 0)) * 100) / 100)}</span>
-                  </div>
-                </>
+                <div className="flex justify-between gap-3 text-sm text-blue-600">
+                  <span>Advance Tax ({data.advanceTaxRate != null ? `${data.advanceTaxRate}%` : ''}{data.filerStatus ? ` — ${data.filerStatus === 'FILER' ? 'Filer' : 'Non-Filer'}` : ''})</span>
+                  <span className="whitespace-nowrap tabular-nums">+ {fmtPKR(data.advanceTax ?? 0)}</span>
+                </div>
+              )}
+              {((data.tradeOfferTotal ?? 0) > 0 || (data.gstTotal ?? 0) > 0) ? (
+                <div className="flex justify-between gap-3 font-semibold text-sm text-slate-900 border-t pt-1.5">
+                  <span>Grand Total Payable</span>
+                  <span className="whitespace-nowrap tabular-nums">{fmtPKR(Math.round((data.total - (data.tradeOfferTotal ?? 0) + (data.gstTotal ?? 0) + (data.advanceTax ?? 0)) * 100) / 100)}</span>
+                </div>
+              ) : (data.advanceTax ?? 0) > 0 && (
+                <div className="flex justify-between gap-3 font-semibold text-sm text-slate-900">
+                  <span>Total Payable (incl. Adv Tax)</span>
+                  <span className="whitespace-nowrap tabular-nums">{fmtPKR(Math.round((data.total + (data.advanceTax ?? 0)) * 100) / 100)}</span>
+                </div>
               )}
             </div>
             {returns.length > 0 && (

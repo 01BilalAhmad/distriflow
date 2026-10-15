@@ -114,7 +114,22 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           : 0
         const advTax = Math.round((advTaxFull - taxReversal) * 100) / 100
 
-        const netPayable = Math.round((bill - returnValue + advTax) * 100) / 100
+        // Task 45: GST + Trade Offer — SAME pro-rata reversal pattern (advance tax jaisa).
+        // GST return par wapas, Trade Offer return par wapas LETA hai (shop TO benefit
+        // returned goods ka kho deta hai) — is liye return credit TO reversal se KAM hota hai.
+        const gstFull = Math.round((order.gstTotal ?? 0) * 100) / 100
+        const toFull = Math.round((order.tradeOfferTotal ?? 0) * 100) / 100
+        const gstReversal = gstFull > 0 && bill > 0 && returnValue > 0
+          ? Math.min(Math.round((gstFull * returnValue / bill) * 100) / 100, gstFull)
+          : 0
+        const toReversal = toFull > 0 && bill > 0 && returnValue > 0
+          ? Math.min(Math.round((toFull * returnValue / bill) * 100) / 100, toFull)
+          : 0
+        const gstEff = Math.round((gstFull - gstReversal) * 100) / 100
+        const toEff = Math.round((toFull - toReversal) * 100) / 100
+
+        // Grand payable = goods − return + GST − trade offer + adv tax (booking chain jaisa)
+        const netPayable = Math.round((bill - returnValue + gstEff - toEff + advTax) * 100) / 100
         const cash = Math.max(0, Math.min(Number(s.cashAmount) || 0, netPayable))
         const credit = Math.round((netPayable - cash) * 100) / 100
         const st = cash <= 0 ? 'CREDIT' : cash >= netPayable ? 'CASH' : 'PARTIAL'
@@ -128,6 +143,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
             billAmount: bill,
             returnAmount: returnValue,
             advanceTax: advTax,
+            gstTotal: gstEff,
+            tradeOfferTotal: toEff,
             cashAmount: cash,
             creditAmount: credit,
             status: st,
@@ -135,29 +152,41 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           },
         })
 
-        // 2) Ledger: DEBIT invoice (full advance tax — invoice jaisi bani), CREDIT return
-        //    value + tax reversal, CREDIT cash received
+        // 2) Ledger: DEBIT invoice (full GST − full TO + full advance tax — invoice jaisi bani),
+        //    CREDIT return value + tax/GST reversal − TO reversal, CREDIT cash received
+        const debitAmount = Math.round((bill + gstFull - toFull + advTaxFull) * 100) / 100
+        const debitNotes = [
+          `Stock delivered (Summary ${summary.summaryNo})`,
+          gstFull > 0 ? `GST Rs ${gstFull.toFixed(2)}` : null,
+          toFull > 0 ? `Trade Offer Rs ${toFull.toFixed(2)}` : null,
+          advTaxFull > 0 ? `Adv Tax Rs ${advTaxFull.toFixed(2)} added (${order.filerStatus === 'FILER' ? 'Filer' : 'Non-Filer'} ${order.advanceTaxRate ?? 0}%)` : null,
+        ].filter(Boolean).join(' • ')
         await tx.outletLedger.create({
           data: {
             outletId: order.outletId,
             type: 'DEBIT',
-            amount: Math.round((bill + advTaxFull) * 100) / 100,
+            amount: debitAmount,
             refType: 'INVOICE',
             refNo: order.orderNo,
-            note: advTaxFull > 0
-              ? `Stock delivered (Summary ${summary.summaryNo}) • Adv Tax Rs ${advTaxFull.toFixed(2)} added (${order.filerStatus === 'FILER' ? 'Filer' : 'Non-Filer'} ${order.advanceTaxRate ?? 0}%)`
-              : `Stock delivered (Summary ${summary.summaryNo})`,
+            note: debitNotes,
           },
         })
         if (returnValue > 0 && returnNo) {
+          const returnCredit = Math.round((returnValue + gstReversal + taxReversal - toReversal) * 100) / 100
+          const returnNotes = [
+            `Stock return at settlement (${returnReason})`,
+            taxReversal > 0 ? `Adv tax reversal Rs ${taxReversal.toFixed(2)}` : null,
+            gstReversal > 0 ? `GST reversal Rs ${gstReversal.toFixed(2)}` : null,
+            toReversal > 0 ? `Trade offer reversal Rs ${toReversal.toFixed(2)}` : null,
+          ].filter(Boolean).join(' • ')
           await tx.outletLedger.create({
             data: {
               outletId: order.outletId,
               type: 'CREDIT',
-              amount: Math.round((returnValue + taxReversal) * 100) / 100,
+              amount: Math.max(0, returnCredit),
               refType: 'RETURN',
               refNo: returnNo,
-              note: `Stock return at settlement (${returnReason})${taxReversal > 0 ? ` • Adv tax reversal Rs ${taxReversal.toFixed(2)}` : ''}`,
+              note: returnNotes,
             },
           })
         }

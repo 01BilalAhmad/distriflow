@@ -1,6 +1,6 @@
 import { db } from '@/lib/db'
 import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
-import { computeOrderLines, recalcManualDiscount, type CalcIncomingItem } from '@/lib/dms-order-calc'
+import { computeOrderLines, recalcManualDiscount, orderGrandPayable, type CalcIncomingItem } from '@/lib/dms-order-calc'
 import { advanceTaxFor, getTaxRates } from '@/lib/dms-settings'
 import { getAvailableToPromise, groupQtyByProduct, oversellMessage } from '@/lib/dms-inventory'
 
@@ -49,6 +49,9 @@ export async function GET(req: Request) {
         manualDiscType: o.manualDiscType,
         manualDiscValue: o.manualDiscValue,
         total: o.total,
+        // Task 45: GST + Trade Order totals (grand payable = total − TO + GST + advTax)
+        tradeOfferTotal: o.tradeOfferTotal,
+        gstTotal: o.gstTotal,
         filerStatus: o.filerStatus,
         advanceTaxRate: o.advanceTaxRate,
         advanceTax: o.advanceTax,
@@ -87,9 +90,19 @@ export async function POST(req: Request) {
     })
 
     // Shared calc (stock-allocation edit bhi yehi math use karta hai)
-    const { lines: itemsData, subtotal, schemeDiscount } = computeOrderLines(products, schemes, items, outlet.channel)
+    // Task 45: items[].tradeOffer = per-SKU Trade Offer Rs (discount ke ilawa, kuch SKUs par)
+    const { lines: itemsData, subtotal, schemeDiscount, gstTotal, tradeOfferTotal } = computeOrderLines(products, schemes, items, outlet.channel)
 
     if (itemsData.length === 0) return jsonError('Koi valid item nahi mila')
+
+    // ---- Task 45: Trade Offer validation — har line ka TO uski net value se zyada nahi ----
+    // (warna line payable negative ho jati — typo pakarne ke liye clear error)
+    const pName = new Map(products.map((p) => [p.id, p.name]))
+    for (const l of itemsData) {
+      if (l.tradeOfferAmt > l.lineTotal) {
+        return jsonError(`Trade offer galat hai — ${pName.get(l.productId) ?? 'Item'}: Rs ${l.tradeOfferAmt} line total Rs ${l.lineTotal} se zyada nahi ho sakta`)
+      }
+    }
 
     // ---- Task 26: STOCK LIMIT — overselling band ----
     // Available = warehouse stock − pehle se CONFIRMED (unprocessed) bills ki booked qty.
@@ -141,6 +154,8 @@ export async function POST(req: Request) {
         manualDiscType,
         manualDiscValue,
         total: orderTotal,
+        tradeOfferTotal,
+        gstTotal,
         filerStatus: outlet.filerStatus,
         advanceTaxRate: tax.rate,
         advanceTax: tax.amount,
@@ -150,12 +165,16 @@ export async function POST(req: Request) {
       include: { items: true },
     })
 
+    const payable = orderGrandPayable({ total: orderTotal, tradeOfferTotal, gstTotal, advanceTax: order.advanceTax })
+
     return Response.json({
       order: {
         id: order.id, orderNo: order.orderNo, total: order.total,
         schemeDiscount, manualDiscount,
+        tradeOfferTotal, gstTotal,
         advanceTax: order.advanceTax, advanceTaxRate: order.advanceTaxRate,
         filerStatus: order.filerStatus,
+        payable,
       },
     })
   } catch (e) {

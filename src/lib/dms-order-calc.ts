@@ -10,6 +10,9 @@ export interface CalcProduct {
   unitsPerCarton: number
   pcsPerBox: number
   tradePrice: number
+  /** Task 45: per-product GST (Products page se set hota hai — kuch bhi hardcoded nahi) */
+  gstEnabled?: boolean
+  gstRate?: number
 }
 
 export interface CalcScheme {
@@ -37,6 +40,11 @@ export interface CalcIncomingItem {
    * purani lines hamesha booking waqt ke type/value/buyQty/freeQty par re-apply hoti
    * hain, current scheme se nahi (bill jis % par bana, usi par rahe). */
   scheme?: { id: string; name?: string; type: string; value: number; buyQty: number; freeQty: number } | null
+  /** Task 45: per-SKU Trade Offer Rs (booking form se) — discount ke ILAWA, kuch SKUs par */
+  tradeOffer?: number | null
+  /** Task 45: existing line ka BOOKED GST rate snapshot (stock-allocation edit par
+   * re-apply hota hai — product ka current rate purane bill par asar nahi dalta) */
+  bookedGstRate?: number | null
 }
 
 export interface CalcLine {
@@ -52,6 +60,10 @@ export interface CalcLine {
   schemeBuyQty: number | null
   schemeFreeQty: number | null
   schemeName: string | null
+  // Task 45: GST + Trade Offer snapshot (OrderItem par persist)
+  tradeOfferAmt: number
+  gstRate: number | null
+  gstAmt: number
   lineTotal: number
 }
 
@@ -59,6 +71,19 @@ export interface CalcResult {
   lines: CalcLine[]
   subtotal: number
   schemeDiscount: number
+  /** Task 45: Σ line GST (purchase invoice ka taxTotal jaisa) */
+  gstTotal: number
+  /** Task 45: Σ line trade offer (purchase invoice ka tradeOfferTotal jaisa) */
+  tradeOfferTotal: number
+}
+
+/**
+ * Task 45: Grand payable — goods net (total) − trade offer + GST + advance tax.
+ * Purchase invoice ke "Net Invoice Amount" jaisa hi chain. Old orders (fields 0)
+ * par yehi total + advTax deta hai — backward compatible.
+ */
+export function orderGrandPayable(o: { total: number; tradeOfferTotal?: number | null; gstTotal?: number | null; advanceTax?: number | null }): number {
+  return Math.round((o.total - (o.tradeOfferTotal ?? 0) + (o.gstTotal ?? 0) + (o.advanceTax ?? 0)) * 100) / 100
 }
 
 /** 3-unit ctn/box/pcs -> total PIECES (product pack config ke mutabiq) */
@@ -86,6 +111,8 @@ export function computeOrderLines(
 ): CalcResult {
   let subtotal = 0
   let schemeDiscount = 0
+  let gstTotal = 0
+  let tradeOfferTotal = 0
   const lines: CalcLine[] = []
 
   for (const item of items) {
@@ -142,9 +169,27 @@ export function computeOrderLines(
     }
 
     const applied = schemeId ? applicable.find((s) => s.id === schemeId) ?? null : null
-    const lineTotal = Math.round(ratePerPc * qty * 100) / 100 - discount
-    subtotal += Math.round(ratePerPc * qty * 100) / 100
+
+    // ---- Task 45: GST (purchase invoice jaisa chain) ----
+    // GST base = line net (gross − scheme discount) — trade offer/manual discount base NAHI
+    // badalte (purchase invoice: GST net excl. tax par, TO baad me minus). Rate snapshot:
+    // existing line apna booked rate rakhti hai, nayi line product ke current rate se.
+    // gstEnabled=false product par GST 0 — rate Products page se aata hai, hardcoded nahi.
+    const gross = Math.round(ratePerPc * qty * 100) / 100
+    const gstRate = item.bookedGstRate != null
+      ? Math.max(0, Number(item.bookedGstRate) || 0)
+      : (p.gstEnabled === false ? 0 : Math.max(0, Number(p.gstRate) || 0))
+    const netExclTax = Math.max(0, gross - discount)
+    const gstAmt = Math.round(netExclTax * (gstRate / 100) * 100) / 100
+
+    // ---- Task 45: Trade Offer (per-SKU Rs, discount ke ilawa) ----
+    const tradeOfferAmt = Math.max(0, Math.round((Number(item.tradeOffer) || 0) * 100) / 100)
+
+    const lineTotal = gross - discount
+    subtotal += gross
     schemeDiscount += discount
+    gstTotal += gstAmt
+    tradeOfferTotal += tradeOfferAmt
     lines.push({
       productId: p.id, qty, freeQty, rate: ratePerPc, discount, schemeId,
       schemeType: applied?.type ?? null,
@@ -152,11 +197,20 @@ export function computeOrderLines(
       schemeBuyQty: applied?.buyQty ?? null,
       schemeFreeQty: applied?.freeQty ?? null,
       schemeName: applied?.name ?? null,
+      tradeOfferAmt,
+      gstRate: gstRate > 0 ? gstRate : null,
+      gstAmt,
       lineTotal,
     })
   }
 
-  return { lines, subtotal: Math.round(subtotal * 100) / 100, schemeDiscount }
+  return {
+    lines,
+    subtotal: Math.round(subtotal * 100) / 100,
+    schemeDiscount: Math.round(schemeDiscount * 100) / 100,
+    gstTotal: Math.round(gstTotal * 100) / 100,
+    tradeOfferTotal: Math.round(tradeOfferTotal * 100) / 100,
+  }
 }
 
 /**

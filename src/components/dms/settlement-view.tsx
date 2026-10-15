@@ -28,11 +28,21 @@ const REASON_LABELS: Record<string, string> = {
   EXPIRED: 'Expired',
 }
 
-/** Task 29: return par advance tax PRO-RATA reversal — jitna % goods wapas, utna tax reverse */
-function taxAfterReturn(advTax: number, bill: number, returnValue: number): { tax: number; reversal: number } {
-  if (advTax <= 0 || bill <= 0 || returnValue <= 0) return { tax: Math.round(advTax * 100) / 100, reversal: 0 }
-  const reversal = Math.round((advTax * returnValue / bill) * 100) / 100
-  return { tax: Math.round((advTax - reversal) * 100) / 100, reversal }
+/** Task 29: return par tax PRO-RATA reversal — jitna % goods wapas, utna tax reverse */
+function proRata(full: number, bill: number, returnValue: number): { eff: number; reversal: number } {
+  if (full <= 0 || bill <= 0 || returnValue <= 0) return { eff: Math.round(full * 100) / 100, reversal: 0 }
+  const reversal = Math.min(Math.round((full * returnValue / bill) * 100) / 100, full)
+  return { eff: Math.round((full - reversal) * 100) / 100, reversal }
+}
+
+/** Task 45: Grand payable parts — goods − return + GST − trade offer + adv tax (pro-rata reversals ke saath).
+ * Booking chain (purchase invoice jaisa) settlement tak consistent. */
+function orderNetPayable(o: { total: number; gstTotal?: number | null; tradeOfferTotal?: number | null; advanceTax?: number | null }, returnValue: number) {
+  const gst = proRata(o.gstTotal ?? 0, o.total, returnValue)
+  const to = proRata(o.tradeOfferTotal ?? 0, o.total, returnValue)
+  const tax = proRata(o.advanceTax ?? 0, o.total, returnValue)
+  const net = Math.round((o.total - returnValue + gst.eff - to.eff + tax.eff) * 100) / 100
+  return { net, gst: gst.eff, gstRev: gst.reversal, to: to.eff, toRev: to.reversal, tax: tax.eff, taxRev: tax.reversal }
 }
 
 /** Per-invoice stock return dialog: item-wise qty (Ctn/Box/Pcs) + reason → net payable auto-calculate */
@@ -48,8 +58,8 @@ function ReturnDialog({ order, initial, onConfirm, onClose }: {
 
   const retQty = order.items.reduce((s, it) => s + (qtys[it.productId] ?? 0), 0)
   const retValue = Math.round(order.items.reduce((s, it) => s + (qtys[it.productId] ?? 0) * it.rate, 0) * 100) / 100
-  const taxEff = taxAfterReturn(order.advanceTax ?? 0, order.total, retValue)
-  const net = Math.round((order.total - retValue + taxEff.tax) * 100) / 100
+  const parts = orderNetPayable(order, retValue)
+  const net = parts.net
 
   function setQty(productId: string, totalPcs: number) {
     setQtys({ ...qtys, [productId]: Math.max(0, Math.floor(totalPcs || 0)) })
@@ -127,10 +137,22 @@ function ReturnDialog({ order, initial, onConfirm, onClose }: {
               <p className="text-[11px] text-slate-400 uppercase">Return Value</p>
               <p className="font-bold text-orange-600 whitespace-nowrap tabular-nums">{fmtPKR(retValue)}</p>
             </div>
-            {taxEff.reversal > 0 && (
+            {parts.gstRev > 0 && (
+              <div className="text-right">
+                <p className="text-[11px] text-slate-400 uppercase">GST</p>
+                <p className="font-bold text-blue-600 whitespace-nowrap tabular-nums">{fmtPKR(parts.gst)} <span className="text-[10px] font-medium">(− {fmtPKR(parts.gstRev)})</span></p>
+              </div>
+            )}
+            {parts.toRev > 0 && (
+              <div className="text-right">
+                <p className="text-[11px] text-slate-400 uppercase">Trade Offer</p>
+                <p className="font-bold text-violet-600 whitespace-nowrap tabular-nums">− {fmtPKR(parts.to)} <span className="text-[10px] font-medium">(+ {fmtPKR(parts.toRev)} wapas)</span></p>
+              </div>
+            )}
+            {parts.taxRev > 0 && (
               <div className="text-right">
                 <p className="text-[11px] text-slate-400 uppercase">Adv Tax</p>
-                <p className="font-bold text-blue-600 whitespace-nowrap tabular-nums">{fmtPKR(taxEff.tax)} <span className="text-[10px] font-medium">(− {fmtPKR(taxEff.reversal)})</span></p>
+                <p className="font-bold text-blue-600 whitespace-nowrap tabular-nums">{fmtPKR(parts.tax)} <span className="text-[10px] font-medium">(− {fmtPKR(parts.taxRev)})</span></p>
               </div>
             )}
             <div className="text-right">
@@ -138,8 +160,8 @@ function ReturnDialog({ order, initial, onConfirm, onClose }: {
               <p className="font-bold text-emerald-700 text-lg whitespace-nowrap tabular-nums">{fmtPKR(net)}</p>
             </div>
           </div>
-          {taxEff.reversal > 0 && (
-            <p className="text-[11px] text-slate-500 text-right pr-1">Advance tax bhi return ke hisaab se kam ho gaya — returned goods par dobara tax nahi lagega</p>
+          {(parts.gstRev > 0 || parts.taxRev > 0 || parts.toRev > 0) && (
+            <p className="text-[11px] text-slate-500 text-right pr-1">GST / Advance tax bhi return ke hisaab se kam ho gaya — returned goods par dobara tax nahi lagega{parts.toRev > 0 ? '; Trade Offer bhi returned goods ka wapas le liya gaya' : ''}</p>
           )}
         </div>
         </div>
@@ -409,7 +431,8 @@ export function SettlementView() {
       setDetail(r.summary)
       // default: sab full cash (bill + advance tax), koi return nahi
       const init: Record<string, SettleRow> = {}
-      for (const o of r.summary.orders) init[o.id] = { cash: String(Math.round((o.total + (o.advanceTax ?? 0)) * 100) / 100) }
+      // Task 45: default cash = grand payable (goods − TO + GST + adv tax) — booking chain jaisa
+      for (const o of r.summary.orders) init[o.id] = { cash: String(orderNetPayable(o, 0).net) }
       setCashInputs(init)
       setRetInputs({})
     } catch (e) {
@@ -439,11 +462,11 @@ export function SettlementView() {
       }
       returnValue = Math.round(returnValue * 100) / 100
       const bill = o.total
-      const taxEff = taxAfterReturn(o.advanceTax ?? 0, bill, returnValue)
-      const net = Math.round((bill - returnValue + taxEff.tax) * 100) / 100
+      const parts = orderNetPayable(o, returnValue)
+      const net = parts.net
       const cash = Math.max(0, Math.min(Number(cashInputs[o.id]?.cash ?? net) || 0, net))
       return {
-        order: o, bill, returnValue, returnQty, tax: taxEff.tax, taxReversal: taxEff.reversal, net, cash,
+        order: o, bill, returnValue, returnQty, tax: parts.tax, taxReversal: parts.taxRev, gst: parts.gst, gstRev: parts.gstRev, to: parts.to, toRev: parts.toRev, net, cash,
         credit: Math.round((net - cash) * 100) / 100,
         status: cash <= 0 ? 'CREDIT' : cash >= net ? 'CASH' : 'PARTIAL',
       }
@@ -468,13 +491,13 @@ export function SettlementView() {
       if (q > 0) rv += q * it.rate
     }
     rv = Math.round(rv * 100) / 100
-    const taxEff = taxAfterReturn(order.advanceTax ?? 0, order.total, rv)
-    const net = Math.round((order.total - rv + taxEff.tax) * 100) / 100
+    const parts = orderNetPayable(order, rv)
+    const net = parts.net
     setCashInputs({ ...cashInputs, [order.id]: { cash: String(net) } })
     setRetDlgOrder(null)
     toast({
       title: 'Return added ✓',
-      description: `${order.outletName}: net payable ab ${fmtPKR(net)}${taxEff.reversal > 0 ? ` — adv tax bhi ${fmtPKR(taxEff.reversal)} kam hua` : ''}`,
+      description: `${order.outletName}: net payable ab ${fmtPKR(net)}${parts.taxRev > 0 ? ` — adv tax bhi ${fmtPKR(parts.taxRev)} kam hua` : ''}${parts.gstRev > 0 ? `, GST ${fmtPKR(parts.gstRev)} kam hua` : ''}`,
     })
   }
 

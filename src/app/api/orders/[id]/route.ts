@@ -1,7 +1,7 @@
 import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
 import { fulfillOrder } from '@/lib/dms-fulfill'
-import { computeOrderLines, recalcManualDiscount, type CalcIncomingItem } from '@/lib/dms-order-calc'
+import { computeOrderLines, recalcManualDiscount, orderGrandPayable, type CalcIncomingItem } from '@/lib/dms-order-calc'
 import { advanceTaxFor, getTaxRates } from '@/lib/dms-settings'
 import { getAvailableToPromise, groupQtyByProduct, oversellMessage } from '@/lib/dms-inventory'
 
@@ -38,9 +38,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         manualDiscType: order.manualDiscType,
         manualDiscValue: order.manualDiscValue,
         total: order.total,
+        tradeOfferTotal: order.tradeOfferTotal,
+        gstTotal: order.gstTotal,
         filerStatus: order.filerStatus,
         advanceTaxRate: order.advanceTaxRate,
         advanceTax: order.advanceTax,
+        payable: orderGrandPayable(order),
         notes: order.notes,
         orderDate: new Date(order.orderDate).toISOString(),
         items: order.items.map((it) => ({
@@ -52,14 +55,17 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           boxesPerCarton: it.product.boxesPerCarton,
           pcsPerBox: it.product.pcsPerBox,
           consumerPrice: it.product.consumerPrice,
-          // Task 37: per-product GST — bill isi rate se print hoga
+          // Task 37: per-product GST flag — Task 45 snapshot rate neeche gstRate me merge hua
           gstEnabled: it.product.gstEnabled,
-          gstRate: it.product.gstRate,
           qty: it.qty,
           freeQty: it.freeQty,
           rate: it.rate,
           discount: it.discount,
           lineTotal: it.lineTotal,
+          // Task 45: booking waqt ke GST + Trade Order snapshots (edit-proof)
+          tradeOfferAmt: it.tradeOfferAmt,
+          gstRate: it.gstRate ?? it.product.gstRate, // snapshot, legacy line par product ka current rate
+          gstAmt: it.gstAmt,
           schemeId: it.schemeId,
           // Task 41: booking waqt ka scheme snapshot (edit-proof)
           schemeType: it.schemeType,
@@ -132,6 +138,19 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         return ls ? { ...i, scheme: { id: ls.id, name: ls.name, type: ls.type, value: ls.value, buyQty: ls.buyQty, freeQty: ls.freeQty } } : i
       })
 
+      // Task 45: TO + GST-rate snapshots bhi wahi scheme principle — purani line apni
+      // BOOKED trade offer aur GST rate rakhti hai (product/scheme baad me badle to asar nahi)
+      const existingByProduct = new Map(order.items.map((i) => [i.productId, i]))
+      const withSnapshots = incoming.map((i) => {
+        const ex = existingByProduct.get(i.productId)
+        if (!ex) return i
+        return {
+          ...i,
+          tradeOffer: ex.tradeOfferAmt > 0 ? ex.tradeOfferAmt : (i.tradeOffer ?? 0),
+          bookedGstRate: ex.gstRate ?? undefined,
+        }
+      })
+
       // Task 23: tenant scope — order jis distributor ka, products/schemes usi ke
       const tenantId = order.distributorId
       const products = await db.product.findMany({
@@ -140,7 +159,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       const schemes = await db.scheme.findMany({
         where: { isActive: true, distributorId: tenantId, OR: [{ endDate: null }, { endDate: { gte: new Date() } }] },
       })
-      const { lines, subtotal, schemeDiscount } = computeOrderLines(products, schemes, incoming, order.channel)
+      const { lines, subtotal, schemeDiscount, gstTotal, tradeOfferTotal } = computeOrderLines(products, schemes, withSnapshots, order.channel)
       if (lines.length === 0) return jsonError('Kam az kam 1 item qty ke saath chahiye')
 
       // ---- Task 26: STOCK LIMIT — allocation edit bhi available ke andar ----
@@ -179,6 +198,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
             subtotal, schemeDiscount,
             manualDiscount: manual.manualDiscount,
             total,
+            tradeOfferTotal,
+            gstTotal,
+            payable: orderGrandPayable({ total, tradeOfferTotal, gstTotal, advanceTax: tax.amount }),
             advanceTax: tax.amount,
             advanceTaxRate: tax.rate,
             filerStatus: taxStatus,
@@ -206,6 +228,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
             manualDiscType: manual.manualDiscType,
             manualDiscValue: manual.manualDiscValue,
             total,
+            tradeOfferTotal,
+            gstTotal,
             filerStatus: taxStatus,
             advanceTaxRate: tax.rate,
             advanceTax: tax.amount,
@@ -228,6 +252,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
           manualDiscType: manual.manualDiscType,
           manualDiscValue: manual.manualDiscValue,
           total,
+          tradeOfferTotal,
+          gstTotal,
+          payable: orderGrandPayable({ total, tradeOfferTotal, gstTotal, advanceTax: tax.amount }),
           advanceTax: tax.amount,
           advanceTaxRate: tax.rate,
           filerStatus: taxStatus,

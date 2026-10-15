@@ -17,12 +17,14 @@ import { api, fmtPKR, fmtDate, STATUS_STYLES, statusLabel } from '@/lib/dms-api'
 import type { OrderDTO, OrderItemDTO, OutletDTO, ProductDTO, SchemeDTO, SalesmanPerfDTO } from '@/lib/dms-types'
 import { UnitQtyInputs, splitPcs, fmtQty, packHint } from '@/components/dms/unit-qty'
 import { PrintFrame, CblInvoiceDoc, keepDialogBehind, type InvoiceData } from '@/components/dms/cbl-print'
-import { Plus, Eye, XCircle, Loader2, Search, ShoppingCart, Printer, Percent } from 'lucide-react'
+import { orderGrandPayable } from '@/lib/dms-order-calc'
+import { Plus, Eye, XCircle, Loader2, Search, ShoppingCart, Printer, Percent, Gift } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
 interface DraftLine {
   productId: string
   qtyPcs: number // base unit = PIECE (Ctn/Box/Pcs inputs se banta hai)
+  tradeOffer: string // Task 45: per-SKU Trade Offer Rs (string input state, discount ke ILAWA)
 }
 
 type DiscType = 'NONE' | 'PERCENT' | 'FLAT'
@@ -206,7 +208,7 @@ function OrderDetailDialog({ order, items, onClose }: { order: OrderDTO | null; 
               </DialogDescription>
             </DialogHeader>
             <div className="flex-1 min-h-0 overflow-y-auto">
-              <Table className="min-w-[460px]">
+              <Table className="min-w-[560px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Product</TableHead>
@@ -214,6 +216,8 @@ function OrderDetailDialog({ order, items, onClose }: { order: OrderDTO | null; 
                     <TableHead className="text-right">Free</TableHead>
                     <TableHead className="text-right">Rate/pc</TableHead>
                     <TableHead className="text-right">Discount</TableHead>
+                    <TableHead className="text-right">Trade Offer</TableHead>
+                    <TableHead className="text-right">GST</TableHead>
                     <TableHead className="text-right">Line Total</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -228,6 +232,8 @@ function OrderDetailDialog({ order, items, onClose }: { order: OrderDTO | null; 
                       <TableCell className="text-right">{it.freeQty > 0 ? <span className="text-emerald-600 font-semibold">+{fmtQty(it.freeQty, it.unitsPerCarton ?? 1, it.pcsPerBox ?? 0)}</span> : '—'}</TableCell>
                       <TableCell className="text-right text-xs">{fmtPKR(it.rate)}</TableCell>
                       <TableCell className="text-right text-xs">{it.discount > 0 ? `- ${fmtPKR(it.discount)}` : '—'}</TableCell>
+                      <TableCell className="text-right text-xs">{(it.tradeOfferAmt ?? 0) > 0 ? <span className="text-violet-600 font-medium">- {fmtPKR(it.tradeOfferAmt ?? 0)}</span> : '—'}</TableCell>
+                      <TableCell className="text-right text-xs">{(it.gstAmt ?? 0) > 0 ? <span className="text-blue-600 font-medium">+ {fmtPKR(it.gstAmt ?? 0)}<span className="text-[10px] text-slate-400"> ({it.gstRate ?? 0}%)</span></span> : '—'}</TableCell>
                       <TableCell className="text-right font-semibold">{fmtPKR(it.lineTotal)}</TableCell>
                     </TableRow>
                   ))}
@@ -244,6 +250,18 @@ function OrderDetailDialog({ order, items, onClose }: { order: OrderDTO | null; 
                   <span className="whitespace-nowrap tabular-nums">- {fmtPKR(order.manualDiscount ?? 0)}</span>
                 </div>
               )}
+              {(order.tradeOfferTotal ?? 0) > 0 && (
+                <div className="flex justify-between gap-3 text-sm text-violet-600">
+                  <span>Trade Offer</span>
+                  <span className="whitespace-nowrap tabular-nums">- {fmtPKR(order.tradeOfferTotal ?? 0)}</span>
+                </div>
+              )}
+              {(order.gstTotal ?? 0) > 0 && (
+                <div className="flex justify-between gap-3 text-sm text-blue-600">
+                  <span>GST (Sales Tax)</span>
+                  <span className="whitespace-nowrap tabular-nums">+ {fmtPKR(order.gstTotal ?? 0)}</span>
+                </div>
+              )}
               <div className="flex justify-between gap-3 font-bold text-lg text-slate-900"><span>Total</span><span className="whitespace-nowrap tabular-nums">{fmtPKR(order.total)}</span></div>
               {(order.advanceTax ?? 0) > 0 && (
                 <>
@@ -251,11 +269,18 @@ function OrderDetailDialog({ order, items, onClose }: { order: OrderDTO | null; 
                     <span>Advance Tax ({order.advanceTaxRate != null ? `${order.advanceTaxRate}%` : ''}{order.filerStatus ? ` — ${order.filerStatus === 'FILER' ? 'Filer' : 'Non-Filer'}` : ''})</span>
                     <span className="whitespace-nowrap tabular-nums">+ {fmtPKR(order.advanceTax ?? 0)}</span>
                   </div>
-                  <div className="flex justify-between gap-3 font-semibold text-sm text-slate-900">
-                    <span>Total Payable (incl. Adv Tax)</span>
-                    <span className="whitespace-nowrap tabular-nums">{fmtPKR(Math.round((order.total + (order.advanceTax ?? 0)) * 100) / 100)}</span>
-                  </div>
                 </>
+              )}
+              {(order.tradeOfferTotal ?? 0) > 0 || (order.gstTotal ?? 0) > 0 ? (
+                <div className="flex justify-between gap-3 font-semibold text-sm text-slate-900 border-t pt-1.5">
+                  <span>Grand Total Payable (Total − Trade Offer + GST + Adv Tax)</span>
+                  <span className="whitespace-nowrap tabular-nums">{fmtPKR(orderGrandPayable(order))}</span>
+                </div>
+              ) : (order.advanceTax ?? 0) > 0 && (
+                <div className="flex justify-between gap-3 font-semibold text-sm text-slate-900">
+                  <span>Total Payable (incl. Adv Tax)</span>
+                  <span className="whitespace-nowrap tabular-nums">{fmtPKR(Math.round((order.total + (order.advanceTax ?? 0)) * 100) / 100)}</span>
+                </div>
               )}
             </div>
             <div className="flex justify-end border-t pt-3 shrink-0">
@@ -319,15 +344,15 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
   function addLine() {
     const used = new Set(lines.map((l) => l.productId))
     const avail = products.find((p) => !used.has(p.id) && p.available > 0) // Task 26: out-of-stock pehle hi select na ho
-    if (avail) setLines([...lines, { productId: avail.id, qtyPcs: Math.max(1, avail.unitsPerCarton) }]) // default 1 ctn
+    if (avail) setLines([...lines, { productId: avail.id, qtyPcs: Math.max(1, avail.unitsPerCarton), tradeOffer: '' }]) // default 1 ctn
   }
 
   const computed = useMemo(() => {
-    if (!outlet) return { subtotal: 0, discount: 0, rows: [] as { name: string; qtyPcs: number; freeQty: number; discount: number; total: number; scheme: string | null; ratePc: number; upc: number; pcsPerBox: number }[] }
-    let subtotal = 0, discount = 0
+    if (!outlet) return { subtotal: 0, discount: 0, gstTotal: 0, toTotal: 0, rows: [] as { name: string; qtyPcs: number; freeQty: number; discount: number; total: number; scheme: string | null; ratePc: number; upc: number; pcsPerBox: number; tradeOffer: number; gstRate: number; gstAmt: number }[] }
+    let subtotal = 0, discount = 0, gstTotal = 0, toTotal = 0
     const rows = lines.map((l) => {
       const p = products.find((x) => x.id === l.productId)
-      if (!p) return { name: '', qtyPcs: l.qtyPcs, freeQty: 0, discount: 0, total: 0, scheme: null, ratePc: 0, upc: 1, pcsPerBox: 0 }
+      if (!p) return { name: '', qtyPcs: l.qtyPcs, freeQty: 0, discount: 0, total: 0, scheme: null, ratePc: 0, upc: 1, pcsPerBox: 0, tradeOffer: 0, gstRate: 0, gstAmt: 0 }
       const upc = Math.max(1, p.unitsPerCarton)
       const pcsPerBox = p.pcsPerBox > 0 ? p.pcsPerBox : 0
       const ratePc = p.tradePrice / upc
@@ -345,12 +370,19 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
           if (s.type === 'FLAT_DISCOUNT') { disc = Math.round(s.value * ctnEquiv * 100) / 100; schemeName = s.name; break }
         }
       }
-      const lineTotal = Math.round(ratePc * l.qtyPcs * 100) / 100 - disc
-      subtotal += Math.round(ratePc * l.qtyPcs * 100) / 100
+      const gross = Math.round(ratePc * l.qtyPcs * 100) / 100
+      // Task 45: GST per product (Products page ka rate — hardcoded nahi); TO discount ke ILAWA
+      const gstRate = p.gstEnabled === false ? 0 : Math.max(0, Number(p.gstRate) || 0)
+      const gstAmt = Math.round(Math.max(0, gross - disc) * (gstRate / 100) * 100) / 100
+      const tradeOffer = Math.max(0, Math.round((parseFloat(l.tradeOffer) || 0) * 100) / 100)
+      const lineTotal = gross - disc
+      subtotal += gross
       discount += disc
-      return { name: p.name, qtyPcs: l.qtyPcs, freeQty, discount: disc, total: lineTotal, scheme: schemeName, ratePc, upc, pcsPerBox }
+      gstTotal += gstAmt
+      toTotal += tradeOffer
+      return { name: p.name, qtyPcs: l.qtyPcs, freeQty, discount: disc, total: lineTotal, scheme: schemeName, ratePc, upc, pcsPerBox, tradeOffer, gstRate, gstAmt }
     })
-    return { subtotal, discount, rows }
+    return { subtotal, discount, gstTotal: Math.round(gstTotal * 100) / 100, toTotal: Math.round(toTotal * 100) / 100, rows }
   }, [lines, products, schemes, outlet])
 
   // Manual discount (order-level) — server bhi yehi formula dobara calculate karta hai
@@ -371,6 +403,9 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
     const rate = outlet.filerStatus === 'FILER' ? taxRates.filer : taxRates.nonFiler
     return Math.round(netTotal * rate / 100 * 100) / 100
   }, [outlet, taxRates, netTotal])
+
+  // Task 45: Grand payable = goods net − trade offer + GST + advance tax (purchase invoice chain)
+  const grandPayable = Math.round((netTotal - computed.toTotal + computed.gstTotal + advTaxPreview) * 100) / 100
 
   function deleteDiscount() {
     setDiscType('NONE')
@@ -394,6 +429,12 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
       toast({ title: 'Discount value galat hai', description: discType === 'PERCENT' ? 'Percentage 0 se 100 ke darmiyan ho' : 'Flat amount 0 se bara hona chahiye', variant: 'destructive' })
       return
     }
+    // Task 45: Trade Offer validation — line ke net total se zyada nahi (server bhi check karta hai)
+    const badTo = computed.rows.findIndex((r) => r.tradeOffer > r.total)
+    if (badTo >= 0) {
+      toast({ title: 'Trade Offer galat hai', description: `${computed.rows[badTo].name}: Rs ${computed.rows[badTo].tradeOffer} line total Rs ${computed.rows[badTo].total} se zyada nahi ho sakta`, variant: 'destructive' })
+      return
+    }
     // Task 26: STOCK LIMIT — available stock se zyada booking UI par bhi block (server bhi check karta hai)
     const overLines = lines.filter((l) => {
       const p = products.find((x) => x.id === l.productId)
@@ -406,22 +447,22 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
     }
     setSaving(true)
     try {
-      // 3-unit split: qtyPcs -> ctn/box/pcs (server dobara verify karta hai)
+      // 3-unit split: qtyPcs -> ctn/box/pcs (server dobara verify karta hai) + per-SKU trade offer
       const items = lines.map((l) => {
         const p = products.find((x) => x.id === l.productId)
         const upc = Math.max(1, p?.unitsPerCarton ?? 1)
         const ppb = p?.pcsPerBox && p.pcsPerBox > 0 ? p.pcsPerBox : 0
         const s = splitPcs(l.qtyPcs, upc, ppb)
-        return { productId: l.productId, ctn: s.ctn, box: s.box, pcs: s.pcs }
+        return { productId: l.productId, ctn: s.ctn, box: s.box, pcs: s.pcs, tradeOffer: Math.max(0, parseFloat(l.tradeOffer) || 0) }
       })
-      const res = await api<{ order: { orderNo: string; total: number } }>('/api/orders', {
+      const res = await api<{ order: { orderNo: string; total: number; payable?: number } }>('/api/orders', {
         method: 'POST',
         body: JSON.stringify({
           outletId, salesmanId: bookerId, items, notes,
           discount: discType !== 'NONE' && discInputValid ? { type: discType, value: discNum } : undefined,
         }),
       })
-      toast({ title: `Order ${res.order.orderNo} Booked ✓`, description: `Booker: ${booker?.name ?? ''} • Total: ${fmtPKR(res.order.total)}${manualDiscount > 0 ? ` (manual disc ${fmtPKR(manualDiscount)})` : ''}` })
+      toast({ title: `Order ${res.order.orderNo} Booked ✓`, description: `Booker: ${booker?.name ?? ''} • Payable: ${fmtPKR(res.order.payable ?? res.order.total)}${manualDiscount > 0 ? ` (manual disc ${fmtPKR(manualDiscount)})` : ''}${computed.toTotal > 0 ? ` • TO ${fmtPKR(computed.toTotal)}` : ''}` })
       onOpenChange(false)
       onCreated()
     } catch (e) {
@@ -494,7 +535,7 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
                     onValueChange={(v) => {
                       const next = [...lines]
                       const np = products.find((x) => x.id === v)
-                      next[i] = { ...next[i], productId: v, qtyPcs: Math.max(1, np?.unitsPerCarton ?? 1) }
+                      next[i] = { ...next[i], productId: v, qtyPcs: Math.max(1, np?.unitsPerCarton ?? 1), tradeOffer: '' }
                       setLines(next)
                     }}
                   >
@@ -525,6 +566,30 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
                   <Button size="sm" variant="ghost" className="h-9 w-9 p-0 text-red-400" onClick={() => setLines(lines.filter((_, j) => j !== i))}>
                     <XCircle className="h-4 w-4" />
                   </Button>
+                </div>
+                {/* Task 45: per-SKU Trade Offer (Rs) — discount ke ILAWA, sirf kuch SKUs par; GST auto product rate se */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <Label className="text-[11px] text-slate-500 whitespace-nowrap flex items-center gap-1"><Gift className="h-3 w-3 text-violet-500" />Trade Offer (Rs)</Label>
+                    <Input
+                      type="number" min={0} step="0.01"
+                      value={lines[i]?.tradeOffer ?? ''}
+                      onChange={(e) => {
+                        const next = [...lines]
+                        next[i] = { ...next[i], tradeOffer: e.target.value }
+                        setLines(next)
+                      }}
+                      placeholder="0"
+                      className="h-8 w-28 border-violet-200 focus-visible:ring-violet-300"
+                    />
+                  </div>
+                  {r.tradeOffer > 0 && <span className="text-[11px] font-semibold text-violet-600">- {fmtPKR(r.tradeOffer)}</span>}
+                  {r.gstAmt > 0 ? (
+                    <span className="text-[11px] font-medium text-blue-600">GST {r.gstRate}% = + {fmtPKR(r.gstAmt)}</span>
+                  ) : (
+                    <span className="text-[11px] text-slate-400">GST nahi lagta</span>
+                  )}
+                  <span className="text-[11px] text-slate-500 ml-auto whitespace-nowrap">Line payable: <b className="text-slate-700">{fmtPKR(Math.max(0, Math.round((r.total - r.tradeOffer + r.gstAmt) * 100) / 100))}</b></span>
                 </div>
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-slate-500">
@@ -599,11 +664,13 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
             {computed.discount > 0 && <div className="flex justify-between text-emerald-600 font-medium"><span>Scheme Discount</span><span>- {fmtPKR(computed.discount)}</span></div>}
             {manualDiscount > 0 && <div className="flex justify-between text-emerald-600 font-medium"><span>Manual Discount</span><span>- {fmtPKR(manualDiscount)}</span></div>}
             <div className="flex justify-between font-bold text-slate-900"><span>Net Total</span><span>{fmtPKR(netTotal)}</span></div>
+            {computed.toTotal > 0 && <div className="flex justify-between text-violet-600 font-medium"><span>Trade Offer</span><span>- {fmtPKR(computed.toTotal)}</span></div>}
+            {computed.gstTotal > 0 && <div className="flex justify-between text-blue-600 font-medium"><span>GST (Sales Tax)</span><span>+ {fmtPKR(computed.gstTotal)}</span></div>}
             {outlet && taxRates && advTaxPreview > 0 && (
-              <>
-                <div className="flex justify-between text-blue-600"><span>Advance Tax ({outlet.filerStatus === 'FILER' ? `Filer ${taxRates.filer}` : `Non-Filer ${taxRates.nonFiler}`}%)</span><span>+ {fmtPKR(advTaxPreview)}</span></div>
-                <div className="flex justify-between font-semibold text-slate-900"><span>Total Payable</span><span>{fmtPKR(Math.round((netTotal + advTaxPreview) * 100) / 100)}</span></div>
-              </>
+              <div className="flex justify-between text-blue-600"><span>Advance Tax ({outlet.filerStatus === 'FILER' ? `Filer ${taxRates.filer}` : `Non-Filer ${taxRates.nonFiler}`}%)</span><span>+ {fmtPKR(advTaxPreview)}</span></div>
+            )}
+            {(computed.toTotal > 0 || computed.gstTotal > 0 || advTaxPreview > 0) && (
+              <div className="flex justify-between font-bold text-emerald-700 border-t border-slate-200 pt-1"><span>Total Payable</span><span>{fmtPKR(grandPayable)}</span></div>
             )}
           </div>
           <Button onClick={save} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700">

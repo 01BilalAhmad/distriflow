@@ -369,6 +369,11 @@ model Order {
   filerStatus    String?      // FILER | NON_FILER (booking waqt ka snapshot)
   advanceTaxRate Float?       // % snapshot (rate-preserve principle)
   advanceTax     Float        @default(0)
+  // Task 45: purchase-invoice jaisa tax mechanism — GST per product + Trade Offer per SKU.
+  // total (goods net) aur advanceTax ka base UNCHANGED (settlement/ledger safe);
+  // Grand Payable = total − tradeOfferTotal + gstTotal + advanceTax
+  tradeOfferTotal Float      @default(0) // Σ line trade offer (per-SKU Rs snapshot)
+  gstTotal        Float      @default(0) // Σ line GST (product gstRate × line net)
   notes          String?
   orderDate      DateTime     @default(now())
   summaryId      String?
@@ -399,6 +404,11 @@ model OrderItem {
   schemeBuyQty  Int?
   schemeFreeQty Int?
   schemeName    String?
+  // Task 45: booking waqt ka GST + Trade Offer snapshot (Task 41 rate/scheme snapshot
+  // jaisa — baad me product rate ya scheme badle to PURANA bill nahi badalta)
+  tradeOfferAmt Float  @default(0) // per-SKU trade offer Rs (booking waqt ka snapshot)
+  gstRate       Float? // GST % snapshot (null = legacy line — product ka current rate fallback)
+  gstAmt        Float  @default(0) // gstRate% × (rate × qty − discount)
   lineTotal Float
 }
 
@@ -462,6 +472,9 @@ model SummarySettlement {
   billAmount   Float
   returnAmount Float    @default(0)
   advanceTax   Float    @default(0) // WHT snapshot (order se)
+  // Task 45: GST (effective, return reversal ke baad) + Trade Offer (effective) — late-return pro-rata isi se
+  gstTotal        Float  @default(0)
+  tradeOfferTotal Float  @default(0)
   cashAmount   Float
   creditAmount Float
   status       String // CASH | PARTIAL | CREDIT
