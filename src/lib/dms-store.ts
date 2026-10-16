@@ -42,10 +42,14 @@ interface DMSState {
   purchaseCompanyId: string | null
   /** Task 49: purchase entry form mein adhoora data mojood hai — nav guard isko dekhta hai */
   purchaseDraftDirty: boolean
+  /** Task 67: shop se order book karna — Outlets/Zero-Purchase par "Order Book" dabate hi
+   * ye set hota hai, /orders mount par New Order dialog is outlet ke sath khulta hai */
+  focusOrderOutletId: string | null
   setUser: (u: SessionUser | null) => void
   setFocusSummary: (id: string | null) => void
   setPurchaseCompanyId: (id: string | null) => void
   setPurchaseDraftDirty: (d: boolean) => void
+  setFocusOrderOutlet: (id: string | null) => void
 }
 
 export const useDMS = create<DMSState>((set) => ({
@@ -53,10 +57,12 @@ export const useDMS = create<DMSState>((set) => ({
   focusSummaryId: null,
   purchaseCompanyId: null,
   purchaseDraftDirty: false,
+  focusOrderOutletId: null,
   setUser: (u) => set({ user: u }),
   setFocusSummary: (id) => set({ focusSummaryId: id }),
   setPurchaseCompanyId: (id) => set({ purchaseCompanyId: id }),
   setPurchaseDraftDirty: (d) => set({ purchaseDraftDirty: d }),
+  setFocusOrderOutlet: (id) => set({ focusOrderOutletId: id }),
 }))
 
 export function loadSession(): SessionUser | null {

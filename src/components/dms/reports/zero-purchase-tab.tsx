@@ -1,17 +1,21 @@
 'use client'
 
 // Task 66 — Zero Purchase tab (month-wise: har shop ko mahine mein 1 bill lazmi)
+// Task 67 — har zero shop ke sath "Order Book" action: seedha New Order dialog usi shop ke sath
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useDMS } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
+import { Button } from '@/components/ui/button'
+import { ShoppingCart } from 'lucide-react'
 import {
   FilterBar, KpiRow, DataTable, SectionCard, CSVButton, PrintButton,
   downloadCSV, printReport, useReport, fmtMoney, fmtDay, type Col, type Option,
 } from './reports-kit'
 
 interface ZeroRow extends Record<string, unknown> {
-  shop: string; code: string; city: string; channel: string; booker: string
+  outletId: string; shop: string; code: string; city: string; channel: string; booker: string
   lastOrderDate: string | null; lastOrderValue: number; daysSinceLastOrder: number | null
   avg3m: number; everOrdered: boolean
 }
@@ -24,9 +28,17 @@ interface Resp extends Record<string, unknown> {
 
 export function ZeroPurchaseTab() {
   const { user } = useDMS()
+  const setFocusOrderOutlet = useDMS((s) => s.setFocusOrderOutlet)
+  const router = useRouter()
   const now = new Date()
   const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
   const [booker, setBooker] = useState('')
+
+  // Task 67: zero shop par foran action — /orders par New Order dialog isi shop ke sath khulega
+  function bookForShop(outletId: string) {
+    setFocusOrderOutlet(outletId)
+    router.push('/orders')
+  }
 
   const { data, loading, refresh } = useReport<Resp>(async () => {
     const p = new URLSearchParams({ userId: user!.id, month })
@@ -51,6 +63,21 @@ export function ZeroPurchaseTab() {
     { key: 'active', label: 'Ordered (is month)', align: 'right', total: true, cls: 'text-emerald-600' },
     { key: 'zero', label: 'Zero Purchase', align: 'right', total: true, cls: 'text-red-500' },
     { key: 'coveragePct', label: 'Coverage %', align: 'right', render: (r) => `${r.coveragePct.toFixed(1)}%` },
+  ]
+
+  // Task 67: table mein action column (CSV/print base cols se banta hai — action us mein nahi)
+  const tableCols: Col<ZeroRow>[] = [
+    ...cols,
+    {
+      key: 'actions', label: 'Action', align: 'right',
+      render: (r) => (
+        <Button size="sm" variant="outline" className="h-7 border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-[10px] px-2"
+          title="Is shop ka order book karein"
+          onClick={() => bookForShop(r.outletId)}>
+          <ShoppingCart className="h-3 w-3 mr-1" /> Order Book
+        </Button>
+      ),
+    },
   ]
 
   return (
@@ -93,7 +120,7 @@ export function ZeroPurchaseTab() {
           </div>
         }
       >
-        <DataTable cols={cols} rows={data?.zeroRows ?? []} empty="Mubarak ho — sab shops ne is month bill banaya ✓" />
+        <DataTable cols={tableCols} rows={data?.zeroRows ?? []} empty="Mubarak ho — sab shops ne is month bill banaya ✓" />
       </SectionCard>
       <SectionCard title="Booker-wise Coverage Summary">
         <DataTable cols={bcols} rows={data?.bookerSummary ?? []} />

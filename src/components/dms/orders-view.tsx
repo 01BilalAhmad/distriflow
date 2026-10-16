@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -10,6 +10,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
+import { Command, CommandInput, CommandList, CommandEmpty, CommandItem } from '@/components/ui/command'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Separator } from '@/components/ui/separator'
 import { useDMS } from '@/lib/dms-store'
@@ -18,7 +20,7 @@ import type { OrderDTO, OrderItemDTO, OutletDTO, ProductDTO, SchemeDTO, Salesman
 import { UnitQtyInputs, splitPcs, fmtQty, packHint } from '@/components/dms/unit-qty'
 import { PrintFrame, CblInvoiceDoc, keepDialogBehind, type InvoiceData } from '@/components/dms/cbl-print'
 import { orderGrandPayable, splitManualByNet, aggregateSchemePromos } from '@/lib/dms-order-calc'
-import { Plus, Eye, XCircle, Loader2, Search, ShoppingCart, Printer, Percent, Gift } from 'lucide-react'
+import { Plus, Eye, XCircle, Loader2, Search, ShoppingCart, Printer, Percent, Gift, ChevronsUpDown, Check, Store } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
 interface DraftLine {
@@ -44,6 +46,9 @@ interface PreviewStackEntry {
 
 export function OrdersView() {
   const user = useDMS((s) => s.user)
+  // Task 67: Outlets page / Zero-Purchase report se "Order Book" — us shop ka id yahan aata hai
+  const focusOutlet = useDMS((s) => s.focusOrderOutletId)
+  const setFocusOrderOutlet = useDMS((s) => s.setFocusOrderOutlet)
   const [orders, setOrders] = useState<OrderDTO[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('ALL')
@@ -51,6 +56,16 @@ export function OrdersView() {
   const [detail, setDetail] = useState<OrderDTO | null>(null)
   const [detailItems, setDetailItems] = useState<OrderItemDTO[] | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
+  const [prefillOutlet, setPrefillOutlet] = useState<string | null>(null)
+
+  // Task 67: shop-focused booking — /orders mount par New Order dialog usi shop ke sath khulta hai
+  useEffect(() => {
+    if (focusOutlet) {
+      setPrefillOutlet(focusOutlet)
+      setFocusOrderOutlet(null) // consume — wapas nav par dobara trigger na ho
+      setCreateOpen(true)
+    }
+  }, [focusOutlet, setFocusOrderOutlet])
 
   async function load() {
     if (!user) return
@@ -183,7 +198,13 @@ export function OrdersView() {
       </Card>
 
       <OrderDetailDialog order={detail} items={detailItems} onClose={() => setDetail(null)} />
-      <CreateOrderDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={load} />
+      <CreateOrderDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={load}
+        prefillOutletId={prefillOutlet}
+        onPrefillApplied={() => setPrefillOutlet(null)}
+      />
     </div>
   )
 }
@@ -327,7 +348,7 @@ function OrderDetailDialog({ order, items, onClose }: { order: OrderDTO | null; 
   )
 }
 
-function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (v: boolean) => void; onCreated: () => void }) {
+function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onPrefillApplied }: { open: boolean; onOpenChange: (v: boolean) => void; onCreated: () => void; prefillOutletId?: string | null; onPrefillApplied?: () => void }) {
   const user = useDMS((s) => s.user)
   const [outlets, setOutlets] = useState<OutletDTO[]>([])
   const [products, setProducts] = useState<ProductDTO[]>([])
@@ -335,31 +356,56 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
   const [salesmen, setSalesmen] = useState<SalesmanPerfDTO[]>([])
   const [outletId, setOutletId] = useState('')
   const [bookerId, setBookerId] = useState('')
+  const [bookerTouched, setBookerTouched] = useState(false) // manual booker choice auto-fill override karta hai
   const [lines, setLines] = useState<DraftLine[]>([])
   const [notes, setNotes] = useState('')
   const [discType, setDiscType] = useState<DiscType>('NONE')
   const [discValue, setDiscValue] = useState('')
   const [saving, setSaving] = useState(false)
   const [taxRates, setTaxRates] = useState<{ filer: number; nonFiler: number } | null>(null)
+  // Task 67: searchable shop picker + shop-focused prefill
+  const [outletPickerOpen, setOutletPickerOpen] = useState(false)
+  const [outletsLoaded, setOutletsLoaded] = useState(false)
+  const prefillDone = useRef<string | null>(null)
 
   useEffect(() => {
     if (!open || !user) return
     setOutletId(''); setBookerId(''); setLines([]); setNotes('')
     setDiscType('NONE'); setDiscValue('')
-    api<{ outlets: OutletDTO[] }>(`/api/outlets?userId=${user.id}`).then((r) => setOutlets(r.outlets)).catch(() => {})
+    setOutletsLoaded(false)
+    prefillDone.current = null // har opening par prefill fresh apply ho
+    setBookerTouched(false)
+    api<{ outlets: OutletDTO[] }>(`/api/outlets?userId=${user.id}`).then((r) => { setOutlets(r.outlets); setOutletsLoaded(true) }).catch(() => {})
     api<{ products: ProductDTO[] }>(`/api/products?userId=${user.id}`).then((r) => setProducts(r.products)).catch(() => {})
     api<{ schemes: SchemeDTO[] }>(`/api/schemes?userId=${user.id}`).then((r) => setSchemes(r.schemes.filter((s) => s.isActive))).catch(() => {})
     api<{ salesmen: SalesmanPerfDTO[] }>(`/api/field-force?userId=${user.id}`).then((r) => setSalesmen(r.salesmen)).catch(() => {})
     api<{ settings: { filerTaxRate: number; nonFilerTaxRate: number } }>(`/api/settings?userId=${user.id}`).then((r) => setTaxRates({ filer: r.settings.filerTaxRate, nonFiler: r.settings.nonFilerTaxRate })).catch(() => {})
   }, [open, user])
 
+  // Task 67: Outlets/Zero-Purchase se aya shop prefill — outlets load hote hi apply (booker bhi auto)
+  useEffect(() => {
+    if (!open || !prefillOutletId || !outletsLoaded) return
+    if (prefillDone.current === prefillOutletId) return
+    prefillDone.current = prefillOutletId
+    const o = outlets.find((x) => x.id === prefillOutletId)
+    if (o) {
+      setOutletId(o.id)
+      const match = o.salesmanName ? salesmen.find((s) => s.name === o.salesmanName) : null
+      if (match) setBookerId(match.id)
+    } else {
+      toast({ title: 'Shop nahi mili', description: 'Jo shop aayi thi wo ab mojood nahi — dobara select karein', variant: 'destructive' })
+    }
+    onPrefillApplied?.()
+  }, [open, prefillOutletId, outletsLoaded])
+
   const outlet = outlets.find((o) => o.id === outletId)
   const booker = salesmen.find((s) => s.id === bookerId)
 
-  // Outlet select hote hi uska default order booker auto-fill (manual choice override nahi hota)
+  // Outlet select hote hi uska default order booker auto-fill — LEKIN sirf jab booker manually
+  // chuna na gaya ho (bookerTouched): shop badla to booker bhi shop ke route par shift hota hai
   function selectOutlet(id: string) {
     setOutletId(id)
-    if (bookerId) return
+    if (bookerTouched) return
     const o = outlets.find((x) => x.id === id)
     if (!o?.salesmanName) return
     const match = salesmen.find((s) => s.name === o.salesmanName)
@@ -489,7 +535,7 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
 
   async function save() {
     if (!outletId || lines.length === 0) {
-      toast({ title: 'Missing info', description: 'Outlet aur kam az kam 1 product select karein', variant: 'destructive' })
+      toast({ title: 'Missing info', description: 'Shop (Outlet) aur kam az kam 1 product select karein', variant: 'destructive' })
       return
     }
     if (lines.some((l) => l.qtyPcs <= 0)) {
@@ -553,13 +599,13 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
       <DialogContent className="max-w-[calc(100%-2rem)] sm:max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><ShoppingCart className="h-5 w-5 text-emerald-600" /> New Order Booking</DialogTitle>
-          <DialogDescription>Outlet select karein — schemes order time par auto-apply hongi</DialogDescription>
+          <DialogDescription>Shop search kar ke select karein — schemes order time par auto-apply hongi</DialogDescription>
         </DialogHeader>
         <div className="grid gap-3 overflow-y-auto pr-1">
           <div className="grid sm:grid-cols-2 gap-3">
             <div className="grid gap-1.5">
               <Label>Order Booker <span className="text-red-500">*</span></Label>
-              <Select value={bookerId} onValueChange={setBookerId}>
+              <Select value={bookerId} onValueChange={(v) => { setBookerId(v); setBookerTouched(true) }}>
                 <SelectTrigger className={bookerId ? 'border-emerald-300' : 'border-amber-300'}><SelectValue placeholder="Bill kis order booker ka?" /></SelectTrigger>
                 <SelectContent>
                   {salesmen.map((s) => (
@@ -572,15 +618,39 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
               )}
             </div>
             <div className="grid gap-1.5">
-              <Label>Outlet</Label>
-              <Select value={outletId} onValueChange={selectOutlet}>
-                <SelectTrigger><SelectValue placeholder="Select outlet" /></SelectTrigger>
-                <SelectContent>
-                  {outlets.map((o) => (
-                    <SelectItem key={o.id} value={o.id}>{o.name} — {o.channel}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label>Shop (Outlet) <span className="text-red-500">*</span></Label>
+              {/* Task 67: SEARCHABLE shop picker — naam/code likh kar shop dhundo (bohat sari shops mein
+                  plain dropdown se dhoondhna mushkil tha). Selected par naam + channel trigger par dikhta hai. */}
+              <Popover open={outletPickerOpen} onOpenChange={setOutletPickerOpen}>
+                <PopoverTrigger asChild>
+                  <Button type="button" variant="outline" role="combobox" aria-expanded={outletPickerOpen}
+                    className={`w-full justify-between h-9 font-normal ${outletId ? 'border-emerald-300' : 'border-amber-300'}`}>
+                    <span className={`truncate text-sm ${outlet ? 'text-slate-800 font-medium' : 'text-slate-400'}`}>
+                      {outlet ? `${outlet.name} — ${outlet.channel}` : 'Search kar ke shop select karein...'}
+                    </span>
+                    <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[min(22rem,calc(100vw-3rem))] p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Shop ka naam ya code likhein..." />
+                    <CommandList className="max-h-72">
+                      <CommandEmpty>Koi shop nahi mili — Outlets page se add karein</CommandEmpty>
+                      {outlets.map((o) => (
+                        <CommandItem key={o.id} value={`${o.name} ${o.code} ${o.channel} ${o.salesmanName ?? ''}`}
+                          onSelect={() => { selectOutlet(o.id); setOutletPickerOpen(false) }}>
+                          <Store className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-slate-800 truncate">{o.name}</p>
+                            <p className="text-[10px] text-slate-400 truncate">{o.code} • {o.channel} • {o.salesmanName ?? 'booker nahi'} • credit {o.creditDays}d</p>
+                          </div>
+                          <Check className={`h-3.5 w-3.5 shrink-0 ${outletId === o.id ? 'opacity-100 text-emerald-600' : 'opacity-0'}`} />
+                        </CommandItem>
+                      ))}
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
             {outlet && (
               <div className="sm:col-span-2 text-xs text-slate-500 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -13,7 +14,7 @@ import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR } from '@/lib/dms-api'
 import type { OutletDTO } from '@/lib/dms-types'
 import { BulkImportDialog, type BulkColumn, type ParseOutcome } from '@/components/dms/bulk-import-dialog'
-import { Plus, Search, MapPin, Loader2, Phone, Store, Pencil, Settings2, FileText, CalendarDays, Upload } from 'lucide-react'
+import { Plus, Search, MapPin, Loader2, Phone, Store, Pencil, Settings2, FileText, CalendarDays, Upload, ShoppingCart } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
 export const DAY_LIST = [
@@ -63,6 +64,8 @@ export const OUTLET_SAMPLE_ROWS = [
 
 export function OutletsView() {
   const user = useDMS((s) => s.user)
+  const setFocusOrderOutlet = useDMS((s) => s.setFocusOrderOutlet)
+  const router = useRouter()
   const [outlets, setOutlets] = useState<OutletDTO[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -71,6 +74,12 @@ export function OutletsView() {
   const [editOutlet, setEditOutlet] = useState<OutletDTO | null>(null)
   const [taxOpen, setTaxOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+
+  // Task 67: is shop ka foran order book karo — /orders par New Order dialog isi shop ke sath khulega
+  function bookOrderFor(outletId: string) {
+    setFocusOrderOutlet(outletId)
+    router.push('/orders')
+  }
 
   async function load() {
     if (!user) return
@@ -166,10 +175,17 @@ export function OutletsView() {
                       <p className="text-slate-400">{o.totalOrders} orders</p>
                     </div>
                     {user?.role !== 'SALESMAN' && (
-                      <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-slate-400 hover:text-emerald-600" title="Edit outlet / tax status"
-                        onClick={() => { setEditOutlet(o); setFormOpen(true) }}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Button size="sm" variant="outline" className="h-8 border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-[11px] px-2"
+                          title="Is shop ka order book karein — New Order dialog isi shop ke sath khulega"
+                          onClick={() => bookOrderFor(o.id)}>
+                          <ShoppingCart className="h-3.5 w-3.5 mr-1" /> Order Book
+                        </Button>
+                        <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-slate-400 hover:text-emerald-600" title="Edit outlet / tax status"
+                          onClick={() => { setEditOutlet(o); setFormOpen(true) }}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                      </div>
                     )}
                   </div>
                 </div>

@@ -9,10 +9,10 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR, fmtDate, STATUS_STYLES, statusLabel } from '@/lib/dms-api'
-import type { PJPPlanDTO, ProductDTO, OrderDTO, RecoveryData, RecoveryRowDTO, RecoveryShopDTO } from '@/lib/dms-types'
+import type { PJPPlanDTO, ProductDTO, OrderDTO, RecoveryData, RecoveryRowDTO, RecoveryShopDTO, SalesmanPerfDTO } from '@/lib/dms-types'
 import { UnitQtyInputs, splitPcs, fmtQty, packHint } from '@/components/dms/unit-qty'
 import { DAY_LIST, DAY_LABELS, VisitDayChips } from '@/components/dms/outlets-view'
-import { Route, Store, ShoppingCart, ClipboardList, User, MapPin, LogIn, LogOut, Plus, Trash2, Loader2, CheckCircle2, Navigation, Wallet, Percent, XCircle, HandCoins, CalendarDays, Clock3, Eye, Banknote, Lock, RefreshCw, Play, Square, CloudUpload, WifiOff, ReceiptText } from 'lucide-react'
+import { Route, Store, ShoppingCart, ClipboardList, User, MapPin, LogIn, LogOut, Plus, Trash2, Loader2, CheckCircle2, Navigation, Wallet, Percent, XCircle, HandCoins, CalendarDays, Clock3, Eye, Banknote, Lock, RefreshCw, Play, Square, CloudUpload, WifiOff, ReceiptText, Target } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 import { addToQueue, clearSnapshot, getQueue, isNetworkError, saveSnapshot, syncQueue, useRouteState, todayStr, type PendingSync, type RouteSnapshot } from '@/lib/route-cache'
 
@@ -1298,6 +1298,16 @@ function MyOrdersTab() {
 function MeTab() {
   const user = useDMS((s) => s.user)
   const { setUser } = useDMS()
+  // Task 67: booker ko APNA month target + live progress nazar — distributor jo set karta hai
+  const [perf, setPerf] = useState<SalesmanPerfDTO | null>(null)
+
+  useEffect(() => {
+    if (!user) return
+    api<{ salesmen: SalesmanPerfDTO[] }>(`/api/field-force?userId=${user.id}`)
+      .then((r) => setPerf(r.salesmen[0] ?? null))
+      .catch(() => { /* offline — target card skip */ })
+  }, [user])
+
   return (
     <div className="space-y-3">
       <Card className="border-slate-200 shadow-sm">
@@ -1320,6 +1330,41 @@ function MeTab() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Task 67: apna month target + live progress — distributor Field Force se jo set karta hai */}
+      {perf && (
+        <Card className="border-slate-200 shadow-sm">
+          <CardContent className="p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-slate-500 flex items-center gap-1"><Target className="h-3.5 w-3.5 text-amber-600" /> Is Month ka Target</p>
+              {perf.monthTarget > 0 && (
+                <span className={`text-xs font-bold ${perf.achievement >= 100 ? 'text-emerald-600' : perf.achievement >= 60 ? 'text-amber-600' : 'text-red-500'}`}>
+                  {perf.achievement}% achieved
+                </span>
+              )}
+            </div>
+            {perf.monthTarget > 0 ? (
+              <>
+                <div className="flex items-baseline justify-between">
+                  <p className="text-lg font-bold text-slate-900">{fmtPKR(perf.monthSales)}</p>
+                  <p className="text-xs text-slate-400">target {fmtPKR(perf.monthTarget)}</p>
+                </div>
+                <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${perf.achievement >= 100 ? 'bg-emerald-500' : perf.achievement >= 60 ? 'bg-amber-500' : 'bg-red-400'}`}
+                    style={{ width: `${Math.min(perf.achievement, 100)}%` }}
+                  />
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  {perf.monthOrders} orders • {perf.achievement >= 100 ? 'Target achieve ho gaya — shabash! 🎉' : `${fmtPKR(Math.max(perf.monthTarget - perf.monthSales, 0))} baqi hain`}
+                </p>
+              </>
+            ) : (
+              <p className="text-xs text-slate-400">Is month ka target abhi set nahi hua — distributor target set karega to yahan progress nazar aayega</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="border-slate-200 shadow-sm">
         <CardContent className="p-4 space-y-2">

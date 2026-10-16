@@ -33,7 +33,8 @@ export async function GET(req: Request) {
 
     const [monthOrders, targets, outlets, todayPlans] = await Promise.all([
       db.order.findMany({
-        where: { orderDate: { gte: mStart }, salesmanId: { in: salesmen.map((s) => s.id) } },
+        // Task 67: CANCELLED orders sales/target nahi hote — reports/targets jaisa hi base
+        where: { orderDate: { gte: mStart }, salesmanId: { in: salesmen.map((s) => s.id) }, status: { not: 'CANCELLED' } },
         select: { salesmanId: true, total: true, orderDate: true },
       }),
       db.salesTarget.findMany({ where: { month: monthKey, salesmanId: { in: salesmen.map((s) => s.id) } } }),
