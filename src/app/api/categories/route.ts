@@ -71,6 +71,7 @@ export async function DELETE(req: Request) {
     const { searchParams } = new URL(req.url)
     const userId = searchParams.get('userId')
     const id = searchParams.get('id')
+    const moveTo = (searchParams.get('moveTo') ?? 'General').trim() || 'General'
     if (!userId || !id) return jsonError('userId aur id required hain')
     const t = await distributorTenant(userId)
     if ('error' in t) return t.error
@@ -78,9 +79,65 @@ export async function DELETE(req: Request) {
     const cat = await db.category.findFirst({ where: { id, distributorId: t.tenantId } })
     if (!cat) return jsonError('Category nahi mili', 404)
     const inUse = await db.product.count({ where: { distributorId: t.tenantId, category: cat.name } })
-    if (inUse > 0) return jsonError(`"${cat.name}" ${inUse} products par use ho rahi hai — pehle unki category badlein`)
+
+    // Task 53b: in-use category delete ho to products moveTo (default General) par chale jate
+    // hain — General category row bhi ensure hoti hai (dropdown consistent rahe).
+    let moved = 0
+    if (inUse > 0) {
+      if (moveTo === cat.name) return jsonError('Products isi category par hain — dusra target dein')
+      await db.category.upsert({
+        where: { name_distributorId: { name: moveTo, distributorId: t.tenantId } },
+        update: {},
+        create: { name: moveTo, distributorId: t.tenantId },
+      })
+      const res = await db.product.updateMany({
+        where: { distributorId: t.tenantId, category: cat.name },
+        data: { category: moveTo },
+      })
+      moved = res.count
+    }
     await db.category.delete({ where: { id } })
-    return Response.json({ ok: true })
+    return Response.json({ ok: true, moved })
+  } catch (e) {
+    return jsonError(e instanceof Error ? e.message : 'Server error', 500)
+  }
+}
+
+// Task 53b: rename — Category ka naam badlo to us category ke products bhi naye naam par
+// (category sirf Product.category string hai, isi liye updateMany zaroori).
+export async function PATCH(req: Request) {
+  try {
+    const body = await req.json()
+    const { userId, id, name } = body as { userId?: string; id?: string; name?: string }
+    if (!userId || !id) return jsonError('userId aur id required hain')
+    const clean = (name ?? '').trim()
+    if (!clean) return jsonError('Category ka naam required hai')
+    if (clean.length > 40) return jsonError('Category ka naam 40 characters se lamba nahi ho sakta')
+    const t = await distributorTenant(userId)
+    if ('error' in t) return t.error
+
+    const cat = await db.category.findFirst({ where: { id, distributorId: t.tenantId } })
+    if (!cat) return jsonError('Category nahi mili', 404)
+    if (cat.name === clean) return Response.json({ category: { id: cat.id, name: cat.name }, moved: 0 })
+
+    // Naam clash: same naam ki dusri category maujood hai — merge kar do (products move + old delete)
+    const clash = await db.category.findFirst({
+      where: { distributorId: t.tenantId, name: { equals: clean, mode: 'insensitive' }, id: { not: id } },
+    })
+    if (clash) {
+      const res = await db.product.updateMany({
+        where: { distributorId: t.tenantId, category: cat.name },
+        data: { category: clash.name },
+      })
+      await db.category.delete({ where: { id } })
+      return Response.json({ category: { id: clash.id, name: clash.name }, moved: res.count, merged: true })
+    }
+
+    const [updated, res] = await db.$transaction([
+      db.category.update({ where: { id }, data: { name: clean } }),
+      db.product.updateMany({ where: { distributorId: t.tenantId, category: cat.name }, data: { category: clean } }),
+    ])
+    return Response.json({ category: { id: updated.id, name: updated.name }, moved: res.count })
   } catch (e) {
     return jsonError(e instanceof Error ? e.message : 'Server error', 500)
   }

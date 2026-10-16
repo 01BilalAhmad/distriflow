@@ -14,7 +14,7 @@ import { api, fmtPKR, fmtNum } from '@/lib/dms-api'
 import { fmtQty, packHint } from '@/components/dms/unit-qty'
 import type { ProductDTO, CompanyDTO, CategoryDTO } from '@/lib/dms-types'
 import { BulkImportDialog, type BulkColumn, type ParseOutcome } from '@/components/dms/bulk-import-dialog'
-import { Plus, Search, Loader2, Package, Building2, Pencil, Upload, Tags } from 'lucide-react'
+import { Plus, Search, Loader2, Package, Building2, Pencil, Upload, Tags, Trash2, Check, X } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
 // Task 53: categories ab DB-backed (per-tenant) — GET /api/categories first run par
@@ -88,6 +88,7 @@ export function ProductsView() {
   const [addOpen, setAddOpen] = useState(false)
   const [editProduct, setEditProduct] = useState<ProductDTO | null>(null)
   const [companiesOpen, setCompaniesOpen] = useState(false)
+  const [categoriesOpen, setCategoriesOpen] = useState(false) // Task 53b: categories manager
   const [importOpen, setImportOpen] = useState(false)
 
   async function load() {
@@ -114,11 +115,14 @@ export function ProductsView() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-slate-900">Product Catalog (SKUs)</h2>
-          <p className="text-sm text-slate-500">{companies.length} companies • {products.length} SKUs — edit, rates, pack sizes aur per-product GST</p>
+          <p className="text-sm text-slate-500">{companies.length} companies • {categories.length} categories • {products.length} SKUs — edit, rates, pack sizes aur per-product GST</p>
         </div>
         <div className="flex gap-2">
           {user?.role !== 'SALESMAN' && (
             <>
+              <Button variant="outline" onClick={() => setCategoriesOpen(true)} className="border-slate-300 text-slate-700 hover:bg-slate-50">
+                <Tags className="h-4 w-4 mr-1.5" /> Categories
+              </Button>
               <Button variant="outline" onClick={() => setCompaniesOpen(true)} className="border-slate-300 text-slate-700 hover:bg-slate-50">
                 <Building2 className="h-4 w-4 mr-1.5" /> Companies
               </Button>
@@ -222,6 +226,7 @@ export function ProductsView() {
       <ProductFormDialog open={addOpen} onOpenChange={setAddOpen} onSaved={load} companies={companies} categories={categories} onCategoriesChanged={load} />
       <ProductFormDialog open={!!editProduct} onOpenChange={(v) => { if (!v) setEditProduct(null) }} onSaved={load} companies={companies} categories={categories} onCategoriesChanged={load} product={editProduct} />
       <CompaniesDialog open={companiesOpen} onOpenChange={setCompaniesOpen} companies={companies} onChanged={load} />
+      <CategoriesDialog open={categoriesOpen} onOpenChange={setCategoriesOpen} categories={categories} onChanged={load} />
       <BulkImportDialog
         open={importOpen}
         onOpenChange={setImportOpen}
@@ -523,6 +528,147 @@ function NewCategoryDialog({ open, onOpenChange, onCreated, onChanged }: {
             Add Category
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** Task 53b: Categories manager — add / rename (products bhi update) / delete (in-use ho to
+ *  products "General" par move). Inline edit + 2-step delete confirm. */
+function CategoriesDialog({ open, onOpenChange, categories, onChanged }: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  categories: CategoryDTO[]
+  onChanged: () => void
+}) {
+  const user = useDMS((s) => s.user)
+  const [name, setName] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editName, setEditName] = useState('')
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [confirmId, setConfirmId] = useState<string | null>(null)
+
+  useEffect(() => { if (open) { setName(''); setEditingId(null); setConfirmId(null) } }, [open])
+
+  async function add() {
+    if (!name.trim()) { toast({ title: 'Category ka naam likhein', variant: 'destructive' }); return }
+    setSaving(true)
+    try {
+      await api('/api/categories', { method: 'POST', body: JSON.stringify({ userId: user?.id, name: name.trim() }) })
+      toast({ title: 'Category Added ✓', description: name.trim() })
+      setName('')
+      onChanged()
+    } catch (e) {
+      toast({ title: 'Failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' })
+    } finally { setSaving(false) }
+  }
+
+  async function rename(id: string) {
+    if (!editName.trim()) { toast({ title: 'Category ka naam likhein', variant: 'destructive' }); return }
+    setBusyId(id)
+    try {
+      const r = await api<{ moved: number; merged?: boolean }>('/api/categories', {
+        method: 'PATCH',
+        body: JSON.stringify({ userId: user?.id, id, name: editName.trim() }),
+      })
+      toast({
+        title: 'Category Renamed ✓',
+        description: r.merged ? `Same naam ki category thi — ${r.moved} products merge ho gaye`
+          : r.moved > 0 ? `${r.moved} products naye naam par update ho gaye` : 'Save ho gaya',
+      })
+      setEditingId(null)
+      onChanged()
+    } catch (e) {
+      toast({ title: 'Failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' })
+    } finally { setBusyId(null) }
+  }
+
+  async function remove(cat: CategoryDTO) {
+    // 2-step: pehla click confirm arm karta hai, dobara click delete
+    if (confirmId !== cat.id) { setConfirmId(cat.id); return }
+    setBusyId(cat.id)
+    try {
+      const r = await api<{ moved: number }>(`/api/categories?userId=${user?.id}&id=${cat.id}&moveTo=General`, { method: 'DELETE' })
+      toast({
+        title: 'Category Deleted ✓',
+        description: r.moved > 0 ? `${r.moved} products "General" category par move ho gaye` : cat.name,
+      })
+      setConfirmId(null)
+      onChanged()
+    } catch (e) {
+      toast({ title: 'Failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' })
+    } finally { setBusyId(null) }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><Tags className="h-5 w-5 text-emerald-600" /> Product Categories</DialogTitle>
+          <DialogDescription>Add, rename ya delete karein — rename par products bhi naye naam par chale jate hain</DialogDescription>
+        </DialogHeader>
+        <div className="flex gap-2">
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add() } }}
+            placeholder="Nayi category ka naam (misal: Biscuits)"
+          />
+          <Button onClick={add} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 shrink-0">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4 mr-1" />} Add
+          </Button>
+        </div>
+        <div className="rounded-lg border">
+          {categories.length === 0 ? (
+            <p className="py-8 text-center text-sm text-slate-400">Abhi koi category nahi</p>
+          ) : categories.map((c) => (
+            <div key={c.id} className="flex items-center justify-between gap-2 px-3 py-2 border-b last:border-0">
+              {editingId === c.id ? (
+                <>
+                  <Input
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); rename(c.id) } }}
+                    className="h-8 flex-1"
+                    autoFocus
+                  />
+                  <div className="flex gap-1 shrink-0">
+                    <Button size="icon" className="h-8 w-8 bg-emerald-600 hover:bg-emerald-700" onClick={() => rename(c.id)} disabled={busyId === c.id} title="Save">
+                      {busyId === c.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                    </Button>
+                    <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => setEditingId(null)} title="Cancel">
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-slate-800 truncate">{c.name}</p>
+                    <p className="text-[11px] text-slate-400">{c.productCount ?? 0} products</p>
+                  </div>
+                  <div className="flex gap-1 shrink-0">
+                    <Button size="icon" variant="ghost" className="h-8 w-8 text-slate-500 hover:bg-slate-100" onClick={() => { setEditingId(c.id); setEditName(c.name); setConfirmId(null) }} title="Rename">
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    {confirmId === c.id ? (
+                      <Button size="sm" variant="destructive" className="h-8" onClick={() => remove(c)} disabled={busyId === c.id}>
+                        {busyId === c.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          : (c.productCount ?? 0) > 0 ? `${c.productCount} products move?` : 'Sure delete?'}
+                      </Button>
+                    ) : (
+                      <Button size="icon" variant="ghost" className="h-8 w-8 text-red-500 hover:bg-red-50 hover:text-red-600" onClick={() => remove(c)} title="Delete">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+        <p className="text-[11px] text-slate-400 -mt-1">Delete par products us category se nikal kar &quot;General&quot; mein chale jate hain — bills/history par asar nahi hota.</p>
       </DialogContent>
     </Dialog>
   )
