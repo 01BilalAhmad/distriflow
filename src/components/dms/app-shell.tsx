@@ -11,32 +11,21 @@
 // jaisa). Technique: inner w-max + mx-auto — content chhota ho to center, overflow ho
 // to left-align + scrollable (justify-center + overflow ka left-clipping bug avoid).
 // Role model wahi (Task 22): MEGA_ADMIN = sirf Distributor Accounts, SALESMAN = apna app.
+//
+// Task 65 — HAR SECTION KA APNA ALAG SECURE PAGE:
+//   - Pehle activeView zustand in-memory state thi → refresh par dashboard par wapas.
+//     Ab har section ka apna URL route hai — activeView URL (pathname) se derive hota hai.
+//   - Navigation router.push se hoti hai → URL badalta hai → refresh par WAHI section
+//     milta hai, dashboard redirect khatam. Browser back/forward bhi kaam karta hai.
+//   - Session ab double-layered: localStorage cache + httpOnly signed cookie (middleware
+//     server-side gate). Shell mount par /api/auth/session se cookie verify/refresh —
+//     401 aaye to force logout (localStorage stale na rahe).
 
 import { useEffect, useMemo, useState } from 'react'
-import { useDMS, loadSession, type ViewKey } from '@/lib/dms-store'
-import { LoginScreen } from './login-screen'
-import { DashboardView } from './dashboard-view'
-import { OrdersView } from './orders-view'
-import { InventoryView } from './inventory-view'
-import { ProductsView } from './products-view'
-import { CompaniesView } from './companies-view'
-import { OutletsView } from './outlets-view'
-import { DistributorsView } from './distributors-view'
-import { PJPView } from './pjp-view'
-import { FieldForceView } from './field-force-view'
-import { SchemesView } from './schemes-view'
-import { ReturnsClaimsView } from './returns-claims-view'
-import { ReportsView } from './reports-view'
+import { useRouter, usePathname } from 'next/navigation'
+import { useDMS, loadSession, saveSession } from '@/lib/dms-store'
+import { VIEW_PATH, viewFromPath } from '@/lib/dms-nav'
 import { SalesmanApp } from './salesman-app'
-import { MegaAccountsView } from './mega-accounts-view'
-import { BackupView } from './backup-view'
-import { VisitMapView } from './visit-map'
-import { UnprocessedBillsView } from './unprocessed-view'
-import { SummariesView } from './summaries-view'
-import { SettlementView } from './settlement-view'
-import { LedgersView } from './ledgers-view'
-import { RecoveryView } from './recovery-view'
-import { PurchaseEntryView } from './purchase-entry-view'
 import {
   LayoutDashboard, ShoppingCart, Warehouse, Package, Store, Network, Route,
   Users, Gift, Undo2, BarChart3, Package2, LogOut, Building2,
@@ -47,7 +36,7 @@ import {
 // group = module ka naam (primary tab) — items us module ke sub-nav tiles isi order mein
 // Task 22 role model: MEGA_ADMIN = sirf Distributor Accounts console (business data locked);
 // DISTRIBUTOR = poora business portal (apne data par), SALESMAN = field app.
-const NAV: { key: ViewKey; label: string; icon: typeof LayoutDashboard; roles: string[]; group: string }[] = [
+const NAV: { key: string; label: string; icon: typeof LayoutDashboard; roles: string[]; group: string }[] = [
   // Mega Admin — sirf account management, koi business view nahi
   { key: 'mega-accounts', label: 'Distributor Accounts', icon: Landmark, roles: ['MEGA_ADMIN'], group: 'Overview' },
   { key: 'backup', label: 'Backup & Safety', icon: Database, roles: ['MEGA_ADMIN'], group: 'Overview' },
@@ -79,6 +68,9 @@ const NAV: { key: ViewKey; label: string; icon: typeof LayoutDashboard; roles: s
   { key: 'sales-app', label: 'Order Booker App', icon: Package2, roles: ['SALESMAN'], group: 'Overview' },
 ]
 
+const KEYSET = new Set(NAV.map((n) => n.key))
+type NavKey = string & keyof typeof VIEW_PATH
+
 // Modules (primary tabs) — upar se neeche yahi order; icon = tab icon
 const MODULES: { name: string; icon: typeof LayoutDashboard }[] = [
   { name: 'Overview', icon: LayoutDashboard },
@@ -89,19 +81,25 @@ const MODULES: { name: string; icon: typeof LayoutDashboard }[] = [
   { name: 'Business Network', icon: Network },
 ]
 
-export function DMSApp() {
-  const { user, setUser, activeView, setActiveView, purchaseDraftDirty } = useDMS()
+export function DMSApp({ children }: { children: React.ReactNode }) {
+  const { user, setUser, purchaseDraftDirty } = useDMS()
+  const router = useRouter()
+  const pathname = usePathname()
   const [mounted, setMounted] = useState(false)
+
+  // Task 65: active view URL se — refresh/back/forward sab par sahi section milta hai
+  const activeView = viewFromPath(pathname ?? '/')
 
   // Task 49: purchase entry full page par adhoora draft ho to side-nav se jaane
   // se pehle confirm — ghalati se click se kaam zaya nahi hota (draft waise bhi
   // auto-save hai, ye double protection hai)
-  function navigate(target: ViewKey) {
+  function navigate(target: string) {
+    if (!KEYSET.has(target)) return
     if (activeView === 'purchase-entry' && target !== 'purchase-entry' && purchaseDraftDirty) {
       const ok = window.confirm('Purchase invoice form mein adhoora data hai — draft auto-save ho chuka hai, wapas aaoge to poora milega.\n\nPhir bhi page chhorein?')
       if (!ok) return
     }
-    setActiveView(target)
+    router.push(VIEW_PATH[target as NavKey])
   }
 
   useEffect(() => {
@@ -111,6 +109,31 @@ export function DMSApp() {
       setMounted(true)
     })
   }, [setUser])
+
+  // Task 65 — cookie session verify/refresh: localStorage cache ke sath server-side
+  // source of truth. 401 (cookie expire/gayab + DB mein user nahi) → force logout.
+  useEffect(() => {
+    if (!mounted) return
+    let alive = true
+    ;(async () => {
+      try {
+        const res = await fetch('/api/auth/session', { method: 'POST' })
+        if (!alive) return
+        if (res.ok) {
+          const data = (await res.json()) as { user: Parameters<typeof setUser>[0] }
+          if (data.user) {
+            setUser(data.user)
+            saveSession(data.user)
+          }
+        } else {
+          saveSession(null)
+          setUser(null)
+          router.replace('/login')
+        }
+      } catch { /* offline — localStorage session chalne do */ }
+    })()
+    return () => { alive = false }
+  }, [mounted])
 
   // Task 24: doosre tab mein login/logout ho jaye to YE purana tab stale session ke
   // saath reh jata tha — phir us tab se banayi cheez galat distributor ke account mein
@@ -126,19 +149,38 @@ export function DMSApp() {
   }, [])
 
   // Task 22: activeView role ke hisab se allowed nahi to allowed view par redirect
-  // (render ke andar setState forbidden tha — ye pre-existing React error ka fix hai)
   // Task 49: 'purchase-entry' NAV mein nahi (full-page form hai) — DISTRIBUTOR ke liye
-  // allowed list mein manually add, warna redirect effect wapas chala jata
+  // allowed list mein manually add.
+  // Task 65: redirect ab router.replace se (URL bhi sahi rehta hai).
   const allowedViews = useMemo(() => {
     if (!user) return []
     const base = NAV.filter((n) => n.roles.includes(user.role)).map((n) => n.key)
-    return user.role === 'DISTRIBUTOR' ? [...base, 'purchase-entry' as ViewKey] : base
+    return user.role === 'DISTRIBUTOR' ? [...base, 'purchase-entry'] : base
   }, [user])
   useEffect(() => {
-    if (user && allowedViews.length > 0 && !allowedViews.includes(activeView)) {
-      queueMicrotask(() => setActiveView(allowedViews[0]))
+    if (user && allowedViews.length > 0 && (activeView === null || !allowedViews.includes(activeView))) {
+      const home = VIEW_PATH[allowedViews[0] as NavKey] ?? '/'
+      queueMicrotask(() => router.replace(home))
     }
-  }, [user, allowedViews, activeView, setActiveView])
+  }, [user, allowedViews, activeView, router])
+
+  // Task 65: user gayab (logout / stale session) → /login?next=<current section>.
+  // RENDER ke andar router.replace forbidden tha (React setState-in-render error) —
+  // is liye effect mein. Middleware normally pehle hi /login par bhej chuka hota hai —
+  // ye belt & braces hai (next param se re-login par wapas isi section par).
+  useEffect(() => {
+    if (mounted && !user) {
+      const next = encodeURIComponent(window.location.pathname)
+      router.replace(`/login?next=${next}`)
+    }
+  }, [mounted, user, router])
+
+  async function doLogout() {
+    try { await fetch('/api/auth/logout', { method: 'POST' }) } catch {}
+    saveSession(null)
+    setUser(null)
+    router.replace('/login')
+  }
 
   if (!mounted) {
     return (
@@ -148,7 +190,13 @@ export function DMSApp() {
     )
   }
 
-  if (!user) return <LoginScreen />
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="h-10 w-10 rounded-full border-4 border-emerald-600 border-t-transparent animate-spin" />
+      </div>
+    )
+  }
   if (user.role === 'SALESMAN') return <SalesmanApp />
 
   const nav = NAV.filter((n) => n.roles.includes(user.role))
@@ -190,7 +238,7 @@ export function DMSApp() {
               </div>
               <span className="hidden md:block text-xs font-semibold text-slate-700 pr-1 max-w-[120px] truncate">{user.name}</span>
               <button
-                onClick={() => { localStorage.removeItem('dms_session'); setUser(null) }}
+                onClick={doLogout}
                 className="h-7 w-7 rounded-full flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
                 title="Logout"
               >
@@ -265,27 +313,7 @@ export function DMSApp() {
 
       {/* ============ MAIN — page scroll nahi, har view apna internal layout manage karta hai ============ */}
       <main className="flex-1 min-h-0 w-full max-w-[1500px] mx-auto overflow-hidden px-3 sm:px-5 py-3">
-        {activeView === 'mega-accounts' && <MegaAccountsView />}
-        {activeView === 'backup' && <BackupView />}
-        {activeView === 'dashboard' && <DashboardView />}
-        {activeView === 'orders' && <OrdersView />}
-        {activeView === 'unprocessed' && <UnprocessedBillsView />}
-        {activeView === 'summaries' && <SummariesView />}
-        {activeView === 'settlement' && <SettlementView />}
-        {activeView === 'ledgers' && <LedgersView />}
-        {activeView === 'recovery' && <RecoveryView />}
-        {activeView === 'inventory' && <InventoryView />}
-        {activeView === 'products' && <ProductsView />}
-        {activeView === 'companies' && <CompaniesView />}
-        {activeView === 'purchase-entry' && <PurchaseEntryView />}
-        {activeView === 'outlets' && <OutletsView />}
-        {activeView === 'distributors' && <DistributorsView />}
-        {activeView === 'pjp' && <PJPView />}
-        {activeView === 'field-force' && <FieldForceView />}
-        {activeView === 'visit-map' && <VisitMapView />}
-        {activeView === 'schemes' && <SchemesView />}
-        {activeView === 'returns' && <ReturnsClaimsView />}
-        {activeView === 'reports' && <ReportsView />}
+        {children}
       </main>
     </div>
   )

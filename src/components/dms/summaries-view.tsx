@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -19,9 +20,9 @@ import { toast } from '@/hooks/use-toast'
 
 export function SummariesView() {
   const user = useDMS((s) => s.user)
+  const router = useRouter()
   const focusSummaryId = useDMS((s) => s.focusSummaryId)
   const setFocusSummary = useDMS((s) => s.setFocusSummary)
-  const setActiveView = useDMS((s) => s.setActiveView)
 
   const [summaries, setSummaries] = useState<SummaryDTO[]>([])
   const [loading, setLoading] = useState(true)
@@ -168,7 +169,7 @@ export function SummariesView() {
                               <Button size="sm" variant="ghost" className="h-8 text-xs px-2 text-amber-700 hover:text-amber-800 hover:bg-amber-50" disabled={unprocBusy} title="Un-process — van stock wapas warehouse, bills wapas unprocessed" onClick={(e) => { e.stopPropagation(); setUnprocTarget({ id: s.id, summaryNo: s.summaryNo, billsCount: s.billsCount }) }}>
                                 <Undo2 className="h-3.5 w-3.5 mr-1" /> Un-process
                               </Button>
-                              <Button size="sm" className="h-8 bg-emerald-600 hover:bg-emerald-700 text-xs px-2" onClick={(e) => { e.stopPropagation(); setFocusSummary(s.id); setActiveView('settlement') }}>
+                              <Button size="sm" className="h-8 bg-emerald-600 hover:bg-emerald-700 text-xs px-2" onClick={(e) => { e.stopPropagation(); setFocusSummary(s.id); router.push('/settlement') }}>
                                 <Wallet className="h-3.5 w-3.5 mr-1" /> Settle
                               </Button>
                             </>
@@ -192,7 +193,7 @@ export function SummariesView() {
         detail={detail}
         onClose={() => setDetail(null)}
         onSettled={() => { load() }}
-        onGoSettle={(id) => { setDetail(null); setFocusSummary(id); setActiveView('settlement') }}
+        onGoSettle={(id) => { setDetail(null); setFocusSummary(id); router.push('/settlement') }}
         onPrintAllInvoices={(s) => printAllInvoices(s)}
         onUnprocess={(s) => setUnprocTarget({ id: s.id, summaryNo: s.summaryNo, billsCount: s.billsCount })}
       />

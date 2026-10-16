@@ -1,5 +1,7 @@
+import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
+import { AUTH_COOKIE, authCookieOptions, makeAuthToken } from '@/lib/auth-token'
 
 /**
  * MEGA ADMIN subscription model (Task 22):
@@ -66,7 +68,8 @@ export async function POST(req: Request) {
       }
     }
 
-    return Response.json({
+    // Task 65: signed httpOnly session cookie — middleware isi se page routes protect karta hai
+    const res = NextResponse.json({
       user: {
         id: user.id,
         name: user.name,
@@ -89,6 +92,8 @@ export async function POST(req: Request) {
           : null,
       },
     })
+    res.cookies.set(AUTH_COOKIE, await makeAuthToken(user.id), authCookieOptions())
+    return res
   } catch {
     return jsonError('Login failed', 500)
   }

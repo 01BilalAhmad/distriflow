@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -67,7 +68,8 @@ function BalanceBadge({ balance }: { balance: number }) {
 // ==================== MAIN VIEW ====================
 
 export function CompaniesView() {
-  const openPurchaseEntry = useDMS((s) => s.openPurchaseEntry)
+  const router = useRouter()
+  const setPurchaseCompanyId = useDMS((s) => s.setPurchaseCompanyId)
   const [data, setData] = useState<CompaniesData | null>(null)
   const [products, setProducts] = useState<ProductDTO[]>([])
   const [loading, setLoading] = useState(true)
@@ -105,7 +107,8 @@ export function CompaniesView() {
   function openNew() { setEditCompany(null); setFormOpen(true) }
   function openEdit(c: CompanyFullDTO) { setEditCompany(c); setFormOpen(true) }
   // Task 49: dialog band — ab POORA PAGE khulta hai (purchase-entry view)
-  function openPurchase(c: CompanyFullDTO) { openPurchaseEntry(c.id) }
+  // Task 65: URL route push (/purchase-entry) — store mein company pre-select
+  function openPurchase(c: CompanyFullDTO) { setPurchaseCompanyId(c.id); router.push('/purchase-entry') }
   function onSaved() { load(); setRefreshKey((k) => k + 1) }
 
   const detailCompany = data?.companies.find((c) => c.id === detailId) ?? null
@@ -346,7 +349,8 @@ function CompanyDetailDialog({ company, products, onClose, onEdit, onDataChanged
   onEdit: () => void
   onDataChanged: () => void
 }) {
-  const openPurchaseEntry = useDMS((s) => s.openPurchaseEntry)
+  const router = useRouter()
+  const setPurchaseCompanyId = useDMS((s) => s.setPurchaseCompanyId)
   const [tab, setTab] = useState('ledger')
   const [ledger, setLedger] = useState<CompanyLedgerDTO | null>(null)
   const [invoices, setInvoices] = useState<PurchaseInvoiceDTO[] | null>(null)
@@ -398,7 +402,7 @@ function CompanyDetailDialog({ company, products, onClose, onEdit, onDataChanged
           <div className="ml-auto flex flex-wrap gap-2">
             <Button size="sm" variant="outline" className="h-8" onClick={onEdit}><Pencil className="h-3.5 w-3.5 mr-1" /> Edit</Button>
             {/* Task 49: dialog band — poora page khulta hai (koi overlay click-loss nahi) */}
-            <Button size="sm" className="h-8 bg-emerald-600 hover:bg-emerald-700" onClick={() => openPurchaseEntry(company.id)}><Truck className="h-3.5 w-3.5 mr-1" /> New Purchase</Button>
+            <Button size="sm" className="h-8 bg-emerald-600 hover:bg-emerald-700" onClick={() => { setPurchaseCompanyId(company.id); router.push('/purchase-entry') }}><Truck className="h-3.5 w-3.5 mr-1" /> New Purchase</Button>
           </div>
         </div>
 
@@ -481,7 +485,7 @@ function CompanyDetailDialog({ company, products, onClose, onEdit, onDataChanged
           <TabsContent value="purchases" className="space-y-3 mt-3">
             <div className="flex items-center justify-between">
               <p className="text-sm text-slate-500">Stock purchase invoices — book hote hi warehouse stock barh jata hai</p>
-              <Button size="sm" className="h-8 bg-emerald-600 hover:bg-emerald-700" onClick={() => openPurchaseEntry(company.id)}><Plus className="h-3.5 w-3.5 mr-1" /> New Purchase</Button>
+              <Button size="sm" className="h-8 bg-emerald-600 hover:bg-emerald-700" onClick={() => { setPurchaseCompanyId(company.id); router.push('/purchase-entry') }}><Plus className="h-3.5 w-3.5 mr-1" /> New Purchase</Button>
             </div>
             <div className="rounded-lg border bg-white overflow-hidden">
               <div className="max-h-[400px] overflow-auto">

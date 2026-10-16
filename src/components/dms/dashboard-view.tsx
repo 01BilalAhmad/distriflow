@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
@@ -22,7 +23,7 @@ const PIE_COLORS = ['#059669', '#10b981', '#34d399', '#6ee7b7', '#f59e0b']
 
 export function DashboardView() {
   const user = useDMS((s) => s.user)
-  const setActiveView = useDMS((s) => s.setActiveView)
+  const router = useRouter()
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -79,21 +80,21 @@ export function DashboardView() {
 
       {/* Action alerts */}
       <div className="grid gap-3 sm:grid-cols-3">
-        <button onClick={() => setActiveView('orders')} className="text-left rounded-xl border border-blue-100 bg-blue-50/60 p-4 hover:border-blue-300 transition-colors">
+        <button onClick={() => router.push('/orders')} className="text-left rounded-xl border border-blue-100 bg-blue-50/60 p-4 hover:border-blue-300 transition-colors">
           <div className="flex items-center gap-2">
             <ShoppingCart className="h-4 w-4 text-blue-600" />
             <p className="text-sm font-semibold text-blue-800">{k.pendingOrders} Orders Pending Delivery</p>
           </div>
           <p className="text-xs text-blue-600 mt-1">Deliver karne ke liye Orders module mein jayein</p>
         </button>
-        <button onClick={() => setActiveView('returns')} className="text-left rounded-xl border border-amber-100 bg-amber-50/60 p-4 hover:border-amber-300 transition-colors">
+        <button onClick={() => router.push('/returns')} className="text-left rounded-xl border border-amber-100 bg-amber-50/60 p-4 hover:border-amber-300 transition-colors">
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 text-amber-600" />
             <p className="text-sm font-semibold text-amber-800">{k.pendingReturns} Returns + {k.pendingClaims} Claims Pending</p>
           </div>
           <p className="text-xs text-amber-600 mt-1">Approvals pending hain — review karein</p>
         </button>
-        <button onClick={() => setActiveView('pjp')} className="text-left rounded-xl border border-emerald-100 bg-emerald-50/60 p-4 hover:border-emerald-300 transition-colors">
+        <button onClick={() => router.push('/pjp')} className="text-left rounded-xl border border-emerald-100 bg-emerald-50/60 p-4 hover:border-emerald-300 transition-colors">
           <div className="flex items-center gap-2">
             <Truck className="h-4 w-4 text-emerald-600" />
             <p className="text-sm font-semibold text-emerald-800">{k.salesmenOnField} Salesmen on Field</p>

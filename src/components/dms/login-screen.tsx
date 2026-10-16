@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -12,8 +13,9 @@ import type { SessionUser } from '@/lib/dms-types'
 import { Boxes, Loader2, MapPin, Package, Route } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
-export function LoginScreen() {
+export function LoginScreen({ nextPath }: { nextPath?: string }) {
   const { setUser } = useDMS()
+  const router = useRouter()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -28,6 +30,9 @@ export function LoginScreen() {
       saveSession(res.user)
       setUser(res.user)
       toast({ title: 'Welcome, ' + res.user.name, description: 'Role: ' + res.user.role.replaceAll('_', ' ') })
+      // Task 65: login API ne httpOnly cookie set ki — ab URL route par jao (jo section
+      // user ne manga tha — next param — warna dashboard). Middleware cookie dekh kar allow karega.
+      router.replace(nextPath || '/')
     } catch (e) {
       toast({ title: 'Login Failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' })
     } finally {

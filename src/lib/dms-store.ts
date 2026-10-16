@@ -27,9 +27,15 @@ export type ViewKey =
   | 'reports'
   | 'sales-app'
 
+/**
+ * Task 65 — activeView zustand se HATA diya. Har section ka apna URL route hai
+ * (/, /orders, /products ...) — browser refresh par wahi section wapas milta hai
+ * (dashboard redirect khatam). Cross-view "focus" states (focusSummaryId,
+ * purchaseCompanyId) SPA memory mein hi rehte hain — route push ke sath set karke
+ * jate hain, target view mount par consume karta hai.
+ */
 interface DMSState {
   user: SessionUser | null
-  activeView: ViewKey
   /** summary to auto-open / auto-select when switching views */
   focusSummaryId: string | null
   /** Task 49: purchase entry full page — kis company ki invoice book karni hai (null = free select) */
@@ -37,26 +43,20 @@ interface DMSState {
   /** Task 49: purchase entry form mein adhoora data mojood hai — nav guard isko dekhta hai */
   purchaseDraftDirty: boolean
   setUser: (u: SessionUser | null) => void
-  setActiveView: (v: ViewKey) => void
   setFocusSummary: (id: string | null) => void
   setPurchaseCompanyId: (id: string | null) => void
   setPurchaseDraftDirty: (d: boolean) => void
-  /** Task 49: companies view se purchase entry full page kholne ka single entry point */
-  openPurchaseEntry: (companyId: string | null) => void
 }
 
 export const useDMS = create<DMSState>((set) => ({
   user: null,
-  activeView: 'dashboard',
   focusSummaryId: null,
   purchaseCompanyId: null,
   purchaseDraftDirty: false,
   setUser: (u) => set({ user: u }),
-  setActiveView: (v) => set({ activeView: v }),
   setFocusSummary: (id) => set({ focusSummaryId: id }),
   setPurchaseCompanyId: (id) => set({ purchaseCompanyId: id }),
   setPurchaseDraftDirty: (d) => set({ purchaseDraftDirty: d }),
-  openPurchaseEntry: (companyId) => set({ purchaseCompanyId: companyId, activeView: 'purchase-entry' }),
 }))
 
 export function loadSession(): SessionUser | null {

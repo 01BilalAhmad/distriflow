@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -144,7 +145,7 @@ interface OrderDetailDTO {
 
 export function UnprocessedBillsView() {
   const user = useDMS((s) => s.user)
-  const setActiveView = useDMS((s) => s.setActiveView)
+  const router = useRouter()
   const setFocusSummary = useDMS((s) => s.setFocusSummary)
 
   const [orders, setOrders] = useState<OrderDTO[]>([])
@@ -369,7 +370,7 @@ export function UnprocessedBillsView() {
       toast({ title: `Summary ${r.summary.summaryNo} Created ✓`, description: `${r.summary.billsCount} bills processed — van loading FEFO basis par ho gayi` })
       setProcessOpen(false)
       setFocusSummary(r.summary.id)
-      setActiveView('summaries')
+      router.push('/summaries')
     } catch (e) {
       // Task 27: out-of-stock — structured shortages payload se detail popup (kis bill sy kia minus)
       const payload = (e as Error & { payload?: { shortages?: ShortageRow[] } }).payload
@@ -824,7 +825,7 @@ export function UnprocessedBillsView() {
           <DialogFooter className="flex-col sm:flex-row gap-2">
             <Button
               variant="outline"
-              onClick={() => { const sid = anywayResult?.summaryId; setAnywayResult(null); if (sid) { setFocusSummary(sid); setActiveView('summaries') } }}
+              onClick={() => { const sid = anywayResult?.summaryId; setAnywayResult(null); if (sid) { setFocusSummary(sid); router.push('/summaries') } }}
               className="w-full sm:w-auto"
             >
               <ClipboardList className="h-4 w-4 mr-1.5" /> Summary Dekhein

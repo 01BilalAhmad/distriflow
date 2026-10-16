@@ -18,6 +18,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -81,10 +82,10 @@ function draftHasData(d: PurchaseDraft): boolean {
 
 export function PurchaseEntryView() {
   const user = useDMS((s) => s.user)
+  const router = useRouter()
   const purchaseCompanyId = useDMS((s) => s.purchaseCompanyId)
   const setPurchaseCompanyId = useDMS((s) => s.setPurchaseCompanyId)
   const setPurchaseDraftDirty = useDMS((s) => s.setPurchaseDraftDirty)
-  const setActiveView = useDMS((s) => s.setActiveView)
 
   const draftKey = `dms_purchase_entry_draft_${user?.id ?? 'anon'}`
   const hydrated = useRef(false)
@@ -240,7 +241,7 @@ export function PurchaseEntryView() {
       if (!ok) return
     }
     setPurchaseCompanyId(null)
-    setActiveView('companies')
+    router.push('/companies')
   }
 
   function startFresh() {
@@ -298,7 +299,7 @@ export function PurchaseEntryView() {
         title: `${r.invoice.invoiceNo} booked — Stock IN`,
         description: `${company?.name ?? 'Company'} • Net Invoice ${fmtPKR(r.invoice.total)}${r.invoice.taxTotal > 0 ? ` • GST ${fmtPKR(r.invoice.taxTotal)}` : ''}${r.invoice.advanceTaxTotal > 0 ? ` • Adv Tax ${fmtPKR(r.invoice.advanceTaxTotal)}` : ''} • Stock "${r.warehouseName ?? 'warehouse'}" mein add ho gaya`,
       })
-      setActiveView('companies')
+      router.push('/companies')
     } catch (e) {
       toast({ title: 'Error', description: e instanceof Error ? e.message : 'Purchase failed', variant: 'destructive' })
     } finally { setSaving(false) }
