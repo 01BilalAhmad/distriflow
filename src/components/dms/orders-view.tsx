@@ -317,8 +317,9 @@ function OrderDetailDialog({ order, items, onClose }: { order: OrderDTO | null; 
       </DialogContent>
     </Dialog>
 
+    {/* Task 59: invoice PORTRAIT A4 (landscape prop hataya) */}
     {printing && invData && (
-      <PrintFrame title={`Invoice ${invData.orderNo}`} landscape onClose={() => setPrinting(false)}>
+      <PrintFrame title={`Invoice ${invData.orderNo}`} onClose={() => setPrinting(false)}>
         <CblInvoiceDoc inv={invData} gst={gst ?? undefined} />
       </PrintFrame>
     )}

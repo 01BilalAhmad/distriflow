@@ -229,7 +229,7 @@ export function SummariesView() {
 
       {/* Bulk print: sab invoices ek hi print job mein — har invoice apne A4 page par */}
       {bulk && (
-        <PrintFrame title={`${bulk.summaryNo} — All Invoices (${bulk.invoices.length})`} landscape onClose={() => setBulk(null)}>
+        <PrintFrame title={`${bulk.summaryNo} — All Invoices (${bulk.invoices.length})`} onClose={() => setBulk(null)}>
           <CblInvoicesDoc invoices={bulk.invoices} gst={bulk.gst} />
         </PrintFrame>
       )}
@@ -442,7 +442,7 @@ function SummaryDetailDialog({ detail, onClose, onSettled, onGoSettle, onPrintAl
 
       {/* Load Form ke andar invoice click hui to SIRF wohi invoice (A4 cash memo) nazar aati hai */}
       {linkInv && (
-        <PrintFrame title={`Invoice ${linkInv.orderNo}`} pdfName={`invoice-${linkInv.orderNo}`} landscape onClose={() => setLinkInv(null)}>
+        <PrintFrame title={`Invoice ${linkInv.orderNo}`} pdfName={`invoice-${linkInv.orderNo}`} onClose={() => setLinkInv(null)}>
           <CblInvoiceDoc inv={linkInv} gst={linkGst ?? undefined} />
         </PrintFrame>
       )}
@@ -596,7 +596,7 @@ function InvoiceDialog({ invoiceId, returns = [], onClose }: { invoiceId: string
 
     {/* CBL-style Cash Memo print preview */}
     {printing && data && (
-      <PrintFrame title={`Invoice ${data.orderNo}`} landscape onClose={() => setPrinting(false)}>
+      <PrintFrame title={`Invoice ${data.orderNo}`} onClose={() => setPrinting(false)}>
         <CblInvoiceDoc inv={data} gst={gst ?? undefined} />
       </PrintFrame>
     )}

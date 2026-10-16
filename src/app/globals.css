@@ -221,8 +221,8 @@
   width: 794px;
   min-height: 1123px; /* 297mm @96dpi — chhota content bhi poora A4 page bane */
 }
-/* Task 51: real-invoice format cash memo — 15-column bill A4 LANDSCAPE par fit hota hai
-   (real Al-Falah/Mondelez bill bhi landscape print hota hai) */
+/* Task 51: landscape option (abhi unused — Task 59 se invoice PORTRAIT hai);
+   machinery future landscape doc ke liye intact */
 .cbl-page-land {
   width: 1123px;      /* 297mm @96dpi */
   min-height: 794px;  /* 210mm @96dpi */

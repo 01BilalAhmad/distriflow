@@ -95,7 +95,8 @@ export function PrintFrame({ title, onClose, pdfName, landscape, children }: {
   onClose: () => void
   /** filename (bina .pdf) direct download ke liye — default title se slug banta hai */
   pdfName?: string
-  /** Task 51: landscape A4 documents (real-invoice format cash memo) — 1123px page + @page landscape */
+  /** Task 51: landscape A4 option — Task 59 ke baad koi caller use nahi karta (invoice PORTRAIT
+   * hai) par machinery intact — future landscape doc ke liye ready (1123px page + @page override) */
   landscape?: boolean
   children: React.ReactNode
 }) {
@@ -206,7 +207,7 @@ export function PrintFrame({ title, onClose, pdfName, landscape, children }: {
           <Button size="sm" variant="outline" onClick={onClose}><X className="h-4 w-4" /></Button>
         </div>
       </div>
-      {/* A4 pages FIXED width (globals.css .cbl-page / .cbl-page-land) — chhote screen par overlay
+      {/* A4 pages FIXED width (globals.css .cbl-page = portrait) — chhote screen par overlay
           scroll karta hai, lekin document ka layout kabhi squeeze nahi hota -> PDF/print hamesha
           preview jaisa */}
       <div className={`mx-auto shadow-2xl ${landscape ? 'w-[1123px]' : 'w-[794px]'}`}>{children}</div>
@@ -501,10 +502,13 @@ export interface InvoiceData {
 }
 
 export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: boolean; rate: number } }) {
-  // Task 51: REAL-INVOICE FORMAT — Al-Falah/Mondelez "CASH MEMO / SALES TAX INVOICE" ka
-  // same-to-same landscape A4 bill. 15 columns: Item | Batch | CTN | Box | Units | Free Units |
-  // Trade Price | Gross Amount | Pass On | Net Amount | Sales Tax | Further ST | Total ST |
-  // Advance Tax 236H | Amount Inclusive of All Tax.
+  // Task 59: REAL-INVOICE FORMAT — PORTRAIT A4 (user: "landscape nai, portrait main ho or
+  // sai sy visible bhi ho"). Portrait 794px par 15 columns physically fit nahi — is liye
+  // jo columns kabhi data nahi rakhte wo hat gaye: Batch (hamesha dash), Further Sales Tax
+  // (hamesha 0.00), Total Sales Tax (Further=0 par Sales Tax ki exact copy). 12 columns:
+  // Item | CTN | Box | Units | Free Units | Trade Price | Gross Amount | Pass On | Net Amount
+  // | Sales Tax | Advance Tax 236H | Amount Inclusive of All Tax.
+  // (Task 51: original landscape real-invoice format — Al-Falah/Mondelez CASH MEMO)
   // Har row BOOKED SNAPSHOT se print hoti hai (rate/discount/lineTotal/gstAmt/tradeOfferAmt —
   // Task 41/45 snapshot principle; yahan koi naya calculation nahi jo booked totals se hat jaye).
   // Advance Tax booked total ka Net-weight pro-rata hai (aakhri row rounding absorb karti hai)
@@ -571,7 +575,7 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
   //  - legacy: Σ Amount Inclusive − manual discount (purana chain, snapshot frozen)
   const netInvoice = manualInside ? Math.round(S.incl * 100) / 100 : Math.round((S.incl - manual) * 100) / 100
 
-  // ---- Task 34: DATA-AWARE column widths (water-filling) — landscape TABLE_W par ----
+  // ---- Task 34: DATA-AWARE column widths (water-filling) — Task 59: portrait TABLE_W par ----
   const colSpecs: { key?: string; hw: number; vl: number; min: number; d: number; need: number }[] = []
   const textW = (s: string) =>
     [...s].reduce((a, ch) => a + (/[.,:]/.test(ch) ? 2.4 : /[0-9a-z/-]/.test(ch) ? 4.8 : 6.2), 0)
@@ -582,8 +586,7 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
     const raw = Math.max(hw, vl) * 1.15 + 12 // data-bhook demand (slack share ke liye)
     colSpecs.push({ key, hw, vl, min, d: Math.max(need, raw), need })
   }
-  addCol([], 'Item / Product Name', undefined, 96) // name wrap hota hai — flat min
-  addCol([], 'Batch', 'batch', 26) // batch data abhi track nahi hota — dash column
+  addCol([], 'Item / Product Name', undefined, 130) // name wrap hota hai — portrait par bhi readable (Task 59)
   addCol([...rows2.map((r) => (r.ctn ? fmtI(r.ctn) : '-')), S.ctn ? fmtI(S.ctn) : '-'], 'CTN', 'ctn')
   addCol([...rows2.map((r) => (r.box ? fmtI(r.box) : '-')), S.box ? fmtI(S.box) : '-'], 'Box', 'box')
   addCol([...rows2.map((r) => (r.pcs ? fmtI(r.pcs) : '-')), S.pcs ? fmtI(S.pcs) : '-'], 'Units', 'units')
@@ -594,13 +597,11 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
   addCol([...rows2.map((r) => fmtCell(r.passOn, 2)), fmtCell(S.passOn, 2)], 'Pass On', 'passon')
   addCol([...rows2.map((r) => fmtCell(r.it.lineTotal, 2)), fmtCell(S.net, 2)], 'Net Amount (Excluding Sales Tax)', 'net')
   addCol([...rows2.map((r) => fmt2(r.gst)), fmt2(S.gst)], 'Sales Tax', 'st')
-  addCol(rows2.map(() => '0.00'), 'Further Sales Tax', 'further') // additional-layer tax abhi 0 (data naya aayega)
-  addCol([...rows2.map((r) => fmt2(r.gst)), fmt2(S.gst)], 'Total Sales Tax', 'tst')
   addCol([...rows2.map((r) => fmt2(r.adv)), fmt2(S.adv)], 'Advance Tax 236H', 'adv')
   addCol([...rows2.map((r) => fmtCell(r.incl, 2)), fmtCell(S.incl, 2)], 'Amount Inclusive of All Tax', 'incl')
   // WATER-FILLING: har column apna CONTENT need pakka leta hai (glyph-measured), bachi hui
   // jagah (TABLE_W − Σneed) data-bhooke columns ko milti hai (lambi value = zyada hissa).
-  const TABLE_W = 1059 // .cbl-page-land 1123px − px-8 (2 x 32)
+  const TABLE_W = 730 // Task 59: .cbl-page portrait 794px − px-8 (2 x 32)
   const needs = colSpecs.map((c) => c.need)
   const slack = Math.max(0, TABLE_W - needs.reduce((a, b) => a + b, 0))
   const extra = colSpecs.map((c) => Math.max(0, c.d - c.need))
@@ -622,7 +623,7 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
 
   return (
     <div className="cbl-doc">
-      <div className="cbl-page cbl-page-land bg-white px-8 py-6">
+      <div className="cbl-page bg-white px-8 py-6">
         {/* header — center: distributor + address line (real invoice jaisa underlined) */}
         <div className="text-center">
           <p className="text-[17px] font-bold underline">{inv.distributorName} ({inv.distributorCity ?? ''}) - (MSD)</p>
@@ -663,7 +664,7 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
           خوشخبری! اب نئے سنیک پیکس، بہترین ٹریڈ مارجن اور اضافی بسکٹس کے ساتھ۔
         </p>
 
-        {/* items table — real invoice ke EXACT 15 columns */}
+        {/* items table — Task 59: portrait 12 columns (khali/duplicate columns hatay) */}
         <table style={{ fontSize: 8.6 }}>
           <colgroup>
             {colW.map((w, i) => (
@@ -673,15 +674,12 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
           <thead>
             <tr>
               <th style={{ textAlign: 'left' }}>Item / Product Name</th>
-              <th>Batch</th>
               <th>CTN</th><th>Box</th><th>Units</th><th>Free Units</th>
               <th>Trade Price (Excluding Sales Tax)</th>
               <th>Gross Amount (Excluding Sales Tax)</th>
               <th>Pass On</th>
               <th>Net Amount (Excluding Sales Tax)</th>
               <th>Sales Tax</th>
-              <th>Further Sales Tax</th>
-              <th>Total Sales Tax</th>
               <th>Advance Tax 236H</th>
               <th>Amount Inclusive of All Tax</th>
             </tr>
@@ -690,7 +688,6 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
             {rows2.map((r) => (
               <tr key={r.it.id} className="cbl-break-avoid">
                 <td style={{ textAlign: 'left' }}>{r.it.sku} {r.it.productName}</td>
-                {dash}
                 <Num v={r.ctn} />
                 <Num v={r.box} />
                 <Num v={r.pcs} />
@@ -700,15 +697,12 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
                 <M v={r.passOn} fit={fitOf('passon')} />
                 <M v={r.it.lineTotal} fit={fitOf('net')} />
                 <M v={r.gst} fit={fitOf('st')} />
-                <M v={0} fit={fitOf('further')} />
-                <M v={r.gst} fit={fitOf('tst')} />
                 <M v={r.adv} fit={fitOf('adv')} />
                 <M v={r.incl} fit={fitOf('incl')} />
               </tr>
             ))}
             <tr style={{ fontWeight: 'bold', backgroundColor: '#f7f7f7' }}>
               <td style={{ textAlign: 'left' }}>Total</td>
-              {dash}
               <Num v={S.ctn} />
               <Num v={S.box} />
               <Num v={S.pcs} />
@@ -718,8 +712,6 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
               <M v={S.passOn} fit={fitOf('passon')} />
               <M v={S.net} fit={fitOf('net')} />
               <M v={S.gst} fit={fitOf('st')} />
-              <M v={0} fit={fitOf('further')} />
-              <M v={S.gst} fit={fitOf('tst')} />
               <M v={S.adv} fit={fitOf('adv')} />
               <M v={S.incl} fit={fitOf('incl')} />
             </tr>
