@@ -85,13 +85,17 @@ export async function POST(req: Request) {
 
     const productIds = items.map((i) => i.productId)
     const products = await db.product.findMany({ where: { id: { in: productIds }, distributorId: tenantId } })
-    const schemes = await db.scheme.findMany({
+    // Task 55: category-wide scheme — category ka NAME join kar ke CalcScheme mein daala
+    const schemesRaw = await db.scheme.findMany({
       where: { isActive: true, distributorId: tenantId, OR: [{ endDate: null }, { endDate: { gte: new Date() } }] },
+      include: { category: { select: { name: true } } },
     })
+    const schemes = schemesRaw.map((s) => ({ ...s, categoryName: s.category?.name ?? null }))
 
     // Shared calc (stock-allocation edit bhi yehi math use karta hai)
     // Task 45: items[].tradeOffer = per-SKU Trade Offer Rs (discount ke ilawa, kuch SKUs par)
-    const { lines: itemsData, subtotal, schemeDiscount, tradeOfferTotal } = computeOrderLines(products, schemes, items, outlet.channel)
+    // Task 55: outlet filer status — filerScope wali schemes sirf matching shops par
+    const { lines: itemsData, subtotal, schemeDiscount, tradeOfferTotal } = computeOrderLines(products, schemes, items, outlet.channel, outlet.filerStatus)
 
     if (itemsData.length === 0) return jsonError('Koi valid item nahi mila')
 

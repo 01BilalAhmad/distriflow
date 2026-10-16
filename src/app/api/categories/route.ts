@@ -2,8 +2,10 @@ import { db } from '@/lib/db'
 import { jsonError, distributorTenant } from '@/lib/dms-scope'
 
 // Task 53: per-tenant product categories — GET (list + first-run seed), POST (naya
-// category), DELETE (sirf jab koi product use na kar raha ho). Product.category
-// string isi table ke naam se match hota hai.
+// category), DELETE (products moveTo General par shift), PATCH (rename + merge).
+// Product.category string isi table ke naam se match hota hai.
+// Task 55: scheme us category ko refer karti ho to DELETE blocked — scheme ka target
+// ALL products par switch hona silent margin-loss hai (user decision: block).
 
 const DEFAULT_CATEGORIES = ['Tea', 'Beverages', 'Dairy', 'Snacks', 'Home Care', 'Personal Care', 'Chocolate', 'Candy', 'Wafer', 'Mints']
 
@@ -78,6 +80,14 @@ export async function DELETE(req: Request) {
 
     const cat = await db.category.findFirst({ where: { id, distributorId: t.tenantId } })
     if (!cat) return jsonError('Category nahi mili', 404)
+
+    // Task 55: scheme isi category par bani ho to delete BLOCK — warna wo scheme silently
+    // ALL products par switch ho jati (categoryId SetNull). Pehle scheme ka target badlo.
+    const schemeCount = await db.scheme.count({ where: { categoryId: id } })
+    if (schemeCount > 0) {
+      return jsonError(`Ye category ${schemeCount} scheme${schemeCount > 1 ? 's' : ''} par use ho rahi hai — pehle us scheme ka target change karein`, 409)
+    }
+
     const inUse = await db.product.count({ where: { distributorId: t.tenantId, category: cat.name } })
 
     // Task 53b: in-use category delete ho to products moveTo (default General) par chale jate
@@ -129,6 +139,9 @@ export async function PATCH(req: Request) {
         where: { distributorId: t.tenantId, category: cat.name },
         data: { category: clash.name },
       })
+      // Task 55: merge par schemes bhi clash category par re-point — SetNull ho kar
+      // ALL-products par switch hone se pehle (rename-safe FK join isi liye hai)
+      await db.scheme.updateMany({ where: { categoryId: id }, data: { categoryId: clash.id } })
       await db.category.delete({ where: { id } })
       return Response.json({ category: { id: clash.id, name: clash.name }, moved: res.count, merged: true })
     }

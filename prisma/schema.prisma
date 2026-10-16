@@ -116,6 +116,7 @@ model Category {
   distributorId String
   distributor   DistributorProfile @relation(fields: [distributorId], references: [id])
   createdAt     DateTime            @default(now())
+  schemes       Scheme[]
   @@unique([name, distributorId])
 }
 
@@ -320,6 +321,13 @@ model Scheme {
   channel     String? // null = all channels
   productId   String? // null = all products
   product     Product?     @relation(fields: [productId], references: [id])
+  // Task 55: category-wide scheme — "Apply To: Whole Category" puri category par ek discount
+  // (null = category filter off). FK join se name runtime par resolve hota hai — rename-safe.
+  categoryId  String?
+  category    Category?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  // Task 55: outlet tax-status scope — null = all outlets | FILER | NON_FILER
+  // ("Non-Filer Special" sirf non-filer shops par chalegi — Outlet.filerStatus se match)
+  filerScope  String?
   value       Float // percent or flat amount per carton
   buyQty      Int          @default(0)
   freeQty     Int          @default(0)

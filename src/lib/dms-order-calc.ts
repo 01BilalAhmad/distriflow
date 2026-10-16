@@ -13,6 +13,8 @@ export interface CalcProduct {
   /** Task 45: per-product GST (Products page se set hota hai — kuch bhi hardcoded nahi) */
   gstEnabled?: boolean
   gstRate?: number
+  /** Task 55: category-wide scheme match — Product.category string isi se compare hota hai */
+  category?: string | null
 }
 
 export interface CalcScheme {
@@ -21,6 +23,10 @@ export interface CalcScheme {
   type: string // BUY_X_GET_Y | PERCENT_DISCOUNT | FLAT_DISCOUNT
   channel: string | null
   productId: string | null
+  /** Task 55: category-wide scheme — category NAME se match (Product.category string) */
+  categoryName?: string | null
+  /** Task 55: outlet tax-status scope — null = all outlets | FILER | NON_FILER */
+  filerScope?: string | null
   value: number
   buyQty: number
   freeQty: number
@@ -112,6 +118,8 @@ export function computeOrderLines(
   schemes: CalcScheme[],
   items: CalcIncomingItem[],
   channel: string,
+  /** Task 55: outlet ka filer status — filerScope wali schemes sirf matching outlets par */
+  outletFilerStatus?: string | null,
 ): CalcResult {
   let subtotal = 0
   let schemeDiscount = 0
@@ -147,7 +155,14 @@ export function computeOrderLines(
     const applicable = snapshot
       ? [snapshot]
       : schemes
-          .filter((s) => (!s.productId || s.productId === p.id) && (!s.channel || s.channel === channel))
+          // Task 55: filters AND hain — product + channel + category (naam se) + filer scope.
+          // Legacy scheme (sab null) har jagah match — purana behavior bilkul same.
+          .filter((s) =>
+            (!s.productId || s.productId === p.id)
+            && (!s.channel || s.channel === channel)
+            && (!s.categoryName || s.categoryName === (p.category ?? ''))
+            && (!s.filerScope || s.filerScope === (outletFilerStatus ?? ''))
+          )
           .sort((a, b) => b.value - a.value)
 
     for (const s of applicable) {

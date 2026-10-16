@@ -262,6 +262,11 @@ export interface SchemeDTO {
   channel: string | null
   productId: string | null
   productName: string | null
+  /** Task 55: category-wide scheme target (null = category filter off) */
+  categoryId?: string | null
+  categoryName?: string | null
+  /** Task 55: outlet tax-status scope — null = all outlets | FILER | NON_FILER */
+  filerScope?: string | null
   value: number
   buyQty: number
   freeQty: number

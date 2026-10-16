@@ -158,10 +158,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       const products = await db.product.findMany({
         where: { isActive: true, distributorId: tenantId, OR: [{ id: { in: incoming.map((i) => i.productId) } }, { id: { in: order.items.map((i) => i.productId) } }] },
       })
-      const schemes = await db.scheme.findMany({
+      // Task 55: category-wide scheme — category NAME join, aur outlet ke filer status se
+      // filerScope match. Order ka BOOKED filer status pehle (snapshot rule), legacy (null)
+      // par outlet ka current status.
+      const schemesRaw = await db.scheme.findMany({
         where: { isActive: true, distributorId: tenantId, OR: [{ endDate: null }, { endDate: { gte: new Date() } }] },
+        include: { category: { select: { name: true } } },
       })
-      const { lines, subtotal, schemeDiscount, tradeOfferTotal } = computeOrderLines(products, schemes, withSnapshots, order.channel)
+      const schemes = schemesRaw.map((s) => ({ ...s, categoryName: s.category?.name ?? null }))
+      const outletFiler = order.filerStatus
+        ?? (await db.outlet.findUnique({ where: { id: order.outletId }, select: { filerStatus: true } }))?.filerStatus
+        ?? null
+      const { lines, subtotal, schemeDiscount, tradeOfferTotal } = computeOrderLines(products, schemes, withSnapshots, order.channel, outletFiler)
       if (lines.length === 0) return jsonError('Kam az kam 1 item qty ke saath chahiye')
 
       // ---- Task 26: STOCK LIMIT — allocation edit bhi available ke andar ----

@@ -5,8 +5,16 @@ import { jsonError, tenantProfileId, distributorTenant } from '@/lib/dms-scope'
  * Task 23 — SCHEMES per-tenant: har distributor apni schemes/discounts khud banata hai.
  * GET  ?userId= -> sirf USI tenant ki schemes (salesman => owner distributor ki).
  * POST { userId, ... } -> DISTRIBUTOR apni nayi scheme banata hai.
- * PATCH { userId, id, isActive } -> sirf apni scheme toggle ho sakti hai.
+ * PATCH { userId, id, ... } -> apni scheme edit/toggle.
+ *
+ * Task 55 — CATEGORY-WIDE + FILER SCOPE:
+ * - categoryId: "Apply To: Whole Category" — puri category par ek discount (null = filter off)
+ * - filerScope: null = all outlets | FILER | NON_FILER — "Non-Filer Special" sirf matching shops par
+ * - Engine (computeOrderLines) best-value jeetata hai — stacking nahi (user-confirmed rule)
  */
+const FILER_SCOPES = ['FILER', 'NON_FILER'] as const
+const normScope = (v: unknown): string | null => (typeof v === 'string' && (FILER_SCOPES as readonly string[]).includes(v) ? v : null)
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url)
@@ -18,7 +26,7 @@ export async function GET(req: Request) {
 
     const schemes = await db.scheme.findMany({
       where: { distributorId: tenantId },
-      include: { product: { select: { name: true } } },
+      include: { product: { select: { name: true } }, category: { select: { name: true } } },
       orderBy: { createdAt: 'desc' },
     })
     return Response.json({
@@ -30,6 +38,9 @@ export async function GET(req: Request) {
         channel: s.channel,
         productId: s.productId,
         productName: s.product?.name ?? null,
+        categoryId: s.categoryId,
+        categoryName: s.category?.name ?? null,
+        filerScope: s.filerScope,
         value: s.value,
         buyQty: s.buyQty,
         freeQty: s.freeQty,
@@ -44,10 +55,17 @@ export async function GET(req: Request) {
   }
 }
 
+/** Task 55: categoryId tenant ka hona chahiye — cross-tenant category par scheme nahi ban sakti */
+async function validCategory(categoryId: string | null | undefined, tenantId: string) {
+  if (!categoryId) return true
+  const cat = await db.category.findFirst({ where: { id: categoryId, distributorId: tenantId } })
+  return !!cat
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json()
-    const { name, description, type, channel, productId, value, buyQty, freeQty, startDate, endDate, userId } = body
+    const { name, description, type, channel, productId, categoryId, filerScope, value, buyQty, freeQty, startDate, endDate, userId } = body
     if (!userId) return jsonError('userId required')
     if (!name || !type) return jsonError('Scheme name aur type required hain')
 
@@ -59,6 +77,9 @@ export async function POST(req: Request) {
       const prod = await db.product.findFirst({ where: { id: productId, distributorId: tenantId } })
       if (!prod) return jsonError('Product nahi mila (ya aap ke catalog ka nahi hai)', 404)
     }
+    if (categoryId && !(await validCategory(categoryId, tenantId))) {
+      return jsonError('Category nahi mili (ya aap ke catalog ki nahi hai)', 404)
+    }
 
     const scheme = await db.scheme.create({
       data: {
@@ -66,6 +87,8 @@ export async function POST(req: Request) {
         distributorId: tenantId,
         channel: channel || null,
         productId: productId || null,
+        categoryId: categoryId || null,
+        filerScope: normScope(filerScope),
         value: Number(value) || 0,
         buyQty: Number(buyQty) || 0,
         freeQty: Number(freeQty) || 0,
@@ -83,7 +106,7 @@ export async function POST(req: Request) {
 
 export async function PATCH(req: Request) {
   try {
-    const { id, isActive, userId, name, description, type, channel, productId, value, buyQty, freeQty, startDate, endDate } = await req.json()
+    const { id, isActive, userId, name, description, type, channel, productId, categoryId, filerScope, value, buyQty, freeQty, startDate, endDate } = await req.json()
     if (!id) return jsonError('Scheme id required')
     if (!userId) return jsonError('userId required')
 
@@ -107,6 +130,9 @@ export async function PATCH(req: Request) {
       const prod = await db.product.findFirst({ where: { id: productId, distributorId: t.tenantId } })
       if (!prod) return jsonError('Product nahi mila (ya aap ke catalog ka nahi hai)', 404)
     }
+    if (categoryId !== undefined && categoryId !== null && categoryId !== existing.categoryId && !(await validCategory(categoryId, t.tenantId))) {
+      return jsonError('Category nahi mili (ya aap ke catalog ki nahi hai)', 404)
+    }
     await db.scheme.update({
       where: { id },
       data: {
@@ -115,6 +141,8 @@ export async function PATCH(req: Request) {
         type,
         channel: channel || null,
         productId: productId || null,
+        categoryId: categoryId || null,
+        filerScope: normScope(filerScope),
         value: Number(value) || 0,
         buyQty: Number(buyQty) || 0,
         freeQty: Number(freeQty) || 0,

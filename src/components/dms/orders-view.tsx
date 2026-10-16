@@ -358,7 +358,17 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
       const ratePc = p.tradePrice / upc
       const ctnEquiv = l.qtyPcs / upc
       let freeQty = 0, disc = 0, schemeName: string | null = null
-      const applicable = schemes.filter((s) => (!s.productId || s.productId === p.id) && (!s.channel || s.channel === outlet.channel))
+      // Task 55: server computeOrderLines ka client mirror — same filters (product + channel
+      // + category + filer scope) + same value-desc sort, warna booking preview server-booked
+      // discount se alag dikhta (e.g. "Category 5%" vs "Non-Filer 8%" dono match hon)
+      const applicable = schemes
+        .filter((s) =>
+          (!s.productId || s.productId === p.id)
+          && (!s.channel || s.channel === outlet.channel)
+          && (!s.categoryName || s.categoryName === p.category)
+          && (!s.filerScope || s.filerScope === outlet.filerStatus)
+        )
+        .sort((a, b) => b.value - a.value)
       for (const s of applicable) {
         if (s.type === 'BUY_X_GET_Y' && s.buyQty > 0 && ctnEquiv >= s.buyQty) {
           freeQty = Math.round(Math.floor(ctnEquiv / s.buyQty) * s.freeQty * upc); schemeName = s.name; break

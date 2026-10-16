@@ -12,8 +12,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useDMS } from '@/lib/dms-store'
 import { api, fmtDate, fmtPKR } from '@/lib/dms-api'
-import type { SchemeDTO, ProductDTO } from '@/lib/dms-types'
-import { Plus, Gift, Percent, Package, Tag, Loader2, CalendarDays, Pencil } from 'lucide-react'
+import type { SchemeDTO, ProductDTO, CategoryDTO } from '@/lib/dms-types'
+import { Plus, Gift, Percent, Package, Tag, Layers, Store, Loader2, CalendarDays, Pencil } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
 const TYPE_META: Record<string, { label: string; icon: typeof Gift; color: string }> = {
@@ -105,6 +105,16 @@ export function SchemesView() {
                       <Package className="h-3 w-3 mr-0.5" /> {s.productName}
                     </Badge>
                   )}
+                  {s.categoryName && (
+                    <Badge variant="outline" className="text-[10px] border-violet-200 text-violet-700 bg-violet-50">
+                      <Layers className="h-3 w-3 mr-0.5" /> Category: {s.categoryName}
+                    </Badge>
+                  )}
+                  {s.filerScope && (
+                    <Badge variant="outline" className={`text-[10px] ${s.filerScope === 'FILER' ? 'border-blue-200 text-blue-700 bg-blue-50' : 'border-amber-200 text-amber-700 bg-amber-50'}`}>
+                      <Store className="h-3 w-3 mr-0.5" /> {s.filerScope === 'FILER' ? 'Filer shops only' : 'Non-filer shops only'}
+                    </Badge>
+                  )}
                 </div>
 
                 <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 flex items-center justify-between">
@@ -132,11 +142,17 @@ export function SchemesView() {
  * order items booking waqt ka scheme snapshot store karte hain. */
 function SchemeDialog({ open, onOpenChange, onSaved, editScheme }: { open: boolean; onOpenChange: (v: boolean) => void; onSaved: () => void; editScheme: SchemeDTO | null }) {
   const [products, setProducts] = useState<ProductDTO[]>([])
+  const [categories, setCategories] = useState<CategoryDTO[]>([])
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [type, setType] = useState('PERCENT_DISCOUNT')
   const [channel, setChannel] = useState('ALL')
+  // Task 55: Apply To — ALL | PRODUCT | CATEGORY (category = puri category par ek discount)
+  const [applyTo, setApplyTo] = useState('ALL')
   const [productId, setProductId] = useState('ALL')
+  const [categoryId, setCategoryId] = useState('')
+  // Task 55: Outlet Tax Status — ALL | FILER | NON_FILER ("Non-Filer Special" ke liye)
+  const [filerScope, setFilerScope] = useState('ALL')
   const [value, setValue] = useState('5')
   const [buyQty, setBuyQty] = useState('5')
   const [freeQty, setFreeQty] = useState('1')
@@ -147,32 +163,41 @@ function SchemeDialog({ open, onOpenChange, onSaved, editScheme }: { open: boole
     if (!open) return
     const user = JSON.parse(localStorage.getItem('dms_session') ?? 'null')
     fetch(`/api/products?userId=${user?.id ?? ''}`).then((r) => r.json()).then((r) => setProducts(r.products ?? [])).catch(() => {})
+    fetch(`/api/categories?userId=${user?.id ?? ''}`).then((r) => r.json()).then((r) => setCategories(r.categories ?? [])).catch(() => {})
     // edit mode: scheme ke values prefill | create mode: defaults reset
     if (editScheme) {
       setName(editScheme.name)
       setDescription(editScheme.description ?? '')
       setType(editScheme.type)
       setChannel(editScheme.channel ?? 'ALL')
+      setApplyTo(editScheme.categoryId ? 'CATEGORY' : editScheme.productId ? 'PRODUCT' : 'ALL')
       setProductId(editScheme.productId ?? 'ALL')
+      setCategoryId(editScheme.categoryId ?? '')
+      setFilerScope(editScheme.filerScope ?? 'ALL')
       setValue(String(editScheme.value))
       setBuyQty(String(editScheme.buyQty))
       setFreeQty(String(editScheme.freeQty))
       setEndDate(editScheme.endDate ? editScheme.endDate.slice(0, 10) : '')
     } else {
-      setName(''); setDescription(''); setType('PERCENT_DISCOUNT'); setChannel('ALL'); setProductId('ALL')
+      setName(''); setDescription(''); setType('PERCENT_DISCOUNT'); setChannel('ALL')
+      setApplyTo('ALL'); setProductId('ALL'); setCategoryId(''); setFilerScope('ALL')
       setValue('5'); setBuyQty('5'); setFreeQty('1'); setEndDate('')
     }
   }, [open, editScheme])
 
   async function save() {
     if (!name) { toast({ title: 'Scheme name required hai', variant: 'destructive' }); return }
+    if (applyTo === 'PRODUCT' && (!productId || productId === 'ALL')) { toast({ title: 'Product select karein — ya Apply To "All Products" rakhein', variant: 'destructive' }); return }
+    if (applyTo === 'CATEGORY' && !categoryId) { toast({ title: 'Category select karein — ya Apply To "All Products" rakhein', variant: 'destructive' }); return }
     setSaving(true)
     try {
       const payload = {
         userId: (JSON.parse(localStorage.getItem('dms_session') ?? 'null'))?.id,
         name, description, type,
         channel: channel === 'ALL' ? null : channel,
-        productId: productId === 'ALL' ? null : productId,
+        productId: applyTo === 'PRODUCT' ? productId : null,
+        categoryId: applyTo === 'CATEGORY' ? categoryId : null,
+        filerScope: filerScope === 'ALL' ? null : filerScope,
         value: Number(value), buyQty: Number(buyQty), freeQty: Number(freeQty),
         endDate: endDate || null,
       }
@@ -198,7 +223,7 @@ function SchemeDialog({ open, onOpenChange, onSaved, editScheme }: { open: boole
           <DialogDescription>
             {editScheme
               ? 'Values update karein — sirf NAYE orders par lagenge, purane bills ke discount nahi badlenge'
-              : 'Channel ya product specific offer define karein'}
+              : 'Channel, category ya filer/non-filer shops ke liye offer define karein'}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
@@ -232,15 +257,49 @@ function SchemeDialog({ open, onOpenChange, onSaved, editScheme }: { open: boole
               </Select>
             </div>
           </div>
-          <div className="grid gap-1.5"><Label>Product</Label>
-            <Select value={productId} onValueChange={setProductId}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">All Products</SelectItem>
-                {products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-1.5"><Label>Apply To</Label>
+              <Select value={applyTo} onValueChange={(v) => { setApplyTo(v); if (v !== 'PRODUCT') setProductId('ALL'); if (v !== 'CATEGORY') setCategoryId('') }}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">All Products</SelectItem>
+                  <SelectItem value="PRODUCT">Single Product</SelectItem>
+                  <SelectItem value="CATEGORY">Whole Category</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-1.5"><Label>Outlet Tax Status</Label>
+              <Select value={filerScope} onValueChange={setFilerScope}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">All Outlets</SelectItem>
+                  <SelectItem value="FILER">Filer shops only</SelectItem>
+                  <SelectItem value="NON_FILER">Non-filer shops only</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
+          {applyTo === 'PRODUCT' && (
+            <div className="grid gap-1.5"><Label>Product</Label>
+              <Select value={productId} onValueChange={setProductId}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL" disabled>— product chunein —</SelectItem>
+                  {products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {applyTo === 'CATEGORY' && (
+            <div className="grid gap-1.5"><Label>Category</Label>
+              <Select value={categoryId || undefined} onValueChange={setCategoryId}>
+                <SelectTrigger><SelectValue placeholder="Category chunein" /></SelectTrigger>
+                <SelectContent>
+                  {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}{c.productCount ? ` (${c.productCount} products)` : ''}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="grid grid-cols-3 gap-3">
             {(type === 'PERCENT_DISCOUNT' || type === 'FLAT_DISCOUNT') && (
               <div className="grid gap-1.5"><Label>{type === 'PERCENT_DISCOUNT' ? 'Percent' : 'Rs / carton'}</Label>
