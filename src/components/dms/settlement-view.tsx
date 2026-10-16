@@ -11,6 +11,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR, fmtDate, STATUS_STYLES, statusLabel } from '@/lib/dms-api'
 import type { SummaryDTO, SummaryDetailDTO, SummaryOrderDTO } from '@/lib/dms-types'
@@ -45,6 +46,13 @@ function orderNetPayable(o: { total: number; gstTotal?: number | null; tradeOffe
   return { net, gst: gst.eff, gstRev: gst.reversal, to: to.eff, toRev: to.reversal, tax: tax.eff, taxRev: tax.reversal }
 }
 
+/** Task 63: return value bill ke ACTUAL per-pc rate par — lineTotal/qty (scheme + manual
+ * discount merge hone ke baad ka net). Pehle trade price (rate) use hota tha — discount wale
+ * bill ka full return bill se ZYADA credit karta tha => NET PAYABLE MINUS ho jata tha. */
+function effRateOf(it: { qty: number; rate: number; lineTotal: number }) {
+  return it.qty > 0 ? it.lineTotal / it.qty : it.rate
+}
+
 /** Per-invoice stock return dialog: item-wise qty (Ctn/Box/Pcs) + reason → net payable auto-calculate */
 function ReturnDialog({ order, initial, onConfirm, onClose }: {
   order: SummaryOrderDTO
@@ -55,14 +63,23 @@ function ReturnDialog({ order, initial, onConfirm, onClose }: {
   const [reason, setReason] = useState(initial?.reason ?? 'UNSOLD')
   // qtys = total PIECES per product (Ctn/Box/Pcs inputs se banta hai)
   const [qtys, setQtys] = useState<Record<string, number>>(initial?.qtys ?? {})
+  // Task 63: per-bill toggle — har bill ka apna (dialog instance state, key={order.id})
+  const [fullBill, setFullBill] = useState(false)
 
   const retQty = order.items.reduce((s, it) => s + (qtys[it.productId] ?? 0), 0)
-  const retValue = Math.round(order.items.reduce((s, it) => s + (qtys[it.productId] ?? 0) * it.rate, 0) * 100) / 100
+  const retValue = Math.round(order.items.reduce((s, it) => s + (qtys[it.productId] ?? 0) * effRateOf(it), 0) * 100) / 100
   const parts = orderNetPayable(order, retValue)
   const net = parts.net
 
   function setQty(productId: string, totalPcs: number) {
+    setFullBill(false)
     setQtys({ ...qtys, [productId]: Math.max(0, Math.floor(totalPcs || 0)) })
+  }
+
+  function toggleFullBill(on: boolean) {
+    setFullBill(on)
+    if (on) setQtys(Object.fromEntries(order.items.map((it) => [it.productId, it.qty])))
+    else setQtys({})
   }
 
   return (
@@ -88,6 +105,15 @@ function ReturnDialog({ order, initial, onConfirm, onClose }: {
             </Select>
           </div>
 
+          {/* Task 63: PURA BILL RETURN toggle — har bill ka apna (ek click mein saary items full qty wapas) */}
+          <div className="flex items-center gap-3 rounded-lg border border-orange-200 bg-orange-50/60 px-3 py-2">
+            <Switch checked={fullBill} onCheckedChange={toggleFullBill} id={`full-ret-${order.id}`} />
+            <label htmlFor={`full-ret-${order.id}`} className="text-sm font-semibold text-slate-700 cursor-pointer select-none">
+              Pura Bill Return — saary items poori qty wapas (ek click)
+            </label>
+            <span className="ml-auto text-xs text-orange-700 font-bold">Bill: {fmtPKR(order.total)}</span>
+          </div>
+
           <div className="rounded-lg border border-slate-200 overflow-hidden">
             <Table className="min-w-[520px]">
               <TableHeader>
@@ -109,7 +135,10 @@ function ReturnDialog({ order, initial, onConfirm, onClose }: {
                         <p className="text-[10px] text-slate-400">{it.sku}{it.freeQty > 0 ? ` • ${fmtQty(it.freeQty, it.unitsPerCarton, it.pcsPerBox)} free` : ''}</p>
                       </TableCell>
                       <TableCell className="text-right text-sm whitespace-nowrap">{fmtQty(it.qty, it.unitsPerCarton, it.pcsPerBox)}</TableCell>
-                      <TableCell className="text-right text-sm">{fmtPKR(it.rate)}</TableCell>
+                      <TableCell className="text-right text-sm whitespace-nowrap">
+                        {fmtPKR(effRateOf(it))}
+                        {it.rate !== effRateOf(it) && <span className="ml-1 text-[10px] text-slate-400 line-through">{fmtPKR(it.rate)}</span>}
+                      </TableCell>
                       <TableCell className="text-center">
                         <div className="flex justify-center">
                           <UnitQtyInputs
@@ -123,7 +152,7 @@ function ReturnDialog({ order, initial, onConfirm, onClose }: {
                         </div>
                       </TableCell>
                       <TableCell className={`text-right text-sm font-semibold ${q > 0 ? 'text-orange-600' : 'text-slate-300'}`}>
-                        {q > 0 ? fmtPKR(Math.round(q * it.rate * 100) / 100) : '—'}
+                        {q > 0 ? fmtPKR(Math.round(q * effRateOf(it) * 100) / 100) : '—'}
                       </TableCell>
                     </TableRow>
                   )
@@ -163,6 +192,10 @@ function ReturnDialog({ order, initial, onConfirm, onClose }: {
           {(parts.gstRev > 0 || parts.taxRev > 0 || parts.toRev > 0) && (
             <p className="text-[11px] text-slate-500 text-right pr-1">GST / Advance tax bhi return ke hisaab se kam ho gaya — returned goods par dobara tax nahi lagega{parts.toRev > 0 ? '; Trade Offer bhi returned goods ka wapas le liya gaya' : ''}</p>
           )}
+          {retQty > 0 && Math.abs(net) < 0.01 && (
+            <p className="text-[11px] font-semibold text-emerald-700 text-right pr-1">Poora bill wapas — is bill ka koi bakaya nahi bacha ✓</p>
+          )}
+          <p className="text-[10px] text-slate-400 text-right pr-1">Rate/pc bill ka actual rate hai (scheme + manual discount ke baad) — return isi par hota hai</p>
         </div>
         </div>
 
@@ -195,6 +228,8 @@ function LateReturnDialog({ summaryId, onClose, onDone }: {
   const [orderId, setOrderId] = useState('')
   const [reason, setReason] = useState('UNSOLD')
   const [qtys, setQtys] = useState<Record<string, number>>({})
+  // Task 63: per-bill full return toggle
+  const [fullBill, setFullBill] = useState(false)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -232,11 +267,19 @@ function LateReturnDialog({ summaryId, onClose, onDone }: {
   const remainOf = (productId: string, billed: number) => Math.max(0, billed - (returnedMap[productId] ?? 0))
   const orderRemain = order ? order.items.reduce((s, it) => s + remainOf(it.productId, it.qty), 0) : 0
   const retQty = order ? order.items.reduce((s, it) => s + (qtys[it.productId] ?? 0), 0) : 0
-  const retValue = order ? Math.round(order.items.reduce((s, it) => s + (qtys[it.productId] ?? 0) * it.rate, 0) * 100) / 100 : 0
+  const retValue = order ? Math.round(order.items.reduce((s, it) => s + (qtys[it.productId] ?? 0) * effRateOf(it), 0) * 100) / 100 : 0
   const overCap = order ? order.items.some((it) => (qtys[it.productId] ?? 0) > remainOf(it.productId, it.qty)) : false
 
   function setQty(productId: string, totalPcs: number) {
+    setFullBill(false)
     setQtys({ ...qtys, [productId]: Math.max(0, Math.floor(totalPcs || 0)) })
+  }
+
+  function toggleFullBill(on: boolean) {
+    setFullBill(on)
+    if (!order) return
+    if (on) setQtys(Object.fromEntries(order.items.map((it) => [it.productId, remainOf(it.productId, it.qty)])))
+    else setQtys({})
   }
 
   async function apply() {
@@ -310,6 +353,15 @@ function LateReturnDialog({ summaryId, onClose, onDone }: {
                   </Select>
                 </div>
 
+                {/* Task 63: PURA BILL RETURN toggle — har bill ka apna (bacha hua poora stock ek click mein wapas) */}
+                <div className="flex items-center gap-3 rounded-lg border border-orange-200 bg-orange-50/60 px-3 py-2">
+                  <Switch checked={fullBill} onCheckedChange={toggleFullBill} id={`full-late-ret-${order?.id ?? 'x'}`} />
+                  <label htmlFor={`full-late-ret-${order?.id ?? 'x'}`} className="text-sm font-semibold text-slate-700 cursor-pointer select-none">
+                    Pura Bill Return — bacha hua poora stock wapas (ek click)
+                  </label>
+                  <span className="ml-auto text-xs text-orange-700 font-bold">Returnable: {orderRemain} pcs</span>
+                </div>
+
                 <div className="rounded-lg border border-slate-200 overflow-hidden">
                   <Table className="min-w-[560px]">
                     <TableHeader>
@@ -330,7 +382,7 @@ function LateReturnDialog({ summaryId, onClose, onDone }: {
                           <TableRow key={it.id}>
                             <TableCell>
                               <p className="text-sm font-medium text-slate-800">{it.productName}</p>
-                              <p className="text-[10px] text-slate-400">{it.sku} • {fmtPKR(it.rate)}/pc</p>
+                              <p className="text-[10px] text-slate-400">{it.sku} • {fmtPKR(effRateOf(it))}/pc</p>
                             </TableCell>
                             <TableCell className="text-right text-sm whitespace-nowrap">{fmtQty(it.qty, it.unitsPerCarton, it.pcsPerBox)}</TableCell>
                             <TableCell className={`text-right text-sm whitespace-nowrap ${done > 0 ? 'text-orange-600' : 'text-slate-300'}`}>{done > 0 ? fmtQty(done, it.unitsPerCarton, it.pcsPerBox) : '—'}</TableCell>
@@ -351,7 +403,7 @@ function LateReturnDialog({ summaryId, onClose, onDone }: {
                               )}
                             </TableCell>
                             <TableCell className={`text-right text-sm font-semibold whitespace-nowrap ${q > 0 ? 'text-orange-600' : 'text-slate-300'}`}>
-                              {q > 0 ? fmtPKR(Math.round(q * it.rate * 100) / 100) : '—'}
+                              {q > 0 ? fmtPKR(Math.round(q * effRateOf(it) * 100) / 100) : '—'}
                             </TableCell>
                           </TableRow>
                         )

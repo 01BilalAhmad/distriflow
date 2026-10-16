@@ -68,8 +68,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       if (qty > oi.qty - already) {
         return jsonError(`${oi.product?.name ?? 'Item'}: sirf ${oi.qty - already} pcs return ho sakte hain (billed ${oi.qty}, pehle se wapas ${already})`)
       }
-      const value = round2(qty * oi.rate)
-      lines.push({ productId: ri.productId, qty, rate: oi.rate, value })
+      // Task 63: value bill ke ACTUAL per-pc rate par (lineTotal/qty — scheme + manual
+      // discount ke baad). Trade price par full return bill se zyada credit => minus.
+      const effRate = oi.qty > 0 ? oi.lineTotal / oi.qty : oi.rate
+      const value = round2(qty * effRate)
+      lines.push({ productId: ri.productId, qty, rate: effRate, value })
       returnValue += value
     }
     if (lines.length === 0) return jsonError('Return qty 0 hai')

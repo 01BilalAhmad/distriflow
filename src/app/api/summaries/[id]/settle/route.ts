@@ -74,8 +74,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
             const oi = itemMap.get(ri.productId)
             if (!oi) throw new Error(`Return item invoice ka hissa nahi hai`)
             if (qty > oi.qty) throw new Error(`Return qty bill qty se zyada nahi ho sakti (${oi.qty})`)
-            const value = Math.round(qty * oi.rate * 100) / 100
-            lines.push({ productId: ri.productId, qty, rate: oi.rate, value })
+            // Task 63: value bill ke ACTUAL per-pc rate par (lineTotal/qty — scheme + manual
+            // discount ke baad ka net). Trade price use karne par full return bill se ZYADA
+            // credit karta tha => ledger/net MINUS. Ab full return EXACT bill jitna.
+            const effRate = oi.qty > 0 ? oi.lineTotal / oi.qty : oi.rate
+            const value = Math.round(qty * effRate * 100) / 100
+            lines.push({ productId: ri.productId, qty, rate: effRate, value })
             returnValue += value
           }
           if (lines.length > 0) {
