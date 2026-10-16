@@ -32,6 +32,10 @@ const Num = ({ v, dec = 0, compact = false, fit }: { v: number | null | undefine
   const s = compact ? fmtCell(v, dec) : dec === 2 ? fmt2(v) : fmtI(v)
   return <td className="num" style={fit && s.length > fit ? { fontSize: 7.4 } : undefined}>{s}</td>
 }
+// Task 51: money cell — real invoice ke money columns 0 ko bhi "0.00" print karte hain (dash nahi)
+const M = ({ v, fit }: { v: number; fit?: number }) => (
+  <td className="num" style={fit && fmt2(v).length > fit ? { fontSize: 7.4 } : undefined}>{fmt2(v)}</td>
+)
 const iso = (d: string | Date) => new Date(d).toISOString().slice(0, 10)
 const printDate = () => {
   const d = new Date()
@@ -85,11 +89,13 @@ export const keepDialogBehind = {
   },
 }
 
-export function PrintFrame({ title, onClose, pdfName, children }: {
+export function PrintFrame({ title, onClose, pdfName, landscape, children }: {
   title: string
   onClose: () => void
   /** filename (bina .pdf) direct download ke liye — default title se slug banta hai */
   pdfName?: string
+  /** Task 51: landscape A4 documents (real-invoice format cash memo) — 1123px page + @page landscape */
+  landscape?: boolean
   children: React.ReactNode
 }) {
   const idRef = useRef(0)
@@ -109,13 +115,22 @@ export function PrintFrame({ title, onClose, pdfName, children }: {
     window.addEventListener('keydown', onKey)
     // PDF chunks background preload (mobile/slow network) — tap se pehle ready
     const warm = setTimeout(() => { loadPdfLibs().catch(() => {}) }, 600)
+    // landscape doc: @page size override — print/PDF landscape par aaye (global @page A4 portrait hai)
+    let landStyle: HTMLStyleElement | null = null
+    if (landscape) {
+      landStyle = document.createElement('style')
+      landStyle.id = 'cbl-landscape-page'
+      landStyle.textContent = '@page { size: A4 landscape; margin: 8mm; }'
+      document.head.appendChild(landStyle)
+    }
     return () => {
       document.body.classList.remove('has-cbl-print')
       window.removeEventListener(PRINT_OPEN_EVT, onOther)
       window.removeEventListener('keydown', onKey)
       clearTimeout(warm)
+      landStyle?.remove()
     }
-  }, [onClose])
+  }, [onClose, landscape])
 
   function doPrint() { window.print() }
   function doExport() {
@@ -136,7 +151,11 @@ export function PrintFrame({ title, onClose, pdfName, children }: {
     toast({ title: 'PDF ban rahi hai...', description: `${pages.length} page(s) capture ho rahe hain — thora wait karein` })
     try {
       const { h: html2canvas, j: { jsPDF } } = await loadPdfLibs()
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+      // Task 51: page width se orientation detect — landscape doc (1123px) landscape A4 par
+      const land = (pages[0]?.offsetWidth ?? 0) > 900
+      const pdf = new jsPDF({ orientation: land ? 'landscape' : 'portrait', unit: 'mm', format: 'a4' })
+      const PW = land ? 297 : 210 // A4 width mm
+      const PH = land ? 210 : 297
       for (let i = 0; i < pages.length; i++) {
         const canvas = await html2canvas(pages[i], {
           scale: 2,
@@ -150,11 +169,11 @@ export function PrintFrame({ title, onClose, pdfName, children }: {
           },
         })
         const img = canvas.toDataURL('image/jpeg', 0.92)
-        let iw = 210 // A4 width mm
+        let iw = PW
         let ih = (canvas.height * iw) / canvas.width
-        if (ih > 297) { ih = 297; iw = (canvas.width * ih) / canvas.height }
+        if (ih > PH) { ih = PH; iw = (canvas.width * ih) / canvas.height }
         if (i > 0) pdf.addPage()
-        pdf.addImage(img, 'JPEG', (210 - iw) / 2, 0, iw, ih)
+        pdf.addImage(img, 'JPEG', (PW - iw) / 2, 0, iw, ih)
       }
       const name = (pdfName ?? title).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'document'
       pdf.save(`${name}.pdf`)
@@ -186,9 +205,10 @@ export function PrintFrame({ title, onClose, pdfName, children }: {
           <Button size="sm" variant="outline" onClick={onClose}><X className="h-4 w-4" /></Button>
         </div>
       </div>
-      {/* A4 pages FIXED 794px (globals.css .cbl-page) — chhote screen par overlay scroll karta hai,
-          lekin document ka layout kabhi squeeze nahi hota -> PDF/print hamesha preview jaisa */}
-      <div className="mx-auto w-[794px] shadow-2xl">{children}</div>
+      {/* A4 pages FIXED width (globals.css .cbl-page / .cbl-page-land) — chhote screen par overlay
+          scroll karta hai, lekin document ka layout kabhi squeeze nahi hota -> PDF/print hamesha
+          preview jaisa */}
+      <div className={`mx-auto shadow-2xl ${landscape ? 'w-[1123px]' : 'w-[794px]'}`}>{children}</div>
       <div className="cbl-no-print h-8" />
     </RemoveScroll>,
     document.body,
@@ -439,10 +459,14 @@ export interface InvoiceItemData {
   discount: number
   lineTotal: number
   schemeName?: string | null
+  // Task 51: booked tax snapshots (real-invoice format ke per-row columns)
+  // gstAmt = gstRate% × (rate × qty − discount) — booking par snapshot
+  gstAmt?: number
+  tradeOfferAmt?: number
 }
 export interface InvoiceData {
   orderNo: string
-  outlet: { name: string; code: string; channel: string; address: string | null; ownerName?: string | null; ntn?: string | null; cnic?: string | null }
+  outlet: { name: string; code: string; channel: string; address: string | null; ownerName?: string | null; phone?: string | null; ntn?: string | null; cnic?: string | null }
   salesmanName: string | null
   distributorName: string
   distributorCity?: string | null
@@ -462,82 +486,76 @@ export interface InvoiceData {
   advanceTaxRate?: number | null
   filerStatus?: string | null
   orderDate: string
+  /** Task 51: summary/delivery se delivery date (real invoice "Delivery Date/Day" line) */
+  summaryDeliveryDate?: string | null
+  /** Task 51: booked grand payable (= total − TO + GST + Adv) — print ke Net Invoice se match */
+  payable?: number
   items: InvoiceItemData[]
 }
 
-export function CblInvoiceDoc({ inv, gst }: { inv: InvoiceData; gst?: { enabled: boolean; rate: number } }) {
-  // Task 37: PER-PRODUCT GST — har item apne product ke rate se split hota hai (product form se
-  // set hota hai). Global Tax Settings (gst prop) sirf purane data ka fallback hai jab item par
-  // gst fields na hon. gstEnabled=false wale rows par GST columns dash print hote hain.
-  const gstOn = gst ? gst.enabled : true // settings na mile to default ON (18%)
-  const gstRate = gst?.rate ?? 18
-  const GFALL = gstOn ? gstRate / 100 : 0
+export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: boolean; rate: number } }) {
+  // Task 51: REAL-INVOICE FORMAT — Al-Falah/Mondelez "CASH MEMO / SALES TAX INVOICE" ka
+  // same-to-same landscape A4 bill. 15 columns: Item | Batch | CTN | Box | Units | Free Units |
+  // Trade Price | Gross Amount | Pass On | Net Amount | Sales Tax | Further ST | Total ST |
+  // Advance Tax 236H | Amount Inclusive of All Tax.
+  // Har row BOOKED SNAPSHOT se print hoti hai (rate/discount/lineTotal/gstAmt/tradeOfferAmt —
+  // Task 41/45 snapshot principle; yahan koi naya calculation nahi jo booked totals se hat jaye).
+  // Advance Tax booked total ka Net-weight pro-rata hai (aakhri row rounding absorb karti hai)
+  // → har column ka total neeche summary box ke number ke EXACT barabar hai — upar/neeche hamesha same.
   const rows = inv.items.map((it) => {
     const upc = it.unitsPerCarton ?? 0
     const ppb = it.pcsPerBox && it.pcsPerBox > 0 ? it.pcsPerBox : 0
-    const cpp = it.consumerPrice ?? 0 // retail PER PIECE (incl GST)
-    const gross = it.qty * it.rate
-    const hasRp = cpp > 0
-    // per-row GST fraction — product ka apna rate, warna global fallback
-    const G = it.gstEnabled === false ? 0 : (it.gstRate != null && Number.isFinite(Number(it.gstRate)) ? Number(it.gstRate) / 100 : GFALL)
-    const K = G / (1 + G)
+    const gross = Math.round(it.qty * it.rate * 100) / 100
     // qty PIECES hai — CTN / Box / Units breakdown
     const ctn = upc > 0 ? Math.floor(it.qty / upc) : 0
     const rem = upc > 0 ? it.qty % upc : 0
     const box = ppb > 0 ? Math.floor(rem / ppb) : 0
     const pcs = ppb > 0 ? rem % ppb : rem
-    // RP value = qty (pcs) × retail PER PIECE — pehle qty × retail-per-CARTON ho raha tha
-    // jo Task 17 (qty carton -> pieces) ke baad unitsPerCarton se DOUBLE multiply karta tha
-    // -> 9-10 digit values print columns mein overlap karti thin
-    const rpIncl = hasRp ? it.qty * cpp : null
-    const rpExcl = hasRp ? rpIncl! / (1 + G) : null
-    const gstRp = hasRp && G > 0 ? rpIncl! - rpExcl! : null
-    // "GST @ X% per Box" = ek box ke retail ka G/(1+G) hissa (box level na ho to per carton)
-    const gstBox = hasRp && G > 0 ? cpp * (ppb > 0 ? ppb : upc) * K : null
     return {
-      it,
-      upc,
-      gross,
-      ctn, box, pcs,
-      G,
-      rpIncl, rpExcl, gstRp, gstBox,
+      it, gross, ctn, box, pcs,
+      gst: Math.round((it.gstAmt ?? 0) * 100) / 100,
+      to: Math.round((it.tradeOfferAmt ?? 0) * 100) / 100,
+      adv: 0,
     }
   })
-  // Task 37: bill-level visibility — koi EK bhi row par GST ho to GST columns aayenge.
-  // Sab GST-wale rows ka ek hi rate ho to headers "@ X%" dikhate hain; mixed rates par generic.
-  const gstRows = rows.filter((r) => r.G > 0)
-  const anyGst = gstRows.length > 0
-  const rateLabel = (pct: number) => String(Math.round(pct * 100) / 100)
-  const rateSet = new Set(gstRows.map((r) => rateLabel(r.G * 100)))
-  const singleRate = rateSet.size === 1 ? [...rateSet][0] : null
+  // Advance Tax 236H — booked advanceTax ko per-row Net ke weight par split (last row
+  // rounding ka farq kha jati hai) → column total EXACTLY booked advanceTax
+  const advTotal = Math.round((inv.advanceTax ?? 0) * 100) / 100
+  const netAll = rows.reduce((s, r) => s + r.it.lineTotal, 0)
+  let advLeft = advTotal
+  rows.forEach((r, i) => {
+    if (advTotal <= 0 || netAll <= 0) return
+    r.adv = i === rows.length - 1
+      ? Math.round(advLeft * 100) / 100
+      : Math.round(advTotal * (r.it.lineTotal / netAll) * 100) / 100
+    advLeft -= r.adv
+  })
+  // Amount Inclusive of All Tax = Net − Trade Offer + Total Sales Tax + Advance Tax 236H
+  const rows2 = rows.map((r) => ({ ...r, incl: Math.round((r.it.lineTotal - r.to + r.gst + r.adv) * 100) / 100 }))
+
+  // ---- column totals (summary box inhi numbers ko print karta hai) ----
   const S = {
-    ctn: rows.reduce((s, r) => s + r.ctn, 0),
-    box: rows.reduce((s, r) => s + r.box, 0),
-    pcs: rows.reduce((s, r) => s + r.pcs, 0),
-    // Task 33: bill par free units visible — Load Form ke 'Issued Free Units' ka invoice counterpart.
-    // Pehle bill par free ka koi asar nahi hota tha, is liye pata nahi chalta tha kis bill par scheme free lagi.
-    free: rows.reduce((s, r) => s + r.it.freeQty, 0),
-    grossExcl: rows.reduce((s, r) => s + r.gross, 0),
-    rpExcl: rows.reduce((s, r) => s + (r.rpExcl ?? 0), 0),
-    gstRp: rows.reduce((s, r) => s + (r.gstRp ?? 0), 0),
-    rpIncl: rows.reduce((s, r) => s + (r.rpIncl ?? 0), 0),
-    gstBox: rows.reduce((s, r) => s + (r.gstBox ?? 0), 0),
-    gross: rows.reduce((s, r) => s + r.gross, 0),
-    discount: rows.reduce((s, r) => s + r.it.discount, 0),
-    manual: inv.manualDiscount ?? 0,
-    net: rows.reduce((s, r) => s + r.it.lineTotal, 0),
+    ctn: rows2.reduce((s, r) => s + r.ctn, 0),
+    box: rows2.reduce((s, r) => s + r.box, 0),
+    pcs: rows2.reduce((s, r) => s + r.pcs, 0),
+    free: rows2.reduce((s, r) => s + r.it.freeQty, 0),
+    tp: rows2.reduce((s, r) => s + r.it.rate, 0),
+    gross: rows2.reduce((s, r) => s + r.gross, 0),
+    passOn: rows2.reduce((s, r) => s + r.it.discount, 0),
+    net: rows2.reduce((s, r) => s + r.it.lineTotal, 0),
+    gst: rows2.reduce((s, r) => s + r.gst, 0),
+    adv: advTotal,
+    to: rows2.reduce((s, r) => s + r.to, 0),
+    incl: rows2.reduce((s, r) => s + r.incl, 0),
   }
-  // Task 34: DATA-AWARE column widths — "jitni bari amount, column wysy wysy adjust ho".
-  // Pehle static % colgroup thi: baray amounts (337,680.00) apne column se bahir nikal jate the
-  // (.num nowrap + table-layout fixed = overflow visible). Neeche WATER-FILLING: har column
-  // apna content-need pakka leta hai, bachi jagah value-length ke hisab se banti hai. Har
-  // invoice apne data ke hisab se apni widths leta hai. Amount >= 100k cell mein decimals
-  // drop (fmtCell), aur phir bhi fit na ho to Num ka fit prop us cell ka font 7.4px kar deta hai.
-  const numStr = (v: number | null | undefined, dec: 0 | 2 = 0, compact = false): string =>
-    v === null || v === undefined || v === 0 ? '-' : compact ? fmtCell(v, dec) : dec === 2 ? fmt2(v) : fmtI(v)
+  const manual = inv.manualDiscount ?? 0
+  const totalDiscount = Math.round((S.passOn + manual) * 100) / 100
+  // Net Invoice Amount = Σ Amount Inclusive − manual discount
+  // (manual ho to promo box ki apni row mein nazar aata hai) = booked payable (total − TO + GST + Adv)
+  const netInvoice = Math.round((S.incl - manual) * 100) / 100
+
+  // ---- Task 34: DATA-AWARE column widths (water-filling) — landscape TABLE_W par ----
   const colSpecs: { key?: string; hw: number; vl: number; min: number; d: number; need: number }[] = []
-  // Arial bold @8.6px real glyph widths (approx): digits/lowercase 4.8, caps/symbols 6.2, seps 2.4 —
-  // pehle uniform per-char model tha jo "CTN" jaise CAPS headers ko underestimate karta tha
   const textW = (s: string) =>
     [...s].reduce((a, ch) => a + (/[.,:]/.test(ch) ? 2.4 : /[0-9a-z/-]/.test(ch) ? 4.8 : 6.2), 0)
   const addCol = (vals: string[], header: string, key?: string, min = 20) => {
@@ -547,28 +565,25 @@ export function CblInvoiceDoc({ inv, gst }: { inv: InvoiceData; gst?: { enabled:
     const raw = Math.max(hw, vl) * 1.15 + 12 // data-bhook demand (slack share ke liye)
     colSpecs.push({ key, hw, vl, min, d: Math.max(need, raw), need })
   }
-  addCol([], 'Item / Product Name', undefined, 76) // name wrap hota hai — flat min
-  addCol([...rows.map((r) => numStr(r.ctn)), numStr(S.ctn)], 'CTN', 'ctn')
-  addCol([...rows.map((r) => numStr(r.box)), numStr(S.box)], 'Box', 'box')
-  addCol([...rows.map((r) => numStr(r.pcs)), numStr(S.pcs)], 'Pcs', 'pcs')
-  addCol([...rows.map((r) => numStr(r.it.freeQty)), numStr(S.free)], 'Free', 'free')
-  addCol(rows.map((r) => numStr(r.it.rate, 2)), 'Rate/ Unit Excl: GST', 'rate')
-  addCol([...rows.map((r) => numStr(r.gross, 2, true)), numStr(S.grossExcl, 2, true)], 'Total Value Excl: GST', 'totval')
-  addCol([...rows.map((r) => numStr(r.rpExcl, 2, true)), numStr(S.rpExcl, 2, true)], 'RP Value Excl: Gst', 'rpexcl')
-  if (anyGst) {
-    addCol([...rows.map((r) => numStr(r.gstRp, 2, true)), numStr(S.gstRp, 2, true)], `GST on RP Value${singleRate ? ` @ ${singleRate}%` : ''}`, 'gstrp')
-    addCol([...rows.map((r) => numStr(r.rpIncl, 2, true)), numStr(S.rpIncl, 2, true)], 'RP Value Incl: GST', 'rpincl')
-    addCol([...rows.map((r) => numStr(r.gstBox, 2, true)), numStr(S.gstBox, 2, true)], singleRate ? `GST @ ${singleRate}% per Box` : 'GST per Box', 'gstbox')
-  }
-  addCol([...rows.map((r) => numStr(r.gross, 2, true)), numStr(S.gross, 2, true)], 'Gross Amount Incl: GST', 'gross')
-  addCol(['-'], 'Advance Tax', 'adv') // items table mein Advance Tax hamesha dash hota hai
-  addCol([...rows.map((r) => numStr(r.it.discount, 2, true)), numStr(S.discount, 2, true)], 'Total Discount', 'disc')
-  addCol([...rows.map((r) => numStr(r.it.lineTotal, 2, true)), numStr(S.net, 2, true)], 'Net Amount', 'net')
-  addCol(rows.map((r) => numStr(r.it.consumerPrice, 2)), 'Retail Price', 'retail')
+  addCol([], 'Item / Product Name', undefined, 96) // name wrap hota hai — flat min
+  addCol([], 'Batch', 'batch', 26) // batch data abhi track nahi hota — dash column
+  addCol([...rows2.map((r) => (r.ctn ? fmtI(r.ctn) : '-')), S.ctn ? fmtI(S.ctn) : '-'], 'CTN', 'ctn')
+  addCol([...rows2.map((r) => (r.box ? fmtI(r.box) : '-')), S.box ? fmtI(S.box) : '-'], 'Box', 'box')
+  addCol([...rows2.map((r) => (r.pcs ? fmtI(r.pcs) : '-')), S.pcs ? fmtI(S.pcs) : '-'], 'Units', 'units')
+  // Free Units: real bill 0 ko bhi "0" print karta hai (dash nahi)
+  addCol([...rows2.map((r) => fmtI(r.it.freeQty)), fmtI(S.free)], 'Free Units', 'free', 22)
+  addCol(rows2.map((r) => fmt2(r.it.rate)), 'Trade Price (Excluding Sales Tax)', 'tp')
+  addCol([...rows2.map((r) => fmtCell(r.gross, 2)), fmtCell(S.gross, 2)], 'Gross Amount (Excluding Sales Tax)', 'gross')
+  addCol([...rows2.map((r) => fmtCell(r.it.discount, 2)), fmtCell(S.passOn, 2)], 'Pass On', 'passon')
+  addCol([...rows2.map((r) => fmtCell(r.it.lineTotal, 2)), fmtCell(S.net, 2)], 'Net Amount (Excluding Sales Tax)', 'net')
+  addCol([...rows2.map((r) => fmt2(r.gst)), fmt2(S.gst)], 'Sales Tax', 'st')
+  addCol(rows2.map(() => '0.00'), 'Further Sales Tax', 'further') // additional-layer tax abhi 0 (data naya aayega)
+  addCol([...rows2.map((r) => fmt2(r.gst)), fmt2(S.gst)], 'Total Sales Tax', 'tst')
+  addCol([...rows2.map((r) => fmt2(r.adv)), fmt2(S.adv)], 'Advance Tax 236H', 'adv')
+  addCol([...rows2.map((r) => fmtCell(r.incl, 2)), fmtCell(S.incl, 2)], 'Amount Inclusive of All Tax', 'incl')
   // WATER-FILLING: har column apna CONTENT need pakka leta hai (glyph-measured), bachi hui
-  // jagah (730 - Σneed) data-bhooke columns ko milti hai (lambi value = zyada hissa).
-  // Is se na header mid-word tootta hai ("CT N") na amount column se bahir nikalti hai.
-  const TABLE_W = 730 // .cbl-page 794px - px-8 (2 x 32)
+  // jagah (TABLE_W − Σneed) data-bhooke columns ko milti hai (lambi value = zyada hissa).
+  const TABLE_W = 1059 // .cbl-page-land 1123px − px-8 (2 x 32)
   const needs = colSpecs.map((c) => c.need)
   const slack = Math.max(0, TABLE_W - needs.reduce((a, b) => a + b, 0))
   const extra = colSpecs.map((c) => Math.max(0, c.d - c.need))
@@ -580,9 +595,10 @@ export function CblInvoiceDoc({ inv, gst }: { inv: InvoiceData; gst?: { enabled:
     if (i < 0) return undefined
     return Math.floor((colPx[i] - 10) / 4.8) // 8px td padding + 2 border, ~4.8px/digit bold
   }
+
   // promotions applied (unique scheme name -> amount)
   const promos = new Map<string, number>()
-  for (const r of rows) {
+  for (const r of rows2) {
     if (r.it.discount > 0) {
       const key = r.it.schemeName ?? 'Trade Discount'
       promos.set(key, (promos.get(key) ?? 0) + r.it.discount)
@@ -590,59 +606,53 @@ export function CblInvoiceDoc({ inv, gst }: { inv: InvoiceData; gst?: { enabled:
   }
   const promoList = [...promos.entries()]
   const letters = 'abcdefghijklmnopqrstuvwxyz'
-  const totalDiscount = S.discount + S.manual
-  const advTax = inv.advanceTax ?? 0
-  const advRate = inv.advanceTaxRate
-  // Task 45: GST (trade value par — booking snapshot) + Trade Offer (per-SKU, discount ke ilawa)
-  const gstTrade = inv.gstTotal ?? 0
-  const toTotal = inv.tradeOfferTotal ?? 0
-  const totalPayable = Math.round((inv.total - toTotal + gstTrade + advTax) * 100) / 100
-  const hasTaxChain = toTotal > 0 || gstTrade > 0 || advTax > 0
 
   return (
     <div className="cbl-doc">
-      <div className="cbl-page bg-white px-8 py-7">
-        {/* header: distributor (left) + invoice meta (right) */}
-        <div className="flex justify-between">
-          <div style={{ width: '58%' }}>
-            <p className="text-[17px] font-bold underline">{inv.distributorName} ({inv.distributorCity ?? ''}) - (MSD)</p>
-            <p className="mt-1 text-[11px] font-bold">{inv.distributorName.toUpperCase()} {inv.distributorCity?.toUpperCase()} MAIN MARKET</p>
-            <table style={{ border: 'none', marginTop: 4 }}>
+      <div className="cbl-page cbl-page-land bg-white px-8 py-6">
+        {/* header — center: distributor + address line (real invoice jaisa underlined) */}
+        <div className="text-center">
+          <p className="text-[17px] font-bold underline">{inv.distributorName} ({inv.distributorCity ?? ''}) - (MSD)</p>
+          <p className="mt-1 text-[11px] font-bold underline">{inv.distributorName.toUpperCase()} {inv.distributorCity?.toUpperCase()} MAIN MARKET</p>
+        </div>
+
+        {/* customer block (left) + invoice meta (right) — real invoice jaisi field list */}
+        <div className="mt-3 flex justify-between">
+          <div style={{ width: '50%' }}>
+            <table style={{ border: 'none' }}>
               <tbody>
-                <tr><td style={{ border: 'none', width: 70, fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8, paddingTop: 3 }}>M/S :</td><td style={{ border: 'none', paddingTop: 3 }}>{inv.outlet.name.toUpperCase()} [ {inv.outlet.code} ]</td></tr>
-                <tr><td style={{ border: 'none', width: 70, fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Owner :</td><td style={{ border: 'none' }}>{inv.outlet.ownerName?.trim() ? inv.outlet.ownerName : '—'}</td></tr>
-                <tr><td style={{ border: 'none', width: 70, fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Address:</td><td style={{ border: 'none' }}>{inv.outlet.address?.toUpperCase() ?? '—'}</td></tr>
-                {/* Shop ka NTN + CNIC ab right side (CASH MEMO ke neeche) — har shop ka apna, outlets detail se */}
+                <tr><td style={{ border: 'none', width: 110, fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>M/S :</td><td style={{ border: 'none' }}>{inv.outlet.name.toUpperCase()} [ {inv.outlet.code} ]</td></tr>
+                <tr><td style={{ border: 'none', width: 110, fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Address:</td><td style={{ border: 'none' }}>{inv.outlet.address?.toUpperCase() ?? '—'}</td></tr>
+                <tr><td style={{ border: 'none', width: 110, fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Channel Type:</td><td style={{ border: 'none' }}>{inv.outlet.channel}</td></tr>
+                <tr><td style={{ border: 'none', width: 110, fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Contact No:</td><td style={{ border: 'none' }}>{inv.outlet.phone?.trim() ? inv.outlet.phone : '—'}</td></tr>
+                <tr><td style={{ border: 'none', width: 110, fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>NTN No:</td><td style={{ border: 'none' }}>{inv.outlet.ntn?.trim() ? inv.outlet.ntn.toUpperCase() : '—'}</td></tr>
+                <tr><td style={{ border: 'none', width: 110, fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>CNIC No:</td><td style={{ border: 'none' }}>{inv.outlet.cnic?.trim() ? inv.outlet.cnic : '—'}</td></tr>
               </tbody>
             </table>
           </div>
-          <div style={{ width: '40%' }}>
+          <div style={{ width: '46%' }}>
             <table style={{ border: 'none' }}>
               <tbody>
-                <tr><td style={{ border: 'none', fontWeight: 'bold', width: 90, whiteSpace: 'nowrap', paddingRight: 8 }}>Invoice No # :</td><td style={{ border: 'none', fontWeight: 'bold' }}>{inv.orderNo}</td></tr>
-                <tr><td style={{ border: 'none', fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Date/Day :</td><td style={{ border: 'none', whiteSpace: 'nowrap' }}>{dayDate(inv.orderDate)}</td></tr>
+                <tr><td style={{ border: 'none', fontWeight: 'bold', width: 150, whiteSpace: 'nowrap', paddingRight: 8 }}>Invoice No # :</td><td style={{ border: 'none', fontWeight: 'bold' }}>{inv.orderNo}</td></tr>
+                <tr><td style={{ border: 'none', fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Booking Date/Day :</td><td style={{ border: 'none', whiteSpace: 'nowrap' }}>{dayDate(inv.orderDate)}</td></tr>
+                <tr><td style={{ border: 'none', fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Invoice Date/Day :</td><td style={{ border: 'none', whiteSpace: 'nowrap' }}>{dayDate(inv.orderDate)}</td></tr>
+                <tr><td style={{ border: 'none', fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Delivery Date/Day :</td><td style={{ border: 'none', whiteSpace: 'nowrap' }}>{inv.summaryDeliveryDate ? dayDate(inv.summaryDeliveryDate) : '—'}</td></tr>
                 <tr><td style={{ border: 'none', fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Route :</td><td style={{ border: 'none', whiteSpace: 'nowrap' }}>{inv.salesmanName ?? '—'}</td></tr>
+                <tr><td style={{ border: 'none', fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Income Tax Status :</td><td style={{ border: 'none' }}>{inv.filerStatus === 'FILER' ? 'Filer' : inv.filerStatus === 'NON_FILER' ? 'Non-Filer' : '—'}</td></tr>
               </tbody>
             </table>
-            <p className="mt-2 text-[17px] font-bold">CASH MEMO / INVOICE</p>
-            <table style={{ border: 'none', marginTop: 3 }}>
-              <tbody>
-                <tr><td style={{ border: 'none', fontWeight: 'bold', width: 90, whiteSpace: 'nowrap', paddingRight: 8 }}>N.T.N No :</td><td style={{ border: 'none' }}>{inv.outlet.ntn?.trim() ? inv.outlet.ntn.toUpperCase() : '—'}</td></tr>
-                <tr><td style={{ border: 'none', fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>C.N.I.C No :</td><td style={{ border: 'none' }}>{inv.outlet.cnic?.trim() ? inv.outlet.cnic : '—'}</td></tr>
-              </tbody>
-            </table>
+            <p className="mt-2 text-[16px] font-bold">CASH MEMO / SALES TAX INVOICE</p>
           </div>
         </div>
 
-        {/* Urdu tagline */}
+        {/* Urdu tagline — table ke upar right (real invoice placement) */}
         <p dir="rtl" className="mt-2 mb-2 text-[12.5px]" style={{ fontFamily: "'Noto Nastaliq Urdu', 'Jameel Noori Nastaleeq', serif" }}>
           خوشخبری! اب نئے سنیک پیکس، بہترین ٹریڈ مارجن اور اضافی بسکٹس کے ساتھ۔
         </p>
 
-        {/* items table — CTN → Box → Pcs pehle (user order), GST columns settings ke hisab se */}
+        {/* items table — real invoice ke EXACT 15 columns */}
         <table style={{ fontSize: 8.6 }}>
           <colgroup>
-            {/* Task 34: widths har invoice ke data se compute hoti hain (colW) — static % nahi */}
             {colW.map((w, i) => (
               <col key={`c${i}`} style={{ width: w }} />
             ))}
@@ -650,91 +660,80 @@ export function CblInvoiceDoc({ inv, gst }: { inv: InvoiceData; gst?: { enabled:
           <thead>
             <tr>
               <th style={{ textAlign: 'left' }}>Item / Product Name</th>
-              <th>CTN</th><th>Box</th><th>Pcs</th>
-              <th>Free</th>
-              <th>{anyGst ? 'Rate/ Unit Excl: GST' : 'Rate/ Unit'}</th>
-              <th>{anyGst ? 'Total Value Excl: GST' : 'Total Value'}</th>
-              <th>RP Value{anyGst ? ' Excl: Gst' : ''}</th>
-              {anyGst && <th>GST on RP Value{singleRate ? ` @ ${singleRate}%` : ''}</th>}
-              {anyGst && <th>RP Value Incl: GST</th>}
-              {anyGst && <th>{singleRate ? `GST @ ${singleRate}% per Box` : 'GST per Box'}</th>}
-              <th>{anyGst ? 'Gross Amount Incl: GST' : 'Gross Amount'}</th>
-              <th>Advance Tax</th>
-              <th>Total Discount</th>
-              <th>Net Amount</th>
-              <th>Retail Price</th>
+              <th>Batch</th>
+              <th>CTN</th><th>Box</th><th>Units</th><th>Free Units</th>
+              <th>Trade Price (Excluding Sales Tax)</th>
+              <th>Gross Amount (Excluding Sales Tax)</th>
+              <th>Pass On</th>
+              <th>Net Amount (Excluding Sales Tax)</th>
+              <th>Sales Tax</th>
+              <th>Further Sales Tax</th>
+              <th>Total Sales Tax</th>
+              <th>Advance Tax 236H</th>
+              <th>Amount Inclusive of All Tax</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {rows2.map((r) => (
               <tr key={r.it.id} className="cbl-break-avoid">
                 <td style={{ textAlign: 'left' }}>{r.it.sku} {r.it.productName}</td>
+                {dash}
                 <Num v={r.ctn} />
                 <Num v={r.box} />
                 <Num v={r.pcs} />
-                <Num v={r.it.freeQty} />
-                <Num v={r.it.rate} dec={2} fit={fitOf('rate')} />
-                <Num v={r.gross} dec={2} compact fit={fitOf('totval')} />
-                <Num v={r.rpExcl} dec={2} compact fit={fitOf('rpexcl')} />
-                {anyGst && <Num v={r.gstRp} dec={2} compact fit={fitOf('gstrp')} />}
-                {anyGst && <Num v={r.rpIncl} dec={2} compact fit={fitOf('rpincl')} />}
-                {anyGst && <Num v={r.gstBox} dec={2} compact fit={fitOf('gstbox')} />}
-                <Num v={r.gross} dec={2} compact fit={fitOf('gross')} />
-                {dash}
-                <Num v={r.it.discount} dec={2} compact fit={fitOf('disc')} />
-                <Num v={r.it.lineTotal} dec={2} compact fit={fitOf('net')} />
-                <Num v={r.it.consumerPrice} dec={2} fit={fitOf('retail')} />
+                <td className="num">{fmtI(r.it.freeQty)}</td>
+                <M v={r.it.rate} fit={fitOf('tp')} />
+                <M v={r.gross} fit={fitOf('gross')} />
+                <M v={r.it.discount} fit={fitOf('passon')} />
+                <M v={r.it.lineTotal} fit={fitOf('net')} />
+                <M v={r.gst} fit={fitOf('st')} />
+                <M v={0} fit={fitOf('further')} />
+                <M v={r.gst} fit={fitOf('tst')} />
+                <M v={r.adv} fit={fitOf('adv')} />
+                <M v={r.incl} fit={fitOf('incl')} />
               </tr>
             ))}
             <tr style={{ fontWeight: 'bold', backgroundColor: '#f7f7f7' }}>
-              <td style={{ textAlign: 'left' }}>Total ({rows.length} items)</td>
+              <td style={{ textAlign: 'left' }}>Total</td>
+              {dash}
               <Num v={S.ctn} />
               <Num v={S.box} />
               <Num v={S.pcs} />
-              <Num v={S.free} />
-              {dash}
-              <Num v={S.grossExcl} dec={2} compact fit={fitOf('totval')} />
-              <Num v={S.rpExcl} dec={2} compact fit={fitOf('rpexcl')} />
-              {anyGst && <Num v={S.gstRp} dec={2} compact fit={fitOf('gstrp')} />}
-              {anyGst && <Num v={S.rpIncl} dec={2} compact fit={fitOf('rpincl')} />}
-              {anyGst && <Num v={S.gstBox} dec={2} compact fit={fitOf('gstbox')} />}
-              <Num v={S.gross} dec={2} compact fit={fitOf('gross')} />
-              {dash}
-              <Num v={S.discount} dec={2} compact fit={fitOf('disc')} />
-              <Num v={S.net} dec={2} compact fit={fitOf('net')} />
-              {dash}
+              <td className="num">{fmtI(S.free)}</td>
+              <M v={S.tp} fit={fitOf('tp')} />
+              <M v={S.gross} fit={fitOf('gross')} />
+              <M v={S.passOn} fit={fitOf('passon')} />
+              <M v={S.net} fit={fitOf('net')} />
+              <M v={S.gst} fit={fitOf('st')} />
+              <M v={0} fit={fitOf('further')} />
+              <M v={S.gst} fit={fitOf('tst')} />
+              <M v={S.adv} fit={fitOf('adv')} />
+              <M v={S.incl} fit={fitOf('incl')} />
             </tr>
           </tbody>
         </table>
 
-        {/* Task 33: free wale bills ek nazar mein pehchane jaayein — notice line sirf free > 0 par */}
-        {S.free > 0 && (
-          <p className="mt-1.5 text-[10.5px] font-bold">
-            FREE SCHEME APPLIED — {fmtI(S.free)} Free Pcs on this bill
-          </p>
-        )}
-
-        {/* bottom: promotions (left) + totals (right) */}
+        {/* bottom: promotions (left) + totals (right) — har number kisi column ka total hai */}
         <div className="mt-4 flex justify-between">
-          <div style={{ width: '47%' }}>
+          <div style={{ width: '46%' }}>
             <table className="cbl-break-avoid" style={{ fontSize: 10 }}>
               <colgroup><col style={{ width: '70%' }} /><col style={{ width: '30%' }} /></colgroup>
               <thead>
-                <tr><th colSpan={2}>Promotions Applied</th></tr>
+                <tr><th colSpan={2} style={{ background: '#000', color: '#fff' }}>Promotions Applied</th></tr>
                 <tr><td style={{ fontWeight: 'bold' }}>Discount Summary</td><td style={{ fontWeight: 'bold' }} className="ctr">Amount</td></tr>
               </thead>
               <tbody>
-                {promoList.length === 0 && S.manual === 0 ? (
+                {promoList.length === 0 && manual === 0 ? (
                   <tr><td>(a) No Promotion</td><td className="num">0.00</td></tr>
                 ) : (
                   <>
                     {promoList.map(([name, amt], i) => (
                       <tr key={name}><td>({letters[i]}) {name}</td><td className="num">{fmt2(amt)}</td></tr>
                     ))}
-                    {S.manual > 0 && (
+                    {manual > 0 && (
                       <tr>
                         <td>({letters[promoList.length]}) Manual Discount{inv.manualDiscType === 'PERCENT' && inv.manualDiscValue ? ` (${inv.manualDiscValue}%)` : ''}</td>
-                        <td className="num">{fmt2(S.manual)}</td>
+                        <td className="num">{fmt2(manual)}</td>
                       </tr>
                     )}
                   </>
@@ -743,23 +742,15 @@ export function CblInvoiceDoc({ inv, gst }: { inv: InvoiceData; gst?: { enabled:
               </tbody>
             </table>
           </div>
-          <div style={{ width: '31%' }}>
+          <div style={{ width: '30%' }}>
             <table className="cbl-break-avoid" style={{ fontSize: 10 }}>
               <tbody>
-                <tr><td style={{ textAlign: 'center' }}>{anyGst ? 'Gross Amount Exl GST:' : 'Gross Amount:'}</td><td className="num" style={{ width: 90 }}>{fmt2(S.grossExcl)}</td></tr>
-                {anyGst && <tr><td style={{ textAlign: 'center' }}>{singleRate ? `${singleRate}% ` : ''}GST:</td><td className="num">{fmt2(S.gstRp)}</td></tr>}
-                {anyGst && <tr><td style={{ textAlign: 'center' }}>Total Amount With GST:</td><td className="num">{fmt2(S.grossExcl + S.gstRp)}</td></tr>}
-                <tr><td style={{ textAlign: 'right', fontWeight: 'bold' }}>Total Discount:</td><td className="num" style={{ fontWeight: 'bold' }}>{fmt2(totalDiscount)}</td></tr>
-                {toTotal > 0 && <tr><td style={{ textAlign: 'right' }}>Trade Offer:</td><td className="num">- {fmt2(toTotal)}</td></tr>}
-                {gstTrade > 0 && <tr><td style={{ textAlign: 'right' }}>GST (Trade Value):</td><td className="num">+ {fmt2(gstTrade)}</td></tr>}
-                <tr>
-                  <td style={{ textAlign: 'right' }}>
-                    Advance Tax {advRate != null ? `@ ${advRate}%` : ''}
-                    {inv.filerStatus ? ` (${inv.filerStatus === 'FILER' ? 'Filer' : 'Non-Filer'})` : ''}:
-                  </td>
-                  <td className="num">{advTax > 0 ? `+ ${fmt2(advTax)}` : '0.00'}</td>
-                </tr>
-                <tr><td style={{ textAlign: 'right', fontWeight: 'bold' }}>Total Invoice Amount:</td><td className="num" style={{ fontWeight: 'bold' }}>{fmtI(hasTaxChain ? totalPayable : inv.total)}</td></tr>
+                <tr><td style={{ textAlign: 'center' }}>Gross Amount:</td><td className="num" style={{ width: 96 }}>{fmt2(S.gross)}</td></tr>
+                <tr><td style={{ textAlign: 'center' }}>Total Discount:</td><td className="num" style={{ fontWeight: 'bold' }}>{fmt2(totalDiscount)}</td></tr>
+                <tr><td style={{ textAlign: 'center' }}>GST:</td><td className="num">{fmt2(S.gst)}</td></tr>
+                <tr><td style={{ textAlign: 'center' }}>Advance Tax 236H:</td><td className="num">{fmt2(S.adv)}</td></tr>
+                {S.to > 0 && <tr><td style={{ textAlign: 'center' }}>Trade Offer:</td><td className="num">- {fmt2(S.to)}</td></tr>}
+                <tr><td style={{ textAlign: 'right', fontWeight: 'bold' }}>Net Invoice Amount:</td><td className="num" style={{ fontWeight: 'bold' }}>{fmtI(Math.round(netInvoice))}</td></tr>
               </tbody>
             </table>
           </div>
@@ -786,15 +777,16 @@ export function CblInvoiceDoc({ inv, gst }: { inv: InvoiceData; gst?: { enabled:
   )
 }
 
+
 // ============================================================
 // 3) BULK INVOICES — ek summary ki sab invoices, har ek apne A4
 //    page par (.cbl-stack print CSS page-break handle karta hai)
 // ============================================================
-export function CblInvoicesDoc({ invoices, gst }: { invoices: InvoiceData[]; gst?: { enabled: boolean; rate: number } }) {
+export function CblInvoicesDoc({ invoices }: { invoices: InvoiceData[]; gst?: { enabled: boolean; rate: number } }) {
   return (
     <div className="cbl-stack">
       {invoices.map((inv) => (
-        <CblInvoiceDoc key={inv.orderNo} inv={inv} gst={gst} />
+        <CblInvoiceDoc key={inv.orderNo} inv={inv} />
       ))}
     </div>
   )

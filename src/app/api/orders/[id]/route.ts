@@ -25,7 +25,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       order: {
         id: order.id,
         orderNo: order.orderNo,
-        outlet: { name: order.outlet.name, code: order.outlet.code, channel: order.outlet.channel, address: order.outlet.address, ownerName: order.outlet.ownerName, ntn: order.outlet.ntn, cnic: order.outlet.cnic },
+        outlet: { name: order.outlet.name, code: order.outlet.code, channel: order.outlet.channel, address: order.outlet.address, ownerName: order.outlet.ownerName, phone: order.outlet.phone, ntn: order.outlet.ntn, cnic: order.outlet.cnic },
         salesmanName: order.salesman?.name ?? null,
         distributorName: order.distributor.businessName,
         distributorCity: order.distributor.city,

@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
+import { orderGrandPayable } from '@/lib/dms-order-calc'
 
 /**
  * GET /api/summaries/[id]/invoices
@@ -16,7 +17,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         distributor: { select: { businessName: true, city: true } },
         orders: {
           include: {
-            outlet: { select: { name: true, code: true, channel: true, address: true, ownerName: true, ntn: true, cnic: true } },
+            outlet: { select: { name: true, code: true, channel: true, address: true, ownerName: true, phone: true, ntn: true, cnic: true } },
             items: { include: { product: { select: { name: true, sku: true, unitsPerCarton: true, boxesPerCarton: true, pcsPerBox: true, consumerPrice: true, gstEnabled: true, gstRate: true } }, scheme: { select: { name: true } } } },
           },
           orderBy: { orderNo: 'asc' },
@@ -33,6 +34,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         channel: o.outlet.channel,
         address: o.outlet.address,
         ownerName: o.outlet.ownerName,
+        phone: o.outlet.phone,
         ntn: o.outlet.ntn,
         cnic: o.outlet.cnic,
       },
@@ -53,6 +55,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       advanceTaxRate: o.advanceTaxRate,
       filerStatus: o.filerStatus,
       orderDate: new Date(o.orderDate).toISOString(),
+      // Task 51: real-invoice format — Delivery Date/Day summary se, payable booked chain se
+      summaryDeliveryDate: new Date(summary.deliveryDate).toISOString(),
+      payable: orderGrandPayable(o),
       items: o.items.map((it) => ({
         id: it.id,
         productName: it.product.name,
@@ -63,13 +68,16 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         consumerPrice: it.product.consumerPrice,
         // Task 37: per-product GST — bill isi rate se print hoga
         gstEnabled: it.product.gstEnabled,
-        gstRate: it.product.gstRate,
+        gstRate: it.gstRate ?? it.product.gstRate, // Task 51: booked snapshot pehle, legacy par product ka current
+        // Task 51: booked GST + Trade Offer snapshots (per-row Sales Tax / Trade Offer columns)
+        gstAmt: it.gstAmt,
+        tradeOfferAmt: it.tradeOfferAmt,
         qty: it.qty,
         freeQty: it.freeQty,
         rate: it.rate,
         discount: it.discount,
         lineTotal: it.lineTotal,
-        schemeName: it.scheme?.name ?? null,
+        schemeName: it.schemeName ?? it.scheme?.name ?? null,
       })),
     }))
 
