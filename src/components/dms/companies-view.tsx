@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -568,9 +568,22 @@ function CompanyDetailDialog({ company, products, onClose, onEdit, onDataChanged
 // ==================== INVOICE ITEMS VIEWER ====================
 
 function InvoiceItemsDialog({ invoice, onClose }: { invoice: PurchaseInvoiceDTO; onClose: () => void }) {
+  // Task 50: upar Net column ka total — neeche summary ke Net Amount se EXACT match (company invoice jaisa)
+  const sum2 = (f: (it: PurchaseInvoiceDTO['items'][number]) => number) =>
+    Math.round(invoice.items.reduce((s, it) => s + f(it), 0) * 100) / 100
+  const sumGross = sum2((it) => it.lineTotal)
+  const sumPassOn = sum2((it) => it.discountAmt)
+  const sumNet = sum2((it) => it.netAmount)
+  const sumGst = sum2((it) => it.totalTax)
+  const sumTo = sum2((it) => it.tradeOfferAmt)
+  const sumAdv = sum2((it) => it.advanceTax)
+  const sumIncl = sum2((it) => it.amountInclusive || it.lineTotal)
+  const sumCartons = invoice.items.reduce((s, it) => s + it.cartons, 0)
+  // bill discount = invoice.discount − Pass On − TO (POST API: discount teeno ka blob hai)
+  const billDisc = Math.round((invoice.discount - sumPassOn - invoice.tradeOfferTotal) * 100) / 100
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-[calc(100%-2rem)] sm:max-w-xl max-h-[92vh] overflow-y-auto">
+      <DialogContent className="max-w-[calc(100%-2rem)] sm:max-w-4xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {invoice.invoiceNo}
@@ -614,21 +627,43 @@ function InvoiceItemsDialog({ invoice, onClose }: { invoice: PurchaseInvoiceDTO;
                 </TableRow>
               ))}
             </TableBody>
+            <TableFooter>
+              <TableRow className="bg-slate-100/80">
+                <TableCell className="text-xs font-semibold">Total — {invoice.items.length} item{invoice.items.length > 1 ? 's' : ''}</TableCell>
+                <TableCell />
+                <TableCell className="text-right text-xs font-semibold">{fmtNum(sumCartons)}</TableCell>
+                <TableCell />
+                <TableCell className="text-right text-xs font-semibold">{fmtNum(sumGross)}</TableCell>
+                <TableCell className="text-right text-xs font-semibold text-emerald-700">{sumPassOn > 0 ? `−${fmtNum(sumPassOn)}` : '—'}</TableCell>
+                <TableCell className="text-right text-xs font-bold text-slate-800">{fmtNum(sumNet)}</TableCell>
+                <TableCell className="text-right text-xs font-semibold text-sky-700">{sumGst > 0 ? `+${fmtNum(sumGst)}` : '—'}</TableCell>
+                <TableCell className="text-right text-xs font-semibold text-amber-700">{sumTo > 0 ? `−${fmtNum(sumTo)}` : '—'}</TableCell>
+                <TableCell className="text-right text-xs font-semibold">{sumAdv > 0 ? `+${fmtNum(sumAdv)}` : '—'}</TableCell>
+                <TableCell className="text-right text-xs font-bold">{fmtNum(sumIncl)}</TableCell>
+              </TableRow>
+            </TableFooter>
           </Table>
         </div>
-        {/* Task 44: company invoice jaisi summary — Gross − Discount + GST + Adv 236H = Net */}
+        {/* Task 44+50: company invoice jaisi summary — Gross − Pass On = Net (Net column total) → − TO − Bill Disc + GST + Adv = Net Invoice */}
         <div className="ml-auto w-full sm:w-80 space-y-1 rounded-lg border bg-slate-50/70 p-3 text-sm">
           <div className="flex justify-between"><span className="text-slate-500">Gross Amount</span><b className="text-slate-700">{fmtPKR(invoice.subtotal)}</b></div>
-          {invoice.discount > 0 && (
-            <div className="flex justify-between">
-              <span className="text-slate-500">Total Discount{invoice.tradeOfferTotal > 0 ? ` (TO ${fmtNum(invoice.tradeOfferTotal)} • Rest ${fmtNum(Math.max(0, invoice.discount - invoice.tradeOfferTotal))})` : ''}</span>
-              <b className="text-emerald-700">−{fmtPKR(invoice.discount)}</b>
-            </div>
+          {sumPassOn > 0 && (
+            <div className="flex justify-between"><span className="text-slate-500">− Pass On (items)</span><b className="text-emerald-700">−{fmtPKR(sumPassOn)}</b></div>
           )}
-          {invoice.taxTotal > 0 && <div className="flex justify-between"><span className="text-slate-500">GST</span><b className="text-sky-700">+{fmtPKR(invoice.taxTotal)}</b></div>}
-          {invoice.advanceTaxTotal > 0 && <div className="flex justify-between"><span className="text-slate-500">Advance Tax 236H ({invoice.advanceTaxPct}%)</span><b className="text-slate-700">+{fmtPKR(invoice.advanceTaxTotal)}</b></div>}
+          <div className="flex justify-between rounded-md border border-sky-200 bg-sky-50/80 px-2 py-1">
+            <span className="text-sky-700 font-semibold">Net Amount</span><b className="text-slate-800">{fmtPKR(sumNet)}</b>
+          </div>
+          {invoice.tradeOfferTotal > 0 && (
+            <div className="flex justify-between"><span className="text-slate-500">− Trade Offer</span><b className="text-amber-700">−{fmtPKR(invoice.tradeOfferTotal)}</b></div>
+          )}
+          {billDisc > 0 && (
+            <div className="flex justify-between"><span className="text-slate-500">− Bill Discount{invoice.discountPct > 0 ? ` (${invoice.discountPct}%)` : ''}</span><b className="text-emerald-700">−{fmtPKR(billDisc)}</b></div>
+          )}
+          {invoice.taxTotal > 0 && <div className="flex justify-between"><span className="text-slate-500">+ GST</span><b className="text-sky-700">+{fmtPKR(invoice.taxTotal)}</b></div>}
+          {invoice.advanceTaxTotal > 0 && <div className="flex justify-between"><span className="text-slate-500">+ Advance Tax 236H ({invoice.advanceTaxPct}%)</span><b className="text-slate-700">+{fmtPKR(invoice.advanceTaxTotal)}</b></div>}
           <div className="flex justify-between border-t pt-1"><span className="text-slate-600 font-semibold">Net Invoice Amount</span><b className="text-red-600 text-base">{fmtPKR(invoice.total)}</b></div>
           <div className="flex justify-between"><span className="text-slate-500">Paid</span><b className="text-emerald-700">{fmtPKR(invoice.paidAmount)}</b></div>
+          <p className="text-[10px] text-slate-400 pt-0.5 leading-snug">Net Amount = upar Net column ka yahi total (Gross − Pass On). Iske baad − TO − Bill Disc + GST + Adv 236H = Net Invoice (payable).</p>
         </div>
         {invoice.notes && <p className="text-xs text-slate-400 border-l-2 border-slate-200 pl-2">{invoice.notes}</p>}
       </DialogContent>

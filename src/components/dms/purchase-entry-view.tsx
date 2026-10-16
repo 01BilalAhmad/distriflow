@@ -454,6 +454,12 @@ export function PurchaseEntryView() {
         <Card className="border-slate-200"><CardContent className="p-4">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-lg border bg-slate-50/70 p-3">
             <div><p className="text-[10px] text-slate-400 uppercase font-semibold">Gross Amount</p><p className="text-sm font-bold">{fmtPKR(subtotal)}</p></div>
+            {/* Task 50: Net Amount = upar items ke Net ka EXACT total — company invoice jaisa hi neeche Net hota hai */}
+            <div className="rounded-md border border-sky-200 bg-sky-50/80 px-2 py-1.5 -my-0.5">
+              <p className="text-[10px] text-sky-700 uppercase font-semibold">Net Amount</p>
+              <p className="text-sm font-bold text-slate-800">{fmtPKR(afterItemDisc)}</p>
+              <p className="text-[10px] text-slate-500 leading-tight">Upar items ke Net ka yahi total (Gross − Pass On)</p>
+            </div>
             <div>
               <p className="text-[10px] text-slate-400 uppercase font-semibold">Total Discount</p>
               <p className={`text-sm font-bold ${totalDiscount > 0 ? 'text-emerald-700' : 'text-slate-300'}`}>{totalDiscount > 0 ? `− ${fmtPKR(totalDiscount)}` : '—'}</p>
@@ -480,7 +486,7 @@ export function PurchaseEntryView() {
             <div className="space-y-0.5"><p className="text-[10px] text-slate-400 uppercase font-semibold">Paid Now (advance)</p><Input type="number" min="0" className="h-8 bg-white" value={paidNow} onChange={(e) => setPaidNow(e.target.value)} placeholder="0" /></div>
             <div><p className="text-[10px] text-slate-400 uppercase font-semibold">Remaining Payable</p><p className="text-sm font-bold text-slate-700">{fmtPKR(Math.max(0, remaining))}</p></div>
             <p className="col-span-2 sm:col-span-4 text-[11px] text-slate-500">
-              Company invoice ka formula: <b>Gross − Total Discount + GST + Advance Tax 236H = Net Invoice</b> — yehi amount ledger payable banti hy. GST % har product ka apna (Products page par set hota hy, yahan override bhi kar sakte hain)
+              Company invoice ka formula: <b>Gross − Pass On = Net Amount</b> (upar items ke Net column ka yahi total banta hy) → − Trade Offer − Bill Discount + GST + Advance Tax 236H = <b>Net Invoice</b> — yehi amount ledger payable banti hy. GST % har product ka apna (Products page par set hota hy, yahan override bhi kar sakte hain)
             </p>
           </div>
         </CardContent></Card>
@@ -496,6 +502,7 @@ export function PurchaseEntryView() {
       <div className="shrink-0 border-t border-slate-200 bg-white/95 backdrop-blur px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs text-slate-500">
           <span>Gross <b className="text-slate-700">{fmtPKR(subtotal)}</b></span>
+          <span>Net Amt <b className="text-slate-800">{fmtPKR(afterItemDisc)}</b></span>
           {totalDiscount > 0 && <span>Discount <b className="text-emerald-700">− {fmtPKR(totalDiscount)}</b></span>}
           {taxTotal > 0 && <span>GST <b className="text-slate-700">+ {fmtPKR(taxTotal)}</b></span>}
           {advTaxTotal > 0 && <span>Adv 236H <b className="text-slate-700">+ {fmtPKR(advTaxTotal)}</b></span>}
