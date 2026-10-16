@@ -112,6 +112,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
             schemeName: it.scheme?.name ?? null,
           })),
           returns: (returnsByOrder.get(o.id) ?? []).map((r) => ({
+            id: r.id, // Task 64: cancel/undo ke liye
             returnNo: r.returnNo,
             type: r.type,
             status: r.status,

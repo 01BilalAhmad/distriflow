@@ -548,6 +548,7 @@ export interface SummaryOrderReturnItemDTO {
 }
 
 export interface SummaryOrderReturnDTO {
+  id?: string // Task 64: cancel/undo ke liye (purane cached payloads mein ho sakta nahi)
   returnNo: string
   type: string
   status: string

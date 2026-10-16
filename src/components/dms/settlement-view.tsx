@@ -17,7 +17,7 @@ import { api, fmtPKR, fmtDate, STATUS_STYLES, statusLabel } from '@/lib/dms-api'
 import type { SummaryDTO, SummaryDetailDTO, SummaryOrderDTO } from '@/lib/dms-types'
 import { UnitQtyInputs, fmtQty } from '@/components/dms/unit-qty'
 import { PrintFrame, CblSettlementDoc } from '@/components/dms/cbl-print'
-import { Wallet, Loader2, CheckCircle2, History, PackageOpen, Undo2, ReceiptText } from 'lucide-react'
+import { Wallet, Loader2, CheckCircle2, History, PackageOpen, Undo2, ReceiptText, X, RotateCcw } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
 interface SettleRow { cash: string }
@@ -55,12 +55,14 @@ function effRateOf(it: { qty: number; rate: number; lineTotal: number }) {
   return it.qty > 0 && it.lineTotal > 0 ? it.lineTotal / it.qty : it.rate
 }
 
-/** Per-invoice stock return dialog: item-wise qty (Ctn/Box/Pcs) + reason → net payable auto-calculate */
-function ReturnDialog({ order, initial, onConfirm, onClose }: {
+/** Per-invoice stock return dialog: item-wise qty (Ctn/Box/Pcs) + reason → net payable auto-calculate.
+ * Task 64: onClear — galti se laga draft wapas hatane ka button ("Pichla Return Hatao") */
+function ReturnDialog({ order, initial, onConfirm, onClose, onClear }: {
   order: SummaryOrderDTO
   initial?: ReturnDraft
   onConfirm: (draft: ReturnDraft) => void
   onClose: () => void
+  onClear?: () => void
 }) {
   const [reason, setReason] = useState(initial?.reason ?? 'UNSOLD')
   // qtys = total PIECES per product (Ctn/Box/Pcs inputs se banta hai)
@@ -202,6 +204,12 @@ function ReturnDialog({ order, initial, onConfirm, onClose }: {
         </div>
 
         <DialogFooter className="shrink-0 border-t pt-3 gap-2">
+          {initial && onClear && (
+            <Button variant="outline" className="mr-auto text-red-600 border-red-200 hover:bg-red-50" onClick={onClear}>
+              <X className="h-4 w-4 mr-1.5" />
+              Pichla Return Hatao
+            </Button>
+          )}
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button className="bg-orange-500 hover:bg-orange-600 text-white" disabled={retQty === 0}
             onClick={() => onConfirm({ reason, qtys })}>
@@ -233,6 +241,9 @@ function LateReturnDialog({ summaryId, onClose, onDone }: {
   // Task 63: per-bill full return toggle
   const [fullBill, setFullBill] = useState(false)
   const [saving, setSaving] = useState(false)
+  // Task 64: galti se lage return ko UNDO — 2-step inline confirm + loading
+  const [undoConfirmNo, setUndoConfirmNo] = useState<string | null>(null)
+  const [undoLoading, setUndoLoading] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -261,6 +272,8 @@ function LateReturnDialog({ summaryId, onClose, onDone }: {
   const returnedMap: Record<string, number> = {}
   if (order) {
     for (const rt of order.returns ?? []) {
+      // Task 64: sirf APPROVED return qty count hoti hai — cancelled (undo hua) stock wapas aa gaya
+      if (rt.status && rt.status !== 'APPROVED') continue
       for (const rit of rt.items ?? []) {
         if (rit.productId) returnedMap[rit.productId] = (returnedMap[rit.productId] ?? 0) + rit.qty
       }
@@ -268,6 +281,9 @@ function LateReturnDialog({ summaryId, onClose, onDone }: {
   }
   const remainOf = (productId: string, billed: number) => Math.max(0, billed - (returnedMap[productId] ?? 0))
   const orderRemain = order ? order.items.reduce((s, it) => s + remainOf(it.productId, it.qty), 0) : 0
+  // Task 64: is bill ke approved returns — UNDO sirf sab se naye par (API createdAt asc — last = latest)
+  const approvedReturns = (order?.returns ?? []).filter((rt) => rt.status === 'APPROVED' && rt.id)
+  const latestApproved = approvedReturns.length > 0 ? approvedReturns[approvedReturns.length - 1] : null
   const retQty = order ? order.items.reduce((s, it) => s + (qtys[it.productId] ?? 0), 0) : 0
   const retValue = order ? Math.round(order.items.reduce((s, it) => s + (qtys[it.productId] ?? 0) * effRateOf(it), 0) * 100) / 100 : 0
   const overCap = order ? order.items.some((it) => (qtys[it.productId] ?? 0) > remainOf(it.productId, it.qty)) : false
@@ -303,6 +319,35 @@ function LateReturnDialog({ summaryId, onClose, onDone }: {
     } catch (e) {
       toast({ title: 'Late Return Failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' })
     } finally { setSaving(false) }
+  }
+
+  // Task 64: undo ke baad detail refresh — selected bill wahi rehta hai, rem/returns fresh
+  async function reloadDetail() {
+    try {
+      const r = await api<{ summary: SummaryDetailDTO }>(`/api/summaries/${summaryId}`)
+      setDetail(r.summary)
+    } catch { /* refresh fail — dialog band karke dobara kholein */ }
+  }
+
+  // Task 64: galti se laga return WAPAS — stock dobara bill mein + shop balance purani state par
+  async function undoReturn(rt: { id?: string; returnNo: string }) {
+    if (!rt.id || undoLoading) return
+    setUndoLoading(true)
+    try {
+      const r = await api<{ result: { returnNo: string; cancelledValue: number; outletName: string; ledgerAmount: number } }>(
+        `/api/returns/${rt.id}/cancel`,
+        { method: 'POST', body: JSON.stringify({ userId: user?.id }) },
+      )
+      toast({
+        title: `Return ${r.result.returnNo} cancel ✓`,
+        description: `${r.result.outletName}: ${fmtPKR(r.result.cancelledValue)} ka return wapas liya — stock bill mein restore, shop ka balance purani state par aa gaya`,
+      })
+      setUndoConfirmNo(null)
+      await reloadDetail()
+    } catch (e) {
+      toast({ title: 'Undo Failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' })
+      setUndoConfirmNo(null)
+    } finally { setUndoLoading(false) }
   }
 
   return (
@@ -341,9 +386,47 @@ function LateReturnDialog({ summaryId, onClose, onDone }: {
                 <div className="rounded-lg border border-orange-200 bg-orange-50/60 px-3 py-2 text-xs text-slate-600">
                   <span className="font-semibold text-slate-800">{order.outletName}</span> • {order.orderNo} • Bill {fmtPKR(order.total)}
                   {orderRemain === 0
-                    ? <span className="block mt-0.5 text-emerald-700 font-medium">Is bill ka poora stock wapas ho chuka hai ✓</span>
+                    ? <span className="block mt-0.5 text-emerald-700 font-medium">Is bill ka poora stock wapas ho chuka hai ✓{latestApproved ? ' — ghalti se hua tha? Neeche Undo Return karein' : ''}</span>
                     : <span className="block mt-0.5">Returnable bacha hua: <span className="font-semibold text-orange-700">{orderRemain} pcs</span></span>}
                 </div>
+
+                {/* Task 64: galti se lage returns UNDO — stock + shop balance dono wapas */}
+                {approvedReturns.length > 0 && (
+                  <div className="rounded-lg border border-red-200 bg-red-50/50 px-3 py-2">
+                    <p className="text-xs font-bold text-red-700 uppercase tracking-wide mb-1.5">Lage Hue Returns — Undo</p>
+                    <div className="space-y-1.5">
+                      {approvedReturns.map((rt) => {
+                        const isLatest = latestApproved?.returnNo === rt.returnNo
+                        const pcs = (rt.items ?? []).reduce((s, rit) => s + rit.qty, 0)
+                        const confirming = undoConfirmNo === rt.returnNo
+                        return (
+                          <div key={rt.returnNo} className="flex items-center gap-2 text-xs">
+                            <span className="font-semibold text-slate-700">{rt.returnNo}</span>
+                            <span className="text-slate-400">{pcs} pcs • {fmtPKR(rt.totalValue)} • {rt.type}</span>
+                            <div className="ml-auto">
+                              {!isLatest ? (
+                                <span className="text-[10px] text-slate-400">undo ke liye pehle baad wale hatayein</span>
+                              ) : confirming ? (
+                                <span className="flex items-center gap-1">
+                                  <span className="text-[10px] font-bold text-red-600">Pakka?</span>
+                                  <Button size="sm" variant="destructive" className="h-6 text-[11px] px-2" disabled={undoLoading}
+                                    onClick={() => undoReturn(rt)}>{undoLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Haan, Undo'}</Button>
+                                  <Button size="sm" variant="outline" className="h-6 text-[11px] px-2" onClick={() => setUndoConfirmNo(null)}>Nahi</Button>
+                                </span>
+                              ) : (
+                                <Button size="sm" variant="outline" className="h-6 text-[11px] px-2 text-red-600 border-red-200 hover:bg-red-100"
+                                  onClick={() => setUndoConfirmNo(rt.returnNo)}>
+                                  <RotateCcw className="h-3 w-3 mr-1" />Undo Return
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1.5">Undo = stock dobara bill mein + shop ka balance wapas + ledger cancel entry. Toggle dobara ON karne se return wapas NAHI hota — isi Undo se hota hai.</p>
+                  </div>
+                )}
 
                 <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                   <p className="text-xs font-semibold text-slate-500 uppercase w-24 shrink-0">Return Reason</p>
@@ -555,6 +638,18 @@ export function SettlementView() {
       title: 'Return added ✓',
       description: `${order.outletName}: net payable ab ${fmtPKR(net)}${parts.taxRev > 0 ? ` — adv tax bhi ${fmtPKR(parts.taxRev)} kam hua` : ''}${parts.gstRev > 0 ? `, GST ${fmtPKR(parts.gstRev)} kam hua` : ''}`,
     })
+  }
+
+  // Task 64: galti se laga return draft wapas hatao (unsettled — sirf screen state thi, DB mein kuch nahi gaya)
+  function clearReturn(orderId: string) {
+    const o = detail?.orders.find((x) => x.id === orderId)
+    const next = { ...retInputs }
+    delete next[orderId]
+    setRetInputs(next)
+    const defaultCash = o ? orderNetPayable(o, 0).net : 0
+    setCashInputs({ ...cashInputs, [orderId]: { cash: String(defaultCash) } })
+    setRetDlgOrder(null)
+    toast({ title: 'Return hata diya ✓', description: `${o?.outletName ?? 'Bill'}: pichla return cancel — bill wapas original payable par` })
   }
 
   async function settle() {
@@ -835,6 +930,7 @@ export function SettlementView() {
           initial={retDlgDraft}
           onConfirm={(draft) => confirmReturn(retDlgRow.order, draft)}
           onClose={() => setRetDlgOrder(null)}
+          onClear={retDlgDraft ? () => clearReturn(retDlgRow.order.id) : undefined}
         />
       )}
 
