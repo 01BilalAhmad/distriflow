@@ -70,7 +70,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       }
       // Task 63: value bill ke ACTUAL per-pc rate par (lineTotal/qty — scheme + manual
       // discount ke baad). Trade price par full return bill se zyada credit => minus.
-      const effRate = oi.qty > 0 ? oi.lineTotal / oi.qty : oi.rate
+      // Task 63-b: lineTotal 0 (purane pre-Task 45 orders) par trade rate fallback.
+      const effRate = oi.qty > 0 && oi.lineTotal > 0 ? oi.lineTotal / oi.qty : oi.rate
       const value = round2(qty * effRate)
       lines.push({ productId: ri.productId, qty, rate: effRate, value })
       returnValue += value

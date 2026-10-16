@@ -48,9 +48,11 @@ function orderNetPayable(o: { total: number; gstTotal?: number | null; tradeOffe
 
 /** Task 63: return value bill ke ACTUAL per-pc rate par — lineTotal/qty (scheme + manual
  * discount merge hone ke baad ka net). Pehle trade price (rate) use hota tha — discount wale
- * bill ka full return bill se ZYADA credit karta tha => NET PAYABLE MINUS ho jata tha. */
+ * bill ka full return bill se ZYADA credit karta tha => NET PAYABLE MINUS ho jata tha.
+ * Task 63-b guard: lineTotal 0 ho (purane pre-Task 45 orders) to trade rate fallback —
+ * warna return credit 0 ho jata. Naye orders par exact eff rate. */
 function effRateOf(it: { qty: number; rate: number; lineTotal: number }) {
-  return it.qty > 0 ? it.lineTotal / it.qty : it.rate
+  return it.qty > 0 && it.lineTotal > 0 ? it.lineTotal / it.qty : it.rate
 }
 
 /** Per-invoice stock return dialog: item-wise qty (Ctn/Box/Pcs) + reason → net payable auto-calculate */
@@ -509,7 +511,8 @@ export function SettlementView() {
       if (d) {
         for (const it of o.items) {
           const q = d.qtys[it.productId] ?? 0
-          if (q > 0) { returnValue += q * it.rate; returnQty += q }
+          // Task 63-b: eff rate (dialog jaisa) — trade price par row Ret value inflated dikhta tha
+          if (q > 0) { returnValue += q * effRateOf(it); returnQty += q }
         }
       }
       returnValue = Math.round(returnValue * 100) / 100
@@ -537,10 +540,11 @@ export function SettlementView() {
   function confirmReturn(order: SummaryOrderDTO, draft: ReturnDraft) {
     setRetInputs({ ...retInputs, [order.id]: draft })
     // cash auto-adjust: net payable par le aao (user baad me edit kar sakta hai)
+    // Task 63-b: eff rate — confirmReturn bhi dialog jaisa math (trade price par minus aa raha tha)
     let rv = 0
     for (const it of order.items) {
       const q = draft.qtys[it.productId] ?? 0
-      if (q > 0) rv += q * it.rate
+      if (q > 0) rv += q * effRateOf(it)
     }
     rv = Math.round(rv * 100) / 100
     const parts = orderNetPayable(order, rv)
