@@ -62,6 +62,8 @@ export interface OrderItemDTO {
   tradeOfferAmt?: number
   gstRate?: number | null
   gstAmt?: number
+  /** Task 52: manual discount ka is line ka hissa (Pass On = discount + manualShare) */
+  manualShare?: number
 }
 
 export interface OrderDTO {

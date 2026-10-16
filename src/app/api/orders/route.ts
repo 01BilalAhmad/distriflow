@@ -1,6 +1,6 @@
 import { db } from '@/lib/db'
 import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
-import { computeOrderLines, recalcManualDiscount, orderGrandPayable, type CalcIncomingItem } from '@/lib/dms-order-calc'
+import { computeOrderLines, recalcManualDiscount, applyManualMerge, orderGrandPayable, type CalcIncomingItem } from '@/lib/dms-order-calc'
 import { advanceTaxFor, getTaxRates } from '@/lib/dms-settings'
 import { getAvailableToPromise, groupQtyByProduct, oversellMessage } from '@/lib/dms-inventory'
 
@@ -91,7 +91,7 @@ export async function POST(req: Request) {
 
     // Shared calc (stock-allocation edit bhi yehi math use karta hai)
     // Task 45: items[].tradeOffer = per-SKU Trade Offer Rs (discount ke ilawa, kuch SKUs par)
-    const { lines: itemsData, subtotal, schemeDiscount, gstTotal, tradeOfferTotal } = computeOrderLines(products, schemes, items, outlet.channel)
+    const { lines: itemsData, subtotal, schemeDiscount, tradeOfferTotal } = computeOrderLines(products, schemes, items, outlet.channel)
 
     if (itemsData.length === 0) return jsonError('Koi valid item nahi mila')
 
@@ -131,6 +131,18 @@ export async function POST(req: Request) {
       manualDiscount = r.manualDiscount
       manualDiscType = r.manualDiscType as 'PERCENT' | 'FLAT' | null
       manualDiscValue = r.manualDiscValue
+    }
+
+    // ---- Task 52: MANUAL DISCOUNT = PASS ON MERGE ----
+    // Manual ko lines mein pro-rata (by net) tor kar har line par lagao —
+    // bill ke Pass On column ka total == Promotions Applied ka Total Discount,
+    // Net column ka total == order.total, aur GST naye (merged) net par.
+    // Trade Offer ab merged net se validate hota hai (line payable kabhi negative nahi).
+    const gstTotal = applyManualMerge(itemsData, manualDiscount)
+    for (const l of itemsData) {
+      if (l.tradeOfferAmt > l.lineTotal) {
+        return jsonError(`Trade offer galat hai — ${pName.get(l.productId) ?? 'Item'}: Rs ${l.tradeOfferAmt} line total Rs ${l.lineTotal} se zyada nahi ho sakta (discount ke baad)`)
+      }
     }
 
     const seq = await nextSeq('order')

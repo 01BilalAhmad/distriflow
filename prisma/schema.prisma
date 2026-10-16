@@ -410,6 +410,10 @@ model OrderItem {
   gstRate       Float? // GST % snapshot (null = legacy line — product ka current rate fallback)
   gstAmt        Float  @default(0) // gstRate% × (rate × qty − discount)
   lineTotal Float
+  // Task 52: manual (order-level) discount ka is line ka pro-rata hissa (by net).
+  // Pass On column = discount + manualShare — bill par Promotions Applied ka Total
+  // Discount EXACT upar Total Pass On ke barabar. GST isi merged net par booked hai.
+  manualShare Float @default(0)
 }
 
 // ============ DELIVERY (Order Fulfillment, FEFO deduction) ============

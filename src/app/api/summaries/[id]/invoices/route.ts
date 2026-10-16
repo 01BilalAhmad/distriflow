@@ -72,6 +72,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         // Task 51: booked GST + Trade Offer snapshots (per-row Sales Tax / Trade Offer columns)
         gstAmt: it.gstAmt,
         tradeOfferAmt: it.tradeOfferAmt,
+        // Task 52: manual discount ka is line ka hissa (Pass On column mein merge)
+        manualShare: it.manualShare,
         qty: it.qty,
         freeQty: it.freeQty,
         rate: it.rate,

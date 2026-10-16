@@ -463,6 +463,9 @@ export interface InvoiceItemData {
   // gstAmt = gstRate% × (rate × qty − discount) — booking par snapshot
   gstAmt?: number
   tradeOfferAmt?: number
+  /** Task 52: manual discount ka is line ka hissa (Pass On = discount + manualShare).
+   * Legacy lines par absent/0 — print purana behaviour rakhta hai. */
+  manualShare?: number
 }
 export interface InvoiceData {
   orderNo: string
@@ -502,6 +505,10 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
   // Task 41/45 snapshot principle; yahan koi naya calculation nahi jo booked totals se hat jaye).
   // Advance Tax booked total ka Net-weight pro-rata hai (aakhri row rounding absorb karti hai)
   // → har column ka total neeche summary box ke number ke EXACT barabar hai — upar/neeche hamesha same.
+  // Task 52: MANUAL DISCOUNT = PASS ON MERGE — manual booking par lines mein pro-rata (manualShare)
+  // merge hota hai, is liye Pass On column = scheme discount + manualShare → top Pass On ka total
+  // == Promotions Applied ka Total Discount, Net column ka total == order.total, GST merged net par.
+  // LEGACY orders (manualShare 0) par purana behaviour — manual sirf promo box + summary mein.
   const rows = inv.items.map((it) => {
     const upc = it.unitsPerCarton ?? 0
     const ppb = it.pcsPerBox && it.pcsPerBox > 0 ? it.pcsPerBox : 0
@@ -513,6 +520,8 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
     const pcs = ppb > 0 ? rem % ppb : rem
     return {
       it, gross, ctn, box, pcs,
+      // Task 52: Pass On = scheme discount + manual share (merged)
+      passOn: Math.round((it.discount + (it.manualShare ?? 0)) * 100) / 100,
       gst: Math.round((it.gstAmt ?? 0) * 100) / 100,
       to: Math.round((it.tradeOfferAmt ?? 0) * 100) / 100,
       adv: 0,
@@ -541,7 +550,7 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
     free: rows2.reduce((s, r) => s + r.it.freeQty, 0),
     tp: rows2.reduce((s, r) => s + r.it.rate, 0),
     gross: rows2.reduce((s, r) => s + r.gross, 0),
-    passOn: rows2.reduce((s, r) => s + r.it.discount, 0),
+    passOn: rows2.reduce((s, r) => s + r.passOn, 0),
     net: rows2.reduce((s, r) => s + r.it.lineTotal, 0),
     gst: rows2.reduce((s, r) => s + r.gst, 0),
     adv: advTotal,
@@ -549,10 +558,14 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
     incl: rows2.reduce((s, r) => s + r.incl, 0),
   }
   const manual = inv.manualDiscount ?? 0
-  const totalDiscount = Math.round((S.passOn + manual) * 100) / 100
-  // Net Invoice Amount = Σ Amount Inclusive − manual discount
-  // (manual ho to promo box ki apni row mein nazar aata hai) = booked payable (total − TO + GST + Adv)
-  const netInvoice = Math.round((S.incl - manual) * 100) / 100
+  // Task 52: manual Pass On mein merged hai ya nahi (legacy orders manualShare 0)
+  const manualInside = Math.round(rows2.reduce((s, r) => s + (r.it.manualShare ?? 0), 0) * 100) / 100 > 0
+  // Total Discount = Pass On column ka total (naye orders: scheme + manual merged; legacy: + manual alag)
+  const totalDiscount = Math.round((S.passOn + (manualInside ? 0 : manual)) * 100) / 100
+  // Net Invoice Amount:
+  //  - naye orders: Σ Amount Inclusive (manual andar hi merged) = booked payable
+  //  - legacy: Σ Amount Inclusive − manual discount (purana chain, snapshot frozen)
+  const netInvoice = manualInside ? Math.round(S.incl * 100) / 100 : Math.round((S.incl - manual) * 100) / 100
 
   // ---- Task 34: DATA-AWARE column widths (water-filling) — landscape TABLE_W par ----
   const colSpecs: { key?: string; hw: number; vl: number; min: number; d: number; need: number }[] = []
@@ -574,7 +587,7 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
   addCol([...rows2.map((r) => fmtI(r.it.freeQty)), fmtI(S.free)], 'Free Units', 'free', 22)
   addCol(rows2.map((r) => fmt2(r.it.rate)), 'Trade Price (Excluding Sales Tax)', 'tp')
   addCol([...rows2.map((r) => fmtCell(r.gross, 2)), fmtCell(S.gross, 2)], 'Gross Amount (Excluding Sales Tax)', 'gross')
-  addCol([...rows2.map((r) => fmtCell(r.it.discount, 2)), fmtCell(S.passOn, 2)], 'Pass On', 'passon')
+  addCol([...rows2.map((r) => fmtCell(r.passOn, 2)), fmtCell(S.passOn, 2)], 'Pass On', 'passon')
   addCol([...rows2.map((r) => fmtCell(r.it.lineTotal, 2)), fmtCell(S.net, 2)], 'Net Amount (Excluding Sales Tax)', 'net')
   addCol([...rows2.map((r) => fmt2(r.gst)), fmt2(S.gst)], 'Sales Tax', 'st')
   addCol(rows2.map(() => '0.00'), 'Further Sales Tax', 'further') // additional-layer tax abhi 0 (data naya aayega)
@@ -684,7 +697,7 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
                 <td className="num">{fmtI(r.it.freeQty)}</td>
                 <M v={r.it.rate} fit={fitOf('tp')} />
                 <M v={r.gross} fit={fitOf('gross')} />
-                <M v={r.it.discount} fit={fitOf('passon')} />
+                <M v={r.passOn} fit={fitOf('passon')} />
                 <M v={r.it.lineTotal} fit={fitOf('net')} />
                 <M v={r.gst} fit={fitOf('st')} />
                 <M v={0} fit={fitOf('further')} />

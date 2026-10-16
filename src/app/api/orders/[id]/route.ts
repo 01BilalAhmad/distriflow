@@ -1,7 +1,7 @@
 import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
 import { fulfillOrder } from '@/lib/dms-fulfill'
-import { computeOrderLines, recalcManualDiscount, orderGrandPayable, type CalcIncomingItem } from '@/lib/dms-order-calc'
+import { computeOrderLines, recalcManualDiscount, applyManualMerge, orderGrandPayable, type CalcIncomingItem } from '@/lib/dms-order-calc'
 import { advanceTaxFor, getTaxRates } from '@/lib/dms-settings'
 import { getAvailableToPromise, groupQtyByProduct, oversellMessage } from '@/lib/dms-inventory'
 
@@ -66,6 +66,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           tradeOfferAmt: it.tradeOfferAmt,
           gstRate: it.gstRate ?? it.product.gstRate, // snapshot, legacy line par product ka current rate
           gstAmt: it.gstAmt,
+          // Task 52: manual discount ka is line ka hissa (Pass On column mein merge)
+          manualShare: it.manualShare,
           schemeId: it.schemeId,
           // Task 41: booking waqt ka scheme snapshot (edit-proof)
           schemeType: it.schemeType,
@@ -159,7 +161,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       const schemes = await db.scheme.findMany({
         where: { isActive: true, distributorId: tenantId, OR: [{ endDate: null }, { endDate: { gte: new Date() } }] },
       })
-      const { lines, subtotal, schemeDiscount, gstTotal, tradeOfferTotal } = computeOrderLines(products, schemes, withSnapshots, order.channel)
+      const { lines, subtotal, schemeDiscount, tradeOfferTotal } = computeOrderLines(products, schemes, withSnapshots, order.channel)
       if (lines.length === 0) return jsonError('Kam az kam 1 item qty ke saath chahiye')
 
       // ---- Task 26: STOCK LIMIT — allocation edit bhi available ke andar ----
@@ -178,6 +180,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
       const manual = recalcManualDiscount(order.manualDiscType, order.manualDiscValue, subtotal, schemeDiscount)
       const total = Math.round((subtotal - schemeDiscount - manual.manualDiscount) * 100) / 100
+
+      // ---- Task 52: MANUAL DISCOUNT = PASS ON MERGE (POST jaisa hi math) ----
+      // Manual lines mein pro-rata merge → Pass On total == Total Discount, Net == total,
+      // GST merged net par. Trade Offer merged net se validate (UPDATE par block).
+      const gstTotal = applyManualMerge(lines, manual.manualDiscount)
+      const pName = new Map(products.map((p) => [p.id, p.name]))
+      for (const l of lines) {
+        if (action === 'UPDATE_ITEMS' && l.tradeOfferAmt > l.lineTotal) {
+          return jsonError(`Trade offer galat hai — ${pName.get(l.productId) ?? 'Item'}: Rs ${l.tradeOfferAmt} line total Rs ${l.lineTotal} se zyada nahi ho sakta (discount ke baad)`)
+        }
+      }
 
       // Advance Tax: order ka SNAPSHOT rate preserve hota hai (booking waqt ka),
       // sirf amount naye total par recompute. Purana order (rate null) ho to

@@ -17,7 +17,7 @@ import { api, fmtPKR, fmtDate, STATUS_STYLES, statusLabel } from '@/lib/dms-api'
 import type { OrderDTO, OrderItemDTO, OutletDTO, ProductDTO, SchemeDTO, SalesmanPerfDTO } from '@/lib/dms-types'
 import { UnitQtyInputs, splitPcs, fmtQty, packHint } from '@/components/dms/unit-qty'
 import { PrintFrame, CblInvoiceDoc, keepDialogBehind, type InvoiceData } from '@/components/dms/cbl-print'
-import { orderGrandPayable } from '@/lib/dms-order-calc'
+import { orderGrandPayable, splitManualByNet } from '@/lib/dms-order-calc'
 import { Plus, Eye, XCircle, Loader2, Search, ShoppingCart, Printer, Percent, Gift } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
@@ -397,6 +397,22 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
   }, [discType, discNum, discInputValid, computed])
   const netTotal = Math.max(0, computed.subtotal - computed.discount - manualDiscount)
 
+  // ---- Task 52: MANUAL DISCOUNT = PASS ON MERGE (server applyManualMerge ka client mirror) ----
+  // Manual ko rows mein pro-rata (by net) tor kar har line par lagao — preview ke numbers
+  // booked bill se EXACT match: Pass On (scheme + manual), Net, aur GST merged net par.
+  const merged = useMemo(() => {
+    const shares = splitManualByNet(computed.rows.map((r) => r.total), manualDiscount)
+    let gstTotal = 0
+    const rows = computed.rows.map((r, i) => {
+      const manualShare = shares[i]
+      const total = Math.round(Math.max(0, r.total - manualShare) * 100) / 100
+      const gstAmt = r.gstRate > 0 ? Math.round(total * (r.gstRate / 100) * 100) / 100 : 0
+      gstTotal += gstAmt
+      return { ...r, manualShare, total, gstAmt }
+    })
+    return { rows, gstTotal: Math.round(gstTotal * 100) / 100 }
+  }, [computed, manualDiscount])
+
   // Advance Tax live preview (bill par ADD hota hai) — shop ke filer status + settings rate se (server bhi yehi karta hai)
   const advTaxPreview = useMemo(() => {
     if (!outlet || !taxRates || netTotal <= 0) return 0
@@ -405,7 +421,8 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
   }, [outlet, taxRates, netTotal])
 
   // Task 45: Grand payable = goods net − trade offer + GST + advance tax (purchase invoice chain)
-  const grandPayable = Math.round((netTotal - computed.toTotal + computed.gstTotal + advTaxPreview) * 100) / 100
+  // Task 52: GST merged (manual ke baad wale) net par — jaisa server book karta hai
+  const grandPayable = Math.round((netTotal - merged.rows.reduce((s, r) => s + r.tradeOffer, 0) + merged.gstTotal + advTaxPreview) * 100) / 100
 
   function deleteDiscount() {
     setDiscType('NONE')
@@ -430,9 +447,10 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
       return
     }
     // Task 45: Trade Offer validation — line ke net total se zyada nahi (server bhi check karta hai)
-    const badTo = computed.rows.findIndex((r) => r.tradeOffer > r.total)
+    // Task 52: merged net ke against (manual discount ke baad) — server bhi wahi karta hai
+    const badTo = merged.rows.findIndex((r) => r.tradeOffer > r.total)
     if (badTo >= 0) {
-      toast({ title: 'Trade Offer galat hai', description: `${computed.rows[badTo].name}: Rs ${computed.rows[badTo].tradeOffer} line total Rs ${computed.rows[badTo].total} se zyada nahi ho sakta`, variant: 'destructive' })
+      toast({ title: 'Trade Offer galat hai', description: `${merged.rows[badTo].name}: Rs ${merged.rows[badTo].tradeOffer} line total Rs ${merged.rows[badTo].total} se zyada nahi ho sakta`, variant: 'destructive' })
       return
     }
     // Task 26: STOCK LIMIT — available stock se zyada booking UI par bhi block (server bhi check karta hai)
@@ -526,6 +544,7 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
               </div>
             )}
             {computed.rows.map((r, i) => {
+              const mr = merged.rows[i]
               const lineProduct = products.find((x) => x.id === lines[i]?.productId)
               return (
               <div key={i} className="rounded-lg border p-3 space-y-2 bg-slate-50/50">
@@ -587,17 +606,18 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
                 <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px]">
                   {lineProduct && <span className="text-slate-400 whitespace-nowrap">{packHint(lineProduct.unitsPerCarton, lineProduct.boxesPerCarton, lineProduct.pcsPerBox)} • {fmtPKR(r.ratePc)}/pc</span>}
                   <span className="text-slate-500 whitespace-nowrap">Gross <b className="text-slate-600">{fmtPKR(r.gross)}</b></span>
-                  {r.discount > 0 && <span className="text-emerald-600 font-medium whitespace-nowrap">Pass On − {fmtPKR(r.discount)}</span>}
+                  {r.discount > 0 && <span className="text-emerald-600 font-medium whitespace-nowrap">Pass On − {fmtPKR(Math.round((r.discount + (mr?.manualShare ?? 0)) * 100) / 100)}</span>}
+                  {(mr?.manualShare ?? 0) > 0 && r.discount <= 0 && <span className="text-emerald-600 font-medium whitespace-nowrap">Pass On − {fmtPKR(mr!.manualShare)}</span>}
                   {r.freeQty > 0 && <span className="text-emerald-600 font-semibold whitespace-nowrap">+{fmtQty(r.freeQty, r.upc, r.pcsPerBox)} FREE</span>}
-                  <span className="text-slate-500 whitespace-nowrap">Net <b className="text-slate-700">{fmtPKR(r.total)}</b></span>
-                  {r.gstAmt > 0 ? (
-                    <span className="text-blue-600 font-medium whitespace-nowrap">GST {r.gstRate}% + {fmtPKR(r.gstAmt)}</span>
+                  <span className="text-slate-500 whitespace-nowrap">Net <b className="text-slate-700">{fmtPKR(mr?.total ?? r.total)}</b></span>
+                  {(mr?.gstAmt ?? r.gstAmt) > 0 ? (
+                    <span className="text-blue-600 font-medium whitespace-nowrap">GST {r.gstRate}% + {fmtPKR(mr?.gstAmt ?? r.gstAmt)}</span>
                   ) : (
                     <span className="text-slate-400 whitespace-nowrap">GST nahi lagta</span>
                   )}
                   {r.tradeOffer > 0 && <span className="text-violet-600 font-semibold whitespace-nowrap">TO − {fmtPKR(r.tradeOffer)}</span>}
                   {r.scheme && <Badge className="bg-emerald-100 text-emerald-700 border-0 text-[10px]">🎁 {r.scheme}</Badge>}
-                  <span className="text-slate-500 ml-auto whitespace-nowrap">Line payable: <b className="text-slate-700">{fmtPKR(Math.max(0, Math.round((r.total - r.tradeOffer + r.gstAmt) * 100) / 100))}</b></span>
+                  <span className="text-slate-500 ml-auto whitespace-nowrap">Line payable: <b className="text-slate-700">{fmtPKR(Math.max(0, Math.round(((mr?.total ?? r.total) - r.tradeOffer + (mr?.gstAmt ?? r.gstAmt)) * 100) / 100))}</b></span>
                 </div>
                 {/* Task 26: available stock guard — requested qty available se bara ho to red warning */}
                 {lineProduct && (
@@ -648,7 +668,7 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
                 </div>
               )}
             </div>
-            <p className="text-[11px] text-slate-400">Scheme discount ke <b>ilawa</b> pura order par lagta hai — invoice ke Discount Summary mein alag row aati hai</p>
+            <p className="text-[11px] text-slate-400">Scheme discount ke <b>ilawa</b> pura order par lagta hai — invoice ke Discount Summary mein alag row aati hai aur Pass On column mein merge hoti hai (GST naye net par)</p>
           </div>
 
           <div className="grid gap-1.5">
@@ -662,12 +682,12 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
             {computed.discount > 0 && <div className="flex justify-between text-emerald-600 font-medium"><span>Scheme Discount</span><span>- {fmtPKR(computed.discount)}</span></div>}
             {manualDiscount > 0 && <div className="flex justify-between text-emerald-600 font-medium"><span>Manual Discount</span><span>- {fmtPKR(manualDiscount)}</span></div>}
             <div className="flex justify-between font-bold text-slate-900"><span>Net Total</span><span>{fmtPKR(netTotal)}</span></div>
-            {computed.gstTotal > 0 && <div className="flex justify-between text-blue-600 font-medium"><span>GST (Sales Tax)</span><span>+ {fmtPKR(computed.gstTotal)}</span></div>}
+            {merged.gstTotal > 0 && <div className="flex justify-between text-blue-600 font-medium"><span>GST (Sales Tax)</span><span>+ {fmtPKR(merged.gstTotal)}</span></div>}
             {computed.toTotal > 0 && <div className="flex justify-between text-violet-600 font-medium"><span>Trade Offer</span><span>- {fmtPKR(computed.toTotal)}</span></div>}
             {outlet && taxRates && advTaxPreview > 0 && (
               <div className="flex justify-between text-blue-600"><span>Advance Tax ({outlet.filerStatus === 'FILER' ? `Filer ${taxRates.filer}` : `Non-Filer ${taxRates.nonFiler}`}%)</span><span>+ {fmtPKR(advTaxPreview)}</span></div>
             )}
-            {(computed.toTotal > 0 || computed.gstTotal > 0 || advTaxPreview > 0) && (
+            {(computed.toTotal > 0 || merged.gstTotal > 0 || advTaxPreview > 0) && (
               <div className="flex justify-between font-bold text-emerald-700 border-t border-slate-200 pt-1"><span>Total Payable</span><span>{fmtPKR(grandPayable)}</span></div>
             )}
           </div>

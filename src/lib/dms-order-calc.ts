@@ -65,6 +65,10 @@ export interface CalcLine {
   gstRate: number | null
   gstAmt: number
   lineTotal: number
+  /** Task 52: manual (order-level) discount ka is line ka hissa (pro-rata by net).
+   * lineTotal = gross − discount − manualShare (merged net) — order.total ka EXACT column total.
+   * Pass On column = discount + manualShare (bill par scheme + manual dono dikhte hain). */
+  manualShare: number
 }
 
 export interface CalcResult {
@@ -114,6 +118,8 @@ export function computeOrderLines(
   let gstTotal = 0
   let tradeOfferTotal = 0
   const lines: CalcLine[] = []
+  // Task 52: manual merge is function ke BAAD hota hai (manual order-level hai, lines ke baad)
+  const manualShare = 0
 
   for (const item of items) {
     const p = products.find((x) => x.id === item.productId)
@@ -201,6 +207,7 @@ export function computeOrderLines(
       gstRate: gstRate > 0 ? gstRate : null,
       gstAmt,
       lineTotal,
+      manualShare,
     })
   }
 
@@ -211,6 +218,67 @@ export function computeOrderLines(
     gstTotal: Math.round(gstTotal * 100) / 100,
     tradeOfferTotal: Math.round(tradeOfferTotal * 100) / 100,
   }
+}
+
+/**
+ * Task 52: manual (order-level) discount ko lines mein pro-rata TORE karne ke lie
+ * pure helper — har line ka share uske NET (gross − scheme discount) ke weight se.
+ * NET-weight isliye taake jo line pehle hi scheme se kam ho gayi wo extra na uthaye,
+ * aur merged net kabhi negative na ho (share <= net guarantee).
+ * Σ shares EXACTLY manual ke barabar (aakhri line rounding kha jati hai, clamp +
+ * redistribution edge cases bhi handle) — order.total ka column total kabhi nahi toota.
+ */
+export function splitManualByNet(nets: number[], manual: number): number[] {
+  const n = nets.length
+  const shares = new Array<number>(n).fill(0)
+  if (!(manual > 0) || n === 0) return shares
+  const capped = Math.min(Math.round(manual * 100) / 100, Math.round(nets.reduce((s, v) => s + Math.max(0, v), 0) * 100) / 100)
+  if (capped <= 0) return shares
+  const netAll = Math.round(nets.reduce((s, v) => s + Math.max(0, v), 0) * 100) / 100
+  let left = capped
+  for (let i = 0; i < n - 1; i++) {
+    const net = Math.max(0, nets[i])
+    const share = Math.min(net, Math.round(capped * (net / netAll) * 100) / 100)
+    shares[i] = share
+    left = Math.round((left - share) * 100) / 100
+  }
+  shares[n - 1] = Math.min(Math.max(0, nets[n - 1]), Math.max(0, left))
+  // Edge: clamp/redistribution ne manual poora nahi tora to bacha hua headroom wali
+  // lines mein daal do (deterministic index order — chhota data, cheap)
+  let residual = Math.round((capped - shares.reduce((s, v) => s + v, 0)) * 100) / 100
+  for (let i = 0; residual > 0 && i < n; i++) {
+    const head = Math.round((Math.max(0, nets[i]) - shares[i]) * 100) / 100
+    const add = Math.min(head, residual)
+    if (add > 0) {
+      shares[i] = Math.round((shares[i] + add) * 100) / 100
+      residual = Math.round((residual - add) * 100) / 100
+    }
+  }
+  return shares
+}
+
+/**
+ * Task 52: MANUAL DISCOUNT = PASS ON MERGE.
+ * Manual (order-level) discount lines mein pro-rata (by net) tor kar har line par
+ * lagao: manualShare persist + lineTotal merged net + GST naye net par recompute.
+ * Isse bill ke Pass On column ka total == Promotions Applied ka Total Discount,
+ * Net column ka total == order.total, aur Sales Tax = Net × rate (real invoice rule).
+ * Returns merged Σ gstAmt (routes isi ko gstTotal ke tor par persist karte hain).
+ * Mutates lines in-place. manual <= 0 par koi asar nahi (legacy orders safe).
+ */
+export function applyManualMerge(lines: CalcLine[], manualDiscount: number): number {
+  if (!(manualDiscount > 0) || lines.length === 0) {
+    return Math.round(lines.reduce((s, l) => s + l.gstAmt, 0) * 100) / 100
+  }
+  const shares = splitManualByNet(lines.map((l) => l.lineTotal), manualDiscount)
+  lines.forEach((l, i) => {
+    l.manualShare = shares[i]
+    l.lineTotal = Math.round(Math.max(0, l.lineTotal - shares[i]) * 100) / 100
+    l.gstAmt = l.gstRate && l.gstRate > 0
+      ? Math.round(l.lineTotal * (l.gstRate / 100) * 100) / 100
+      : 0
+  })
+  return Math.round(lines.reduce((s, l) => s + l.gstAmt, 0) * 100) / 100
 }
 
 /**
