@@ -3,7 +3,7 @@
 /**
  * CBL-style print documents — same-to-same design as the uploaded samples:
  *  1. CblLoadFormDoc  — Load Form: product load sheet + customers sheet + signatures (3 pages)
- *  2. CblInvoiceDoc   — CASH MEMO / INVOICE: distributor header,
+ *  2. CblInvoiceDoc   — CASH MEMO / INVOICE: distributor header, Urdu disclaimer,
  *                       GST-style item table, Promotions Applied, totals box, 3 signature boxes
  * PrintFrame = on-screen A4 preview overlay with Print + Export PDF (browser print-to-PDF).
  */
@@ -658,6 +658,11 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
             <p className="mt-2 text-[16px] font-bold">CASH MEMO / SALES TAX INVOICE</p>
           </div>
         </div>
+
+        {/* Urdu disclaimer — Task 61: maal moky pr check + zati laindain ka zimydari inkar */}
+        <p dir="rtl" className="mt-2 mb-2 text-[12.5px] leading-6" style={{ fontFamily: "'Noto Nastaliq Urdu', 'Jameel Noori Nastaleeq', serif" }}>
+          مال موقے پر چیک کریں، بعد کی ذمہ داری نہ ہوگی۔ ڈسٹریبیوٹر / آرڈربوکر کے کسی بھی ذاتی لین دین کا ذمہ دار نہیں ہوگا۔ شکریہ
+        </p>
 
         {/* items table — Task 59: portrait 12 columns (khali/duplicate columns hatay) */}
         <table style={{ fontSize: 8.6 }}>
