@@ -58,7 +58,11 @@ export interface CalcIncomingItem {
 
 /** Task 56: frozen scheme shape (OrderItem.schemeStack rows + CalcLine.schemeStack).
  * Type alias (interface nahi) — implicit index signature milta hai, Prisma InputJson
- * assignability ke liye zaroori. */
+ * assignability ke liye zaroori.
+ * Task 57: per-scheme attribution — `amount` = is line par IS scheme ka apna Rs
+ * discount (money schemes), `freeQtyGiven` = is line par IS BxGy scheme ke free pcs.
+ * Combined line.discount/freeQty inhi ka sum hai — Promotions Applied / previews
+ * har scheme ko APNI alag row/column par dikhati hain (ek column mein ek promotion). */
 export type CalcSchemeSnapshot = {
   id: string
   name?: string
@@ -66,6 +70,10 @@ export type CalcSchemeSnapshot = {
   value: number
   buyQty: number
   freeQty: number
+  /** Task 57: is line par is scheme ka apna Rs contribution (BxGy par 0/absent) */
+  amount?: number
+  /** Task 57: is line par is BxGy scheme ke free pcs (money schemes par 0/absent) */
+  freeQtyGiven?: number
 }
 
 export interface CalcLine {
@@ -217,12 +225,26 @@ export function computeOrderLines(
 
     // Stack contributions: BxGy = free pcs, PERCENT = gross ka exact %, FLAT = per-ctn Rs.
     // Alag-alag tiers ke percent ADD hoti hain (3% + 2% = 5% of gross) — user mental model.
+    // Task 57: har scheme ka APNA contribution bhi record hota hai (amount / freeQtyGiven)
+    // — persisted schemeStack row ke andar freeze hota hai taake bill + previews har
+    // promotion ko alag row par apne amount ke sath dikhayen (combined totals inhi ka sum).
     let freeQty = 0
     let discount = 0
+    const stackRows: CalcSchemeSnapshot[] = []
     for (const s of stack) {
-      if (qualifiesBxGy(s)) freeQty += Math.round(Math.floor(ctnEquiv / s.buyQty) * s.freeQty * upc)
-      else if (s.type === 'PERCENT_DISCOUNT') discount += Math.round(ratePerPc * qty * (s.value / 100) * 100) / 100
-      else if (s.type === 'FLAT_DISCOUNT') discount += Math.round(s.value * ctnEquiv * 100) / 100
+      let amount = 0
+      let freeGiven = 0
+      if (qualifiesBxGy(s)) {
+        freeGiven = Math.round(Math.floor(ctnEquiv / s.buyQty) * s.freeQty * upc)
+        freeQty += freeGiven
+      } else if (s.type === 'PERCENT_DISCOUNT') {
+        amount = Math.round(ratePerPc * qty * (s.value / 100) * 100) / 100
+        discount += amount
+      } else if (s.type === 'FLAT_DISCOUNT') {
+        amount = Math.round(s.value * ctnEquiv * 100) / 100
+        discount += amount
+      }
+      stackRows.push({ id: s.id, name: s.name, type: s.type, value: s.value, buyQty: s.buyQty, freeQty: s.freeQty, ...(s.type === 'BUY_X_GET_Y' ? { freeQtyGiven: freeGiven } : { amount }) })
     }
 
     // Primary (single fields) = sab se SPECIFIC tier wali scheme (stack[0]) — legacy
@@ -261,10 +283,10 @@ export function computeOrderLines(
       schemeFreeQty: applied?.freeQty ?? null,
       schemeName: schemeNameCombined,
       // Task 56: poora stack freeze hota hai (single line par length-1 list) — edit
-      // par isi se re-apply, warna stacked discount ghatak kar bhi jata
-      schemeStack: stack.length
-        ? stack.map((s) => ({ id: s.id, name: s.name, type: s.type, value: s.value, buyQty: s.buyQty, freeQty: s.freeQty }))
-        : undefined,
+      // par isi se re-apply, warna stacked discount ghatak kar bhi jata.
+      // Task 57: rows mein per-scheme amount/freeQtyGiven bhi freeze (Promotions Applied
+      // har scheme ki alag row print karta hai — combined name + combined amount nahi).
+      schemeStack: stackRows.length ? stackRows : undefined,
       tradeOfferAmt,
       gstRate: gstRate > 0 ? gstRate : null,
       gstAmt,
@@ -280,6 +302,69 @@ export function computeOrderLines(
     gstTotal: Math.round(gstTotal * 100) / 100,
     tradeOfferTotal: Math.round(tradeOfferTotal * 100) / 100,
   }
+}
+
+/**
+ * Task 57: Promotions Applied rows — HAR scheme apni ALAG row (ek column mein ek hi
+ * promotion, combined nahi). Booked lines ke frozen schemeStack se per-scheme amount
+ * (money) / free pcs (BxGy) aggregate karta hai. Print bill, order detail dialog aur
+ * koi bhi "applied promotions" display ISI helper se chalta hai — sab jagah same rows.
+ * Fallbacks (purane orders, koi migration nahi):
+ *  - Task 56 stack rows bina amount → type/value + line qty/rate se same engine math recompute
+ *  - pre-56 single-scheme lines (stack nahi) → schemeName + line.discount (purana behaviour)
+ */
+export interface SchemePromoRow {
+  id: string
+  name: string
+  /** money schemes (PERCENT/FLAT) ka aggregate Rs contribution */
+  amount: number
+  /** BxGy schemes ke aggregate free pieces */
+  freePcs: number
+}
+
+export function aggregateSchemePromos(
+  items: {
+    qty: number
+    rate: number
+    discount: number
+    unitsPerCarton?: number
+    schemeName?: string | null
+    schemeStack?: CalcSchemeSnapshot[] | null
+  }[],
+): SchemePromoRow[] {
+  const map = new Map<string, SchemePromoRow>()
+  const touch = (key: string, name: string): SchemePromoRow => {
+    let e = map.get(key)
+    if (!e) { e = { id: key, name, amount: 0, freePcs: 0 }; map.set(key, e) }
+    return e
+  }
+  for (const it of items) {
+    const stack = Array.isArray(it.schemeStack) && it.schemeStack.length > 0 ? it.schemeStack : null
+    if (stack) {
+      const upc = it.unitsPerCarton && it.unitsPerCarton > 0 ? it.unitsPerCarton : 1
+      const ctnEquiv = it.qty / upc
+      for (const s of stack) {
+        const e = touch(s.id || s.name || 'Trade Discount', s.name ?? 'Trade Discount')
+        if (s.type === 'BUY_X_GET_Y') {
+          e.freePcs += s.freeQtyGiven != null
+            ? s.freeQtyGiven
+            : Math.round(Math.floor(ctnEquiv / Math.max(1, s.buyQty)) * s.freeQty * upc)
+        } else {
+          const amt = s.amount != null
+            ? s.amount
+            : s.type === 'PERCENT_DISCOUNT'
+              ? Math.round(it.rate * it.qty * (s.value / 100) * 100) / 100
+              : Math.round(s.value * ctnEquiv * 100) / 100
+          e.amount = Math.round((e.amount + amt) * 100) / 100
+        }
+      }
+    } else if (it.discount > 0) {
+      const name = it.schemeName ?? 'Trade Discount'
+      const e = touch(name, name)
+      e.amount = Math.round((e.amount + it.discount) * 100) / 100
+    }
+  }
+  return [...map.values()].filter((e) => e.amount > 0 || e.freePcs > 0)
 }
 
 /**

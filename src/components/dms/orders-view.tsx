@@ -17,7 +17,7 @@ import { api, fmtPKR, fmtDate, STATUS_STYLES, statusLabel } from '@/lib/dms-api'
 import type { OrderDTO, OrderItemDTO, OutletDTO, ProductDTO, SchemeDTO, SalesmanPerfDTO } from '@/lib/dms-types'
 import { UnitQtyInputs, splitPcs, fmtQty, packHint } from '@/components/dms/unit-qty'
 import { PrintFrame, CblInvoiceDoc, keepDialogBehind, type InvoiceData } from '@/components/dms/cbl-print'
-import { orderGrandPayable, splitManualByNet } from '@/lib/dms-order-calc'
+import { orderGrandPayable, splitManualByNet, aggregateSchemePromos } from '@/lib/dms-order-calc'
 import { Plus, Eye, XCircle, Loader2, Search, ShoppingCart, Printer, Percent, Gift } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
@@ -28,6 +28,19 @@ interface DraftLine {
 }
 
 type DiscType = 'NONE' | 'PERCENT' | 'FLAT'
+
+/** Task 57: booking preview ki per-scheme breakdown entry — har promotion apni
+ * chip/row par dikhti hai (combined "Eclair + Khushhali" nahi), jitni schemes
+ * qualify karein utni entries auto. */
+interface PreviewStackEntry {
+  id: string
+  name: string
+  type: string
+  /** money scheme (PERCENT/FLAT) ka is line par apna Rs contribution */
+  amount: number
+  /** BxGy scheme ke is line par apne free pcs */
+  freeGiven: number
+}
 
 export function OrdersView() {
   const user = useDMS((s) => s.user)
@@ -192,6 +205,10 @@ function OrderDetailDialog({ order, items, onClose }: { order: OrderDTO | null; 
     })
   }, [order])
 
+  // Task 57: Promotions Applied breakdown — har scheme apni row (print bill jaisi hi,
+  // ISI shared helper se). Purani orders (stack nahi) helper khud legacy fallback use karta hai.
+  const detailPromos = useMemo(() => aggregateSchemePromos(items ?? []), [items])
+
   return (
     <>
     <Dialog open={!!order} onOpenChange={(v) => !v && onClose()}>
@@ -243,7 +260,14 @@ function OrderDetailDialog({ order, items, onClose }: { order: OrderDTO | null; 
             <div className="space-y-1 pt-2 shrink-0">
               <Separator className="mb-2" />
               <div className="flex justify-between gap-3 text-sm text-slate-500"><span>Subtotal</span><span className="whitespace-nowrap tabular-nums">{fmtPKR(order.subtotal)}</span></div>
-              <div className="flex justify-between gap-3 text-sm text-emerald-600"><span>Scheme Discount</span><span className="whitespace-nowrap tabular-nums">- {fmtPKR(order.schemeDiscount)}</span></div>
+              {detailPromos.length > 0 ? detailPromos.map((p) => (
+                <div key={p.id} className="flex justify-between gap-3 text-sm text-emerald-600">
+                  <span>🎁 {p.name}</span>
+                  <span className="whitespace-nowrap tabular-nums">{p.freePcs > 0 ? `+${p.freePcs} Pcs Free` : `- ${fmtPKR(p.amount)}`}</span>
+                </div>
+              )) : (order.schemeDiscount ?? 0) > 0 && (
+                <div className="flex justify-between gap-3 text-sm text-emerald-600"><span>Scheme Discount</span><span className="whitespace-nowrap tabular-nums">- {fmtPKR(order.schemeDiscount)}</span></div>
+              )}
               {(order.manualDiscount ?? 0) > 0 && (
                 <div className="flex justify-between gap-3 text-sm text-emerald-600">
                   <span>Manual Discount{order.manualDiscType === 'PERCENT' && order.manualDiscValue ? ` (${order.manualDiscValue}%)` : ''}</span>
@@ -348,11 +372,11 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
   }
 
   const computed = useMemo(() => {
-    if (!outlet) return { subtotal: 0, discount: 0, gstTotal: 0, toTotal: 0, rows: [] as { name: string; qtyPcs: number; freeQty: number; discount: number; total: number; gross: number; scheme: string | null; ratePc: number; upc: number; pcsPerBox: number; tradeOffer: number; gstRate: number; gstAmt: number }[] }
+    if (!outlet) return { subtotal: 0, discount: 0, gstTotal: 0, toTotal: 0, rows: [] as { name: string; qtyPcs: number; freeQty: number; discount: number; total: number; gross: number; stack: PreviewStackEntry[]; ratePc: number; upc: number; pcsPerBox: number; tradeOffer: number; gstRate: number; gstAmt: number }[] }
     let subtotal = 0, discount = 0, gstTotal = 0, toTotal = 0
     const rows = lines.map((l) => {
       const p = products.find((x) => x.id === l.productId)
-      if (!p) return { name: '', qtyPcs: l.qtyPcs, freeQty: 0, discount: 0, total: 0, gross: 0, scheme: null, ratePc: 0, upc: 1, pcsPerBox: 0, tradeOffer: 0, gstRate: 0, gstAmt: 0 }
+      if (!p) return { name: '', qtyPcs: l.qtyPcs, freeQty: 0, discount: 0, total: 0, gross: 0, stack: [] as PreviewStackEntry[], ratePc: 0, upc: 1, pcsPerBox: 0, tradeOffer: 0, gstRate: 0, gstAmt: 0 }
       const upc = Math.max(1, p.unitsPerCarton)
       const pcsPerBox = p.pcsPerBox > 0 ? p.pcsPerBox : 0
       const ratePc = p.tradePrice / upc
@@ -372,25 +396,26 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
         .sort((a, b) => b.value - a.value)
       const tierOf = (s: SchemeDTO) => (s.productId ? 0 : s.categoryName ? 1 : 2)
       const qualifiesBxGy = (s: SchemeDTO) => s.type === 'BUY_X_GET_Y' && s.buyQty > 0 && ctnEquiv >= s.buyQty
-      const stackNames: string[] = []
+      // Task 57: har scheme ka APNA contribution — per-scheme chips/rows isi se bante hain
+      const stackAgg: PreviewStackEntry[] = []
       for (let tier = 0; tier <= 2; tier++) {
         const tierSchemes = applicable.filter((s) => tierOf(s) === tier)
         const bx = tierSchemes.find(qualifiesBxGy)
         if (bx) {
-          freeQty += Math.round(Math.floor(ctnEquiv / bx.buyQty) * bx.freeQty * upc)
-          stackNames.push(bx.name ?? '')
+          const given = Math.round(Math.floor(ctnEquiv / bx.buyQty) * bx.freeQty * upc)
+          freeQty += given
+          stackAgg.push({ id: bx.id, name: bx.name ?? 'Scheme', type: bx.type, amount: 0, freeGiven: given })
           continue
         }
         const money = tierSchemes.find((s) => s.type === 'PERCENT_DISCOUNT' || s.type === 'FLAT_DISCOUNT')
         if (money) {
-          if (money.type === 'PERCENT_DISCOUNT') disc += Math.round(ratePc * l.qtyPcs * (money.value / 100) * 100) / 100
-          else disc += Math.round(money.value * ctnEquiv * 100) / 100
-          stackNames.push(money.name ?? '')
+          const amount = money.type === 'PERCENT_DISCOUNT'
+            ? Math.round(ratePc * l.qtyPcs * (money.value / 100) * 100) / 100
+            : Math.round(money.value * ctnEquiv * 100) / 100
+          disc += amount
+          stackAgg.push({ id: money.id, name: money.name ?? 'Scheme', type: money.type, amount, freeGiven: 0 })
         }
       }
-      const schemeName = stackNames.filter(Boolean).length > 1
-        ? stackNames.filter(Boolean).join(' + ')
-        : stackNames.find(Boolean) ?? null
       const gross = Math.round(ratePc * l.qtyPcs * 100) / 100
       // Task 45: GST per product (Products page ka rate — hardcoded nahi); TO discount ke ILAWA
       const gstRate = p.gstEnabled === false ? 0 : Math.max(0, Number(p.gstRate) || 0)
@@ -401,10 +426,25 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
       discount += disc
       gstTotal += gstAmt
       toTotal += tradeOffer
-      return { name: p.name, qtyPcs: l.qtyPcs, freeQty, discount: disc, total: lineTotal, gross, scheme: schemeName, ratePc, upc, pcsPerBox, tradeOffer, gstRate, gstAmt }
+      return { name: p.name, qtyPcs: l.qtyPcs, freeQty, discount: disc, total: lineTotal, gross, stack: stackAgg, ratePc, upc, pcsPerBox, tradeOffer, gstRate, gstAmt }
     })
     return { subtotal, discount, gstTotal: Math.round(gstTotal * 100) / 100, toTotal: Math.round(toTotal * 100) / 100, rows }
   }, [lines, products, schemes, outlet])
+
+  // Task 57: footer summary ki per-scheme rows — jitni schemes utni rows (auto).
+  // Σ per-scheme amounts == computed.discount (Pass On column) — reconciliation barkarar.
+  const schemePromos = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; amount: number; freePcs: number }>()
+    for (const r of computed.rows) {
+      for (const s of r.stack) {
+        let e = map.get(s.id)
+        if (!e) { e = { id: s.id, name: s.name, amount: 0, freePcs: 0 }; map.set(s.id, e) }
+        if (s.freeGiven > 0) e.freePcs += s.freeGiven
+        else e.amount = Math.round((e.amount + s.amount) * 100) / 100
+      }
+    }
+    return [...map.values()]
+  }, [computed])
 
   // Manual discount (order-level) — server bhi yehi formula dobara calculate karta hai
   const discNum = parseFloat(discValue)
@@ -627,9 +667,15 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
                 <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px]">
                   {lineProduct && <span className="text-slate-400 whitespace-nowrap">{packHint(lineProduct.unitsPerCarton, lineProduct.boxesPerCarton, lineProduct.pcsPerBox)} • {fmtPKR(r.ratePc)}/pc</span>}
                   <span className="text-slate-500 whitespace-nowrap">Gross <b className="text-slate-600">{fmtPKR(r.gross)}</b></span>
-                  {r.discount > 0 && <span className="text-emerald-600 font-medium whitespace-nowrap">Pass On − {fmtPKR(Math.round((r.discount + (mr?.manualShare ?? 0)) * 100) / 100)}</span>}
-                  {(mr?.manualShare ?? 0) > 0 && r.discount <= 0 && <span className="text-emerald-600 font-medium whitespace-nowrap">Pass On − {fmtPKR(mr!.manualShare)}</span>}
-                  {r.freeQty > 0 && <span className="text-emerald-600 font-semibold whitespace-nowrap">+{fmtQty(r.freeQty, r.upc, r.pcsPerBox)} FREE</span>}
+                  {/* Task 57: HAR promotion apni chip — combined Pass On chip nahi.
+                     Σ per-scheme amounts + Manual == bill ke Pass On column ka total */}
+                  {r.stack.filter((s) => s.amount > 0).map((s) => (
+                    <span key={`m-${s.id}`} className="text-emerald-600 font-medium whitespace-nowrap">🎁 {s.name} − {fmtPKR(s.amount)}</span>
+                  ))}
+                  {r.stack.filter((s) => s.freeGiven > 0).map((s) => (
+                    <span key={`f-${s.id}`} className="text-emerald-600 font-semibold whitespace-nowrap">🎁 {s.name} +{fmtQty(s.freeGiven, r.upc, r.pcsPerBox)} FREE</span>
+                  ))}
+                  {(mr?.manualShare ?? 0) > 0 && <span className="text-amber-600 font-medium whitespace-nowrap">Manual − {fmtPKR(mr!.manualShare)}</span>}
                   <span className="text-slate-500 whitespace-nowrap">Net <b className="text-slate-700">{fmtPKR(mr?.total ?? r.total)}</b></span>
                   {(mr?.gstAmt ?? r.gstAmt) > 0 ? (
                     <span className="text-blue-600 font-medium whitespace-nowrap">GST {r.gstRate}% + {fmtPKR(mr?.gstAmt ?? r.gstAmt)}</span>
@@ -637,7 +683,6 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
                     <span className="text-slate-400 whitespace-nowrap">GST nahi lagta</span>
                   )}
                   {r.tradeOffer > 0 && <span className="text-violet-600 font-semibold whitespace-nowrap">TO − {fmtPKR(r.tradeOffer)}</span>}
-                  {r.scheme && <Badge className="bg-emerald-100 text-emerald-700 border-0 text-[10px]">🎁 {r.scheme}</Badge>}
                   <span className="text-slate-500 ml-auto whitespace-nowrap">Line payable: <b className="text-slate-700">{fmtPKR(Math.max(0, Math.round(((mr?.total ?? r.total) - r.tradeOffer + (mr?.gstAmt ?? r.gstAmt)) * 100) / 100))}</b></span>
                 </div>
                 {/* Task 26: available stock guard — requested qty available se bara ho to red warning */}
@@ -700,7 +745,12 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
         <DialogFooter className="flex-col sm:flex-row gap-2 items-stretch sm:items-center border-t pt-3">
           <div className="flex-1 text-sm space-y-0.5">
             <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>{fmtPKR(computed.subtotal)}</span></div>
-            {computed.discount > 0 && <div className="flex justify-between text-emerald-600 font-medium"><span>Scheme Discount</span><span>- {fmtPKR(computed.discount)}</span></div>}
+            {schemePromos.map((p) => (
+              <div key={p.id} className="flex justify-between text-emerald-600 font-medium">
+                <span>🎁 {p.name}</span>
+                <span>{p.freePcs > 0 ? `+${p.freePcs} Pcs Free` : `- ${fmtPKR(p.amount)}`}</span>
+              </div>
+            ))}
             {manualDiscount > 0 && <div className="flex justify-between text-emerald-600 font-medium"><span>Manual Discount</span><span>- {fmtPKR(manualDiscount)}</span></div>}
             <div className="flex justify-between font-bold text-slate-900"><span>Net Total</span><span>{fmtPKR(netTotal)}</span></div>
             {merged.gstTotal > 0 && <div className="flex justify-between text-blue-600 font-medium"><span>GST (Sales Tax)</span><span>+ {fmtPKR(merged.gstTotal)}</span></div>}

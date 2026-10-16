@@ -76,6 +76,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           schemeFreeQty: it.schemeFreeQty,
           // snapshot naam prefer — scheme rename ho to bhi purana bill sahi
           schemeName: it.schemeName ?? it.scheme?.name ?? null,
+          // Task 57: poora frozen stack + per-scheme amounts (bill/print/detail breakdown)
+          schemeStack: (it.schemeStack ?? null) as import('@/lib/dms-types').SchemeStackRow[] | null,
         })),
         deliveries: order.deliveries.map((d) => ({
           id: d.id,

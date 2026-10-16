@@ -15,7 +15,8 @@ import { Button } from '@/components/ui/button'
 import { Printer, Download, FileDown, Loader2, X } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 import { fmtQty } from '@/components/dms/unit-qty'
-import type { SummaryDetailDTO, SummaryOrderDTO } from '@/lib/dms-types'
+import { aggregateSchemePromos } from '@/lib/dms-order-calc'
+import type { SummaryDetailDTO, SummaryOrderDTO, SchemeStackRow } from '@/lib/dms-types'
 
 // ---------- formatting helpers ----------
 const fmt2 = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -459,6 +460,9 @@ export interface InvoiceItemData {
   discount: number
   lineTotal: number
   schemeName?: string | null
+  /** Task 56/57: booking par freeze hua poora scheme stack (rows mein per-scheme
+   * amount/freeQtyGiven — Promotions Applied har scheme ki ALAG row print karta hai) */
+  schemeStack?: SchemeStackRow[] | null
   // Task 51: booked tax snapshots (real-invoice format ke per-row columns)
   // gstAmt = gstRate% × (rate × qty − discount) — booking par snapshot
   gstAmt?: number
@@ -609,15 +613,11 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
     return Math.floor((colPx[i] - 10) / 4.8) // 8px td padding + 2 border, ~4.8px/digit bold
   }
 
-  // promotions applied (unique scheme name -> amount)
-  const promos = new Map<string, number>()
-  for (const r of rows2) {
-    if (r.it.discount > 0) {
-      const key = r.it.schemeName ?? 'Trade Discount'
-      promos.set(key, (promos.get(key) ?? 0) + r.it.discount)
-    }
-  }
-  const promoList = [...promos.entries()]
+  // Task 57: Promotions Applied — HAR promotion apni ALAG row (ek column mein ek hi
+  // promotion, na combine): per-line frozen schemeStack se per-scheme amounts aggregate.
+  // Jitni schemes user banata jayega, utni rows auto. Shared engine helper — order
+  // detail dialog b ISI se rows banata hai (print == dialog == preview hamesha).
+  const promoRows = aggregateSchemePromos(rows2.map((r) => r.it))
   const letters = 'abcdefghijklmnopqrstuvwxyz'
 
   return (
@@ -736,16 +736,19 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
                 <tr><td style={{ fontWeight: 'bold' }}>Discount Summary</td><td style={{ fontWeight: 'bold' }} className="ctr">Amount</td></tr>
               </thead>
               <tbody>
-                {promoList.length === 0 && manual === 0 ? (
+                {promoRows.length === 0 && manual === 0 ? (
                   <tr><td>(a) No Promotion</td><td className="num">0.00</td></tr>
                 ) : (
                   <>
-                    {promoList.map(([name, amt], i) => (
-                      <tr key={name}><td>({letters[i]}) {name}</td><td className="num">{fmt2(amt)}</td></tr>
+                    {promoRows.map((p, i) => (
+                      <tr key={`${p.name}-${i}`}>
+                        <td>({letters[i]}) {p.name}</td>
+                        <td className="num">{p.freePcs > 0 ? `${fmtI(p.freePcs)} Pcs Free` : fmt2(p.amount)}</td>
+                      </tr>
                     ))}
                     {manual > 0 && (
                       <tr>
-                        <td>({letters[promoList.length]}) Manual Discount{inv.manualDiscType === 'PERCENT' && inv.manualDiscValue ? ` (${inv.manualDiscValue}%)` : ''}</td>
+                        <td>({letters[promoRows.length]}) Manual Discount{inv.manualDiscType === 'PERCENT' && inv.manualDiscValue ? ` (${inv.manualDiscValue}%)` : ''}</td>
                         <td className="num">{fmt2(manual)}</td>
                       </tr>
                     )}

@@ -43,6 +43,20 @@ export interface DashboardData {
   pjpToday: { salesman: string; total: number; completed: number; status: string }[]
 }
 
+/** Task 57: OrderItem.schemeStack Json row — booking par freeze hui har scheme ki
+ * apni contribution (amount = money schemes ka Rs, freeQtyGiven = BxGy ke free pcs).
+ * Purani bookings par rows in fields ke baghair ho saktin hain (optional). */
+export interface SchemeStackRow {
+  id: string
+  name?: string
+  type: string // BUY_X_GET_Y | PERCENT_DISCOUNT | FLAT_DISCOUNT
+  value: number
+  buyQty: number
+  freeQty: number
+  amount?: number
+  freeQtyGiven?: number
+}
+
 export interface OrderItemDTO {
   id: string
   productId: string
@@ -58,6 +72,8 @@ export interface OrderItemDTO {
   discount: number
   lineTotal: number
   schemeName?: string | null
+  /** Task 56/57: booking par freeze hua poora scheme stack (per-scheme amounts Task 57) */
+  schemeStack?: SchemeStackRow[] | null
   /** Task 45: booking waqt ke GST + Trade Order snapshots */
   tradeOfferAmt?: number
   gstRate?: number | null
