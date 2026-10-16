@@ -357,10 +357,11 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
       const pcsPerBox = p.pcsPerBox > 0 ? p.pcsPerBox : 0
       const ratePc = p.tradePrice / upc
       const ctnEquiv = l.qtyPcs / upc
-      let freeQty = 0, disc = 0, schemeName: string | null = null
+      let freeQty = 0, disc = 0
       // Task 55: server computeOrderLines ka client mirror — same filters (product + channel
-      // + category + filer scope) + same value-desc sort, warna booking preview server-booked
-      // discount se alag dikhta (e.g. "Category 5%" vs "Non-Filer 8%" dono match hon)
+      // + category + filer scope), warna booking preview server-booked discount se alag dikhta.
+      // Task 56: TIER STACKING mirror — PRODUCT > CATEGORY > BLANKET, har tier best, tiers
+      // stack (product 3% + all-products 2% = 5%). Same tier par best-wins (Task 55 rule).
       const applicable = schemes
         .filter((s) =>
           (!s.productId || s.productId === p.id)
@@ -369,17 +370,27 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
           && (!s.filerScope || s.filerScope === outlet.filerStatus)
         )
         .sort((a, b) => b.value - a.value)
-      for (const s of applicable) {
-        if (s.type === 'BUY_X_GET_Y' && s.buyQty > 0 && ctnEquiv >= s.buyQty) {
-          freeQty = Math.round(Math.floor(ctnEquiv / s.buyQty) * s.freeQty * upc); schemeName = s.name; break
+      const tierOf = (s: SchemeDTO) => (s.productId ? 0 : s.categoryName ? 1 : 2)
+      const qualifiesBxGy = (s: SchemeDTO) => s.type === 'BUY_X_GET_Y' && s.buyQty > 0 && ctnEquiv >= s.buyQty
+      const stackNames: string[] = []
+      for (let tier = 0; tier <= 2; tier++) {
+        const tierSchemes = applicable.filter((s) => tierOf(s) === tier)
+        const bx = tierSchemes.find(qualifiesBxGy)
+        if (bx) {
+          freeQty += Math.round(Math.floor(ctnEquiv / bx.buyQty) * bx.freeQty * upc)
+          stackNames.push(bx.name ?? '')
+          continue
+        }
+        const money = tierSchemes.find((s) => s.type === 'PERCENT_DISCOUNT' || s.type === 'FLAT_DISCOUNT')
+        if (money) {
+          if (money.type === 'PERCENT_DISCOUNT') disc += Math.round(ratePc * l.qtyPcs * (money.value / 100) * 100) / 100
+          else disc += Math.round(money.value * ctnEquiv * 100) / 100
+          stackNames.push(money.name ?? '')
         }
       }
-      if (!schemeName) {
-        for (const s of applicable) {
-          if (s.type === 'PERCENT_DISCOUNT') { disc = Math.round(ratePc * l.qtyPcs * (s.value / 100) * 100) / 100; schemeName = s.name; break }
-          if (s.type === 'FLAT_DISCOUNT') { disc = Math.round(s.value * ctnEquiv * 100) / 100; schemeName = s.name; break }
-        }
-      }
+      const schemeName = stackNames.filter(Boolean).length > 1
+        ? stackNames.filter(Boolean).join(' + ')
+        : stackNames.find(Boolean) ?? null
       const gross = Math.round(ratePc * l.qtyPcs * 100) / 100
       // Task 45: GST per product (Products page ka rate — hardcoded nahi); TO discount ke ILAWA
       const gstRate = p.gstEnabled === false ? 0 : Math.max(0, Number(p.gstRate) || 0)

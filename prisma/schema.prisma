@@ -424,6 +424,11 @@ model OrderItem {
   schemeBuyQty  Int?
   schemeFreeQty Int?
   schemeName    String?
+  // Task 56: TIER STACKING snapshot — jab ek line par 1 se zyada scheme lageen
+  // (product + category + all-products tiers stack hoti hain) to poori applied list
+  // freeze hoti hai. Stock-allocation edit par ISI stack se re-apply hota hai (bill
+  // jis par bana, usi par rahe). Null = legacy line (single scheme fields use honge).
+  schemeStack   Json?
   // Task 45: booking waqt ka GST + Trade Offer snapshot (Task 41 rate/scheme snapshot
   // jaisa — baad me product rate ya scheme badle to PURANA bill nahi badalta)
   tradeOfferAmt Float  @default(0) // per-SKU trade offer Rs (booking waqt ka snapshot)

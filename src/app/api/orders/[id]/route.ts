@@ -134,7 +134,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         const ex = snapMap.get(i.productId)
         if (!ex?.schemeId) return i
         if (ex.schemeType) {
-          return { ...i, scheme: { id: ex.schemeId, name: ex.schemeName ?? undefined, type: ex.schemeType, value: ex.schemeValue ?? 0, buyQty: ex.schemeBuyQty ?? 0, freeQty: ex.schemeFreeQty ?? 0 } }
+          // Task 56: stacked line apna poora FROZEN STACK wapis attach karti hai —
+          // edit par isi list se re-apply hota hai (warna stacked discount uDD jata).
+          // Legacy single-scheme lines (stack null) purane single path par rehti hain.
+          const frozenStack = Array.isArray(ex.schemeStack) && ex.schemeStack.length > 0
+            ? (ex.schemeStack as unknown as CalcIncomingItem['schemeStack'])
+            : undefined
+          return {
+            ...i,
+            scheme: { id: ex.schemeId, name: ex.schemeName ?? undefined, type: ex.schemeType, value: ex.schemeValue ?? 0, buyQty: ex.schemeBuyQty ?? 0, freeQty: ex.schemeFreeQty ?? 0 },
+            schemeStack: frozenStack,
+          }
         }
         const ls = legacyById.get(ex.schemeId)
         return ls ? { ...i, scheme: { id: ls.id, name: ls.name, type: ls.type, value: ls.value, buyQty: ls.buyQty, freeQty: ls.freeQty } } : i

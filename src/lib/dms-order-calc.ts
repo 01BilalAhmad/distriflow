@@ -46,11 +46,26 @@ export interface CalcIncomingItem {
    * purani lines hamesha booking waqt ke type/value/buyQty/freeQty par re-apply hoti
    * hain, current scheme se nahi (bill jis % par bana, usi par rahe). */
   scheme?: { id: string; name?: string; type: string; value: number; buyQty: number; freeQty: number } | null
+  /** Task 56: TIER STACK — stacked line ka poora frozen scheme list (OrderItem.schemeStack
+   * se). Mojood ho to single `scheme` ke bajaye ISI list se re-apply hota hai. */
+  schemeStack?: CalcSchemeSnapshot[] | null
   /** Task 45: per-SKU Trade Offer Rs (booking form se) — discount ke ILAWA, kuch SKUs par */
   tradeOffer?: number | null
   /** Task 45: existing line ka BOOKED GST rate snapshot (stock-allocation edit par
    * re-apply hota hai — product ka current rate purane bill par asar nahi dalta) */
   bookedGstRate?: number | null
+}
+
+/** Task 56: frozen scheme shape (OrderItem.schemeStack rows + CalcLine.schemeStack).
+ * Type alias (interface nahi) — implicit index signature milta hai, Prisma InputJson
+ * assignability ke liye zaroori. */
+export type CalcSchemeSnapshot = {
+  id: string
+  name?: string
+  type: string
+  value: number
+  buyQty: number
+  freeQty: number
 }
 
 export interface CalcLine {
@@ -66,6 +81,10 @@ export interface CalcLine {
   schemeBuyQty: number | null
   schemeFreeQty: number | null
   schemeName: string | null
+  /** Task 56: TIER STACK — line par lagee SAB schemes (tier order: product > category >
+   * all-products). Persist OrderItem.schemeStack par hota hai — edit par ISI se re-apply.
+   * Single scheme line par bhi list length 1 persist hoti hai (uniform re-apply path). */
+  schemeStack?: CalcSchemeSnapshot[]
   // Task 45: GST + Trade Offer snapshot (OrderItem par persist)
   tradeOfferAmt: number
   gstRate: number | null
@@ -142,9 +161,6 @@ export function computeOrderLines(
 
     // schemes carton-based hain (buyQty/freeQty/value per carton) — ctn-equivalent se compare
     const ctnEquiv = qty / upc
-    let freeQty = 0
-    let discount = 0
-    let schemeId: string | null = null
 
     // Task 41: booked scheme snapshot (existing line) current schemes se pehle
     // check hota hai — sirf IS line ke booking waqt ke values re-apply hote hain
@@ -152,44 +168,69 @@ export function computeOrderLines(
       ? { id: item.scheme.id, name: item.scheme.name, type: item.scheme.type, channel: null, productId: null, value: Number(item.scheme.value) || 0, buyQty: Number(item.scheme.buyQty) || 0, freeQty: Number(item.scheme.freeQty) || 0 }
       : null
 
-    const applicable = snapshot
-      ? [snapshot]
-      : schemes
-          // Task 55: filters AND hain — product + channel + category (naam se) + filer scope.
-          // Legacy scheme (sab null) har jagah match — purana behavior bilkul same.
-          .filter((s) =>
-            (!s.productId || s.productId === p.id)
-            && (!s.channel || s.channel === channel)
-            && (!s.categoryName || s.categoryName === (p.category ?? ''))
-            && (!s.filerScope || s.filerScope === (outletFilerStatus ?? ''))
-          )
-          .sort((a, b) => b.value - a.value)
+    // ---- Task 56: TIER-BASED STACKING ----
+    // Ek line par scheme ke 3 tiers hain — PRODUCT (productId set) > CATEGORY
+    // (categoryId set) > BLANKET (dono null — e.g. all-products loyalty program).
+    // HAR tier ki best scheme line par lagti hai aur TIERS AAPAS MEIN STACK hote
+    // hain (Eclair product 3% + Khushhali all-products 2% = 5%). Same tier ki 2
+    // schemes aapas mein compete karti hain — best-wins (Task 55 decision: category
+    // "5%" vs non-filer "8%" dono category-tier par → non-filer ko sirf 8%).
+    // Legacy behavior preserved: snapshot/frozen-stack path pehle, filter wale 4
+    // AND-conditions waise hi (product + channel + category + filerScope).
+    const tierOf = (s: CalcScheme) => (s.productId ? 0 : s.categoryName ? 1 : 2)
+    const qualifiesBxGy = (s: CalcScheme) => s.type === 'BUY_X_GET_Y' && s.buyQty > 0 && ctnEquiv >= s.buyQty
 
-    for (const s of applicable) {
-      if (s.type === 'BUY_X_GET_Y' && s.buyQty > 0 && ctnEquiv >= s.buyQty) {
-        freeQty = Math.round(Math.floor(ctnEquiv / s.buyQty) * s.freeQty * upc)
-        schemeId = s.id
-        break // one BxGy per line
+    // Frozen stack (Task 56 edit path) — booking waqt ki poori list, isi tarteeb se
+    // re-apply (BxGy dobara qualify karta hai, percent/flat hamesha)
+    const frozenStack: CalcScheme[] | null = item.schemeStack?.length
+      ? item.schemeStack.map((s) => ({ id: s.id, name: s.name, type: s.type, channel: null, productId: null, value: Number(s.value) || 0, buyQty: Number(s.buyQty) || 0, freeQty: Number(s.freeQty) || 0 }))
+      : null
+
+    const stack: CalcScheme[] = []
+    if (frozenStack) {
+      for (const s of frozenStack) {
+        if (s.type === 'BUY_X_GET_Y') { if (qualifiesBxGy(s)) stack.push(s) } else stack.push(s)
+      }
+    } else if (snapshot) {
+      // Legacy single-snapshot line — wahi purana behavior (BxGy qualify na kare to
+      // line par koi scheme nahi, discount 0)
+      if (snapshot.type === 'BUY_X_GET_Y') { if (qualifiesBxGy(snapshot)) stack.push(snapshot) } else stack.push(snapshot)
+    } else {
+      // Fresh lines — 4 AND filters (product + channel + category + filerScope),
+      // phir per-tier best pick: pehle qualifying BxGy, warna percent/flat
+      const applicable = schemes
+        .filter((s) =>
+          (!s.productId || s.productId === p.id)
+          && (!s.channel || s.channel === channel)
+          && (!s.categoryName || s.categoryName === (p.category ?? ''))
+          && (!s.filerScope || s.filerScope === (outletFilerStatus ?? ''))
+        )
+        .sort((a, b) => b.value - a.value)
+      for (let tier = 0; tier <= 2; tier++) {
+        const tierSchemes = applicable.filter((s) => tierOf(s) === tier)
+        const bx = tierSchemes.find(qualifiesBxGy)
+        if (bx) { stack.push(bx); continue }
+        const money = tierSchemes.find((s) => s.type === 'PERCENT_DISCOUNT' || s.type === 'FLAT_DISCOUNT')
+        if (money) stack.push(money)
       }
     }
-    if (!schemeId) {
-      for (const s of applicable) {
-        // PERCENT discount = EXACT % of line GROSS (rate × qty), 2-decimal — whole-rupee
-        // rounding nahi (warna chhoti line par flat Rs jaisa lagta tha: 92.29 ka 5% = 4.61, 5 nahi)
-        if (s.type === 'PERCENT_DISCOUNT') {
-          discount += Math.round(ratePerPc * qty * (s.value / 100) * 100) / 100
-          schemeId = s.id
-          break
-        }
-        if (s.type === 'FLAT_DISCOUNT') {
-          discount += Math.round(s.value * ctnEquiv * 100) / 100
-          schemeId = s.id
-          break
-        }
-      }
+
+    // Stack contributions: BxGy = free pcs, PERCENT = gross ka exact %, FLAT = per-ctn Rs.
+    // Alag-alag tiers ke percent ADD hoti hain (3% + 2% = 5% of gross) — user mental model.
+    let freeQty = 0
+    let discount = 0
+    for (const s of stack) {
+      if (qualifiesBxGy(s)) freeQty += Math.round(Math.floor(ctnEquiv / s.buyQty) * s.freeQty * upc)
+      else if (s.type === 'PERCENT_DISCOUNT') discount += Math.round(ratePerPc * qty * (s.value / 100) * 100) / 100
+      else if (s.type === 'FLAT_DISCOUNT') discount += Math.round(s.value * ctnEquiv * 100) / 100
     }
 
-    const applied = schemeId ? applicable.find((s) => s.id === schemeId) ?? null : null
+    // Primary (single fields) = sab se SPECIFIC tier wali scheme (stack[0]) — legacy
+    // readers (print, summaries) waisa hi chalte hain; schemeName combined dikhta hai
+    const applied = stack[0] ?? null
+    const schemeNameCombined = stack.length > 1
+      ? stack.map((s) => s.name).filter(Boolean).join(' + ')
+      : applied?.name ?? null
 
     // ---- Task 45: GST (purchase invoice jaisa chain) ----
     // GST base = line net (gross − scheme discount) — trade offer/manual discount base NAHI
@@ -212,12 +253,18 @@ export function computeOrderLines(
     gstTotal += gstAmt
     tradeOfferTotal += tradeOfferAmt
     lines.push({
-      productId: p.id, qty, freeQty, rate: ratePerPc, discount, schemeId,
+      productId: p.id, qty, freeQty, rate: ratePerPc, discount,
+      schemeId: applied?.id ?? null,
       schemeType: applied?.type ?? null,
       schemeValue: applied?.value ?? null,
       schemeBuyQty: applied?.buyQty ?? null,
       schemeFreeQty: applied?.freeQty ?? null,
-      schemeName: applied?.name ?? null,
+      schemeName: schemeNameCombined,
+      // Task 56: poora stack freeze hota hai (single line par length-1 list) — edit
+      // par isi se re-apply, warna stacked discount ghatak kar bhi jata
+      schemeStack: stack.length
+        ? stack.map((s) => ({ id: s.id, name: s.name, type: s.type, value: s.value, buyQty: s.buyQty, freeQty: s.freeQty }))
+        : undefined,
       tradeOfferAmt,
       gstRate: gstRate > 0 ? gstRate : null,
       gstAmt,

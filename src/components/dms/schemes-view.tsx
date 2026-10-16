@@ -315,6 +315,12 @@ function SchemeDialog({ open, onOpenChange, onSaved, editScheme }: { open: boole
               <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
             </div>
           </div>
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
+            Stacking rule: Product &gt; Category &gt; All-Products — har level ki best scheme
+            lagti hai aur levels <span className="font-medium">aapas mein jurti hain</span> (e.g.
+            Eclair 3% + Khushhali Program 2% = 5%). Ek hi level par 2 schemes hon to behtar wali
+            (best-wins) lagegi.
+          </p>
         </div>
         <DialogFooter>
           <Button onClick={save} disabled={saving} className="w-full bg-emerald-600 hover:bg-emerald-700">
