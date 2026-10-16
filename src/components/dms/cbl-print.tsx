@@ -626,8 +626,8 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
       <div className="cbl-page bg-white px-8 py-6">
         {/* header — center: distributor + address line (real invoice jaisa underlined) */}
         <div className="text-center">
-          <p className="text-[17px] font-bold underline">{inv.distributorName} ({inv.distributorCity ?? ''}) - (MSD)</p>
-          <p className="mt-1 text-[11px] font-bold underline">{inv.distributorName.toUpperCase()} {inv.distributorCity?.toUpperCase()} MAIN MARKET</p>
+          <p className="text-[17px] font-bold underline">{inv.distributorName} ({inv.distributorCity ?? ''})</p>
+          <p className="mt-1 text-[11px] font-bold underline">{inv.distributorName.toUpperCase()} {inv.distributorCity?.toUpperCase()}</p>
         </div>
 
         {/* customer block (left) + invoice meta (right) — real invoice jaisi field list */}
@@ -849,7 +849,7 @@ export function CblSettlementDoc({ detail }: { detail: SummaryDetailDTO }) {
         {/* header: distributor (left) + settlement meta (right) */}
         <div className="flex justify-between">
           <div style={{ width: '58%' }}>
-            <p className="text-[17px] font-bold underline">{detail.distributorName} - (MSD)</p>
+            <p className="text-[17px] font-bold underline">{detail.distributorName}</p>
             <table style={{ border: 'none', marginTop: 4 }}>
               <tbody>
                 <tr><td style={{ border: 'none', width: 105, fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Deliveryman:</td><td style={{ border: 'none' }}>{detail.salesmanName}</td></tr>

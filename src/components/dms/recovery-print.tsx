@@ -55,7 +55,7 @@ export function RecoveryRouteSheetDoc({ businessName, bookerName, bookerPhone, d
         {/* header: distributor (left) + meta (right) */}
         <div className="flex justify-between">
           <div style={{ width: '58%' }}>
-            <p className="text-[17px] font-bold underline">{businessName} - (MSD)</p>
+            <p className="text-[17px] font-bold underline">{businessName}</p>
             <table style={{ border: 'none', marginTop: 4 }}>
               <tbody>
                 <tr><td style={{ border: 'none', width: 105, fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Order Booker:</td><td style={{ border: 'none' }}>{bookerName}{bookerPhone ? ` — ${bookerPhone}` : ''}</td></tr>
@@ -155,7 +155,7 @@ export function RecoveryReportDoc({ businessName, bookers, history }: {
         {/* header */}
         <div className="flex justify-between">
           <div style={{ width: '58%' }}>
-            <p className="text-[17px] font-bold underline">{businessName} - (MSD)</p>
+            <p className="text-[17px] font-bold underline">{businessName}</p>
             <table style={{ border: 'none', marginTop: 4 }}>
               <tbody>
                 <tr><td style={{ border: 'none', width: 105, fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Bookers:</td><td style={{ border: 'none' }}>{bookers.filter((b) => b.id).length} order bookers</td></tr>
