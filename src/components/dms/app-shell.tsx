@@ -17,11 +17,16 @@
 //     Ab har section ka apna URL route hai — activeView URL (pathname) se derive hota hai.
 //   - Navigation router.push se hoti hai → URL badalta hai → refresh par WAHI section
 //     milta hai, dashboard redirect khatam. Browser back/forward bhi kaam karta hai.
+// Task 65-b — NAV ITEMS AB REAL LINKS: <button> ko <Link> banaya — right-click par
+//   browser menu "Copy link address" / "Open in new tab" deta hai, middle-click bhi.
+//   (URL to router.push se bhi badalta tha, lekin button ka browser ko href nahi pata
+//   tha is liye copy-link option nahi aata tha.)
 //   - Session ab double-layered: localStorage cache + httpOnly signed cookie (middleware
 //     server-side gate). Shell mount par /api/auth/session se cookie verify/refresh —
 //     401 aaye to force logout (localStorage stale na rahe).
 
 import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import { useDMS, loadSession, saveSession } from '@/lib/dms-store'
 import { VIEW_PATH, viewFromPath } from '@/lib/dms-nav'
@@ -68,7 +73,6 @@ const NAV: { key: string; label: string; icon: typeof LayoutDashboard; roles: st
   { key: 'sales-app', label: 'Order Booker App', icon: Package2, roles: ['SALESMAN'], group: 'Overview' },
 ]
 
-const KEYSET = new Set(NAV.map((n) => n.key))
 type NavKey = string & keyof typeof VIEW_PATH
 
 // Modules (primary tabs) — upar se neeche yahi order; icon = tab icon
@@ -90,16 +94,17 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
   // Task 65: active view URL se — refresh/back/forward sab par sahi section milta hai
   const activeView = viewFromPath(pathname ?? '/')
 
-  // Task 49: purchase entry full page par adhoora draft ho to side-nav se jaane
-  // se pehle confirm — ghalati se click se kaam zaya nahi hota (draft waise bhi
-  // auto-save hai, ye double protection hai)
-  function navigate(target: string) {
-    if (!KEYSET.has(target)) return
-    if (activeView === 'purchase-entry' && target !== 'purchase-entry' && purchaseDraftDirty) {
-      const ok = window.confirm('Purchase invoice form mein adhoora data hai — draft auto-save ho chuka hai, wapas aaoge to poora milega.\n\nPhir bhi page chhorein?')
-      if (!ok) return
+  // Task 65-b: Link ke sath navigation khud <a href> karta hai — onClick sirf Task 49
+  // ka purchase-draft confirm guard hai. Sirf plain left-click par chalta hai; Ctrl/Cmd
+  // click, middle-click, right-click → native browser behavior (new tab / context menu).
+  function guardNavClick(target: string) {
+    return (e: React.MouseEvent) => {
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+      if (activeView === 'purchase-entry' && target !== 'purchase-entry' && purchaseDraftDirty) {
+        const ok = window.confirm('Purchase invoice form mein adhoora data hai — draft auto-save ho chuka hai, wapas aaoge to poora milega.\n\nPhir bhi page chhorein?')
+        if (!ok) e.preventDefault()
+      }
     }
-    router.push(VIEW_PATH[target as NavKey])
   }
 
   useEffect(() => {
@@ -254,9 +259,10 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
           {modules.map((m) => {
             const on = m.name === activeModule.name
             return (
-              <button
+              <Link
                 key={m.name}
-                onClick={() => navigate(m.items[0].key)}
+                href={VIEW_PATH[m.items[0].key as NavKey]}
+                onClick={guardNavClick(m.items[0].key)}
                 title={`${m.name} module — ${m.items.length} pages`}
                 className={`relative flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition-all duration-200 ${
                   on
@@ -273,7 +279,7 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
                 {on && (
                   <span className="absolute left-1/2 -translate-x-1/2 -bottom-[6px] h-2.5 w-2.5 rotate-45 rounded-[2px] bg-gradient-to-br from-emerald-600 to-teal-500" />
                 )}
-              </button>
+              </Link>
             )
           })}
           </div>
@@ -285,9 +291,10 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
           {activeModule.items.map((n) => {
             const on = n.key === activeView
             return (
-              <button
+              <Link
                 key={n.key}
-                onClick={() => navigate(n.key)}
+                href={VIEW_PATH[n.key as NavKey]}
+                onClick={guardNavClick(n.key)}
                 className={`group flex w-[104px] shrink-0 flex-col items-center gap-1.5 rounded-2xl border px-1.5 pt-2 pb-1.5 transition-all duration-200 ${
                   on
                     ? 'border-emerald-200 bg-white shadow-md shadow-emerald-600/10 -translate-y-0.5'
@@ -304,7 +311,7 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
                 <span className={`text-center text-[10px] leading-tight break-words ${on ? 'font-bold text-emerald-700' : 'font-medium text-slate-500'}`}>
                   {n.label}
                 </span>
-              </button>
+              </Link>
             )
           })}
           </div>
