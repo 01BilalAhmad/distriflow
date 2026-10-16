@@ -176,15 +176,16 @@ export function computeOrderLines(
       ? { id: item.scheme.id, name: item.scheme.name, type: item.scheme.type, channel: null, productId: null, value: Number(item.scheme.value) || 0, buyQty: Number(item.scheme.buyQty) || 0, freeQty: Number(item.scheme.freeQty) || 0 }
       : null
 
-    // ---- Task 56: TIER-BASED STACKING ----
-    // Ek line par scheme ke 3 tiers hain — PRODUCT (productId set) > CATEGORY
-    // (categoryId set) > BLANKET (dono null — e.g. all-products loyalty program).
-    // HAR tier ki best scheme line par lagti hai aur TIERS AAPAS MEIN STACK hote
-    // hain (Eclair product 3% + Khushhali all-products 2% = 5%). Same tier ki 2
-    // schemes aapas mein compete karti hain — best-wins (Task 55 decision: category
-    // "5%" vs non-filer "8%" dono category-tier par → non-filer ko sirf 8%).
-    // Legacy behavior preserved: snapshot/frozen-stack path pehle, filter wale 4
-    // AND-conditions waise hi (product + channel + category + filerScope).
+    // ---- Task 58: FULL STACKING (user rule) ----
+    // "Main jitny bhi promotions banata jaon, jo bill qualify karein wo SAB auto
+    // lagin" — pehli column Eclair, doosri Khushhali, teesri agli (Task 56/57 spec).
+    // Koi tier competition / best-wins NAHI: har scheme jo 4 AND filters (product +
+    // channel + category + filerScope) pass kare wo stack hoti hai — e.g. KIRYANA
+    // non-filer outlet par Eclair product 3% + Test 2% + Khushhali 2% = 7% (3 alag
+    // rows). BxGy sirf qty qualify kare to; money schemes hamesha. Order:
+    // product-tier pehle, phir category, phir blanket (specific → general; legacy
+    // primary stack[0] = most specific). Legacy paths preserved: frozen-stack /
+    // snapshot pehle, filter wale 4 AND-conditions waise hi.
     const tierOf = (s: CalcScheme) => (s.productId ? 0 : s.categoryName ? 1 : 2)
     const qualifiesBxGy = (s: CalcScheme) => s.type === 'BUY_X_GET_Y' && s.buyQty > 0 && ctnEquiv >= s.buyQty
 
@@ -204,27 +205,25 @@ export function computeOrderLines(
       // line par koi scheme nahi, discount 0)
       if (snapshot.type === 'BUY_X_GET_Y') { if (qualifiesBxGy(snapshot)) stack.push(snapshot) } else stack.push(snapshot)
     } else {
-      // Fresh lines — 4 AND filters (product + channel + category + filerScope),
-      // phir per-tier best pick: pehle qualifying BxGy, warna percent/flat
-      const applicable = schemes
+      // Task 58: FULL STACK — jitni schemes bill qualify karein SAB lagti hain
+      // (tier sirf ORDER ke liye: product > category > blanket; competition nahi)
+      schemes
         .filter((s) =>
           (!s.productId || s.productId === p.id)
           && (!s.channel || s.channel === channel)
           && (!s.categoryName || s.categoryName === (p.category ?? ''))
           && (!s.filerScope || s.filerScope === (outletFilerStatus ?? ''))
         )
-        .sort((a, b) => b.value - a.value)
-      for (let tier = 0; tier <= 2; tier++) {
-        const tierSchemes = applicable.filter((s) => tierOf(s) === tier)
-        const bx = tierSchemes.find(qualifiesBxGy)
-        if (bx) { stack.push(bx); continue }
-        const money = tierSchemes.find((s) => s.type === 'PERCENT_DISCOUNT' || s.type === 'FLAT_DISCOUNT')
-        if (money) stack.push(money)
-      }
+        .sort((a, b) => tierOf(a) - tierOf(b))
+        .forEach((s) => {
+          if (s.type === 'BUY_X_GET_Y') { if (qualifiesBxGy(s)) stack.push(s) }
+          else stack.push(s)
+        })
     }
 
     // Stack contributions: BxGy = free pcs, PERCENT = gross ka exact %, FLAT = per-ctn Rs.
-    // Alag-alag tiers ke percent ADD hoti hain (3% + 2% = 5% of gross) — user mental model.
+    // Task 58 full stack: jitni schemes lagin unke percent/flat ADD hote hain
+    // (3% + 2% + 2% = 7% of gross) — user mental model, har promotion apni row par.
     // Task 57: har scheme ka APNA contribution bhi record hota hai (amount / freeQtyGiven)
     // — persisted schemeStack row ke andar freeze hota hai taake bill + previews har
     // promotion ko alag row par apne amount ke sath dikhayen (combined totals inhi ka sum).

@@ -10,7 +10,8 @@ import { jsonError, tenantProfileId, distributorTenant } from '@/lib/dms-scope'
  * Task 55 — CATEGORY-WIDE + FILER SCOPE:
  * - categoryId: "Apply To: Whole Category" — puri category par ek discount (null = filter off)
  * - filerScope: null = all outlets | FILER | NON_FILER — "Non-Filer Special" sirf matching shops par
- * - Engine (computeOrderLines) best-value jeetata hai — stacking nahi (user-confirmed rule)
+ * - Engine (computeOrderLines) FULL STACK (Task 58): jitni schemes bill qualify karein
+ *   (product + channel + category + filerScope match) wo SAB lagti hain — har ek apni row
  */
 const FILER_SCOPES = ['FILER', 'NON_FILER'] as const
 const normScope = (v: unknown): string | null => (typeof v === 'string' && (FILER_SCOPES as readonly string[]).includes(v) ? v : null)

@@ -384,38 +384,34 @@ function CreateOrderDialog({ open, onOpenChange, onCreated }: { open: boolean; o
       let freeQty = 0, disc = 0
       // Task 55: server computeOrderLines ka client mirror — same filters (product + channel
       // + category + filer scope), warna booking preview server-booked discount se alag dikhta.
-      // Task 56: TIER STACKING mirror — PRODUCT > CATEGORY > BLANKET, har tier best, tiers
-      // stack (product 3% + all-products 2% = 5%). Same tier par best-wins (Task 55 rule).
-      const applicable = schemes
+      // Task 58: FULL STACK mirror — jitni schemes bill qualify karein wo SAB lagti hain
+      // (product + category + blanket, koi tier competition nahi). Har scheme apni chip/row.
+      const tierOf = (s: SchemeDTO) => (s.productId ? 0 : s.categoryName ? 1 : 2)
+      const qualifiesBxGy = (s: SchemeDTO) => s.type === 'BUY_X_GET_Y' && s.buyQty > 0 && ctnEquiv >= s.buyQty
+      // Task 57: har scheme ka APNA contribution — per-scheme chips/rows isi se bante hain
+      const stackAgg: PreviewStackEntry[] = []
+      schemes
         .filter((s) =>
           (!s.productId || s.productId === p.id)
           && (!s.channel || s.channel === outlet.channel)
           && (!s.categoryName || s.categoryName === p.category)
           && (!s.filerScope || s.filerScope === outlet.filerStatus)
         )
-        .sort((a, b) => b.value - a.value)
-      const tierOf = (s: SchemeDTO) => (s.productId ? 0 : s.categoryName ? 1 : 2)
-      const qualifiesBxGy = (s: SchemeDTO) => s.type === 'BUY_X_GET_Y' && s.buyQty > 0 && ctnEquiv >= s.buyQty
-      // Task 57: har scheme ka APNA contribution — per-scheme chips/rows isi se bante hain
-      const stackAgg: PreviewStackEntry[] = []
-      for (let tier = 0; tier <= 2; tier++) {
-        const tierSchemes = applicable.filter((s) => tierOf(s) === tier)
-        const bx = tierSchemes.find(qualifiesBxGy)
-        if (bx) {
-          const given = Math.round(Math.floor(ctnEquiv / bx.buyQty) * bx.freeQty * upc)
-          freeQty += given
-          stackAgg.push({ id: bx.id, name: bx.name ?? 'Scheme', type: bx.type, amount: 0, freeGiven: given })
-          continue
-        }
-        const money = tierSchemes.find((s) => s.type === 'PERCENT_DISCOUNT' || s.type === 'FLAT_DISCOUNT')
-        if (money) {
-          const amount = money.type === 'PERCENT_DISCOUNT'
-            ? Math.round(ratePc * l.qtyPcs * (money.value / 100) * 100) / 100
-            : Math.round(money.value * ctnEquiv * 100) / 100
+        .sort((a, b) => tierOf(a) - tierOf(b))
+        .forEach((s) => {
+          if (s.type === 'BUY_X_GET_Y') {
+            if (!qualifiesBxGy(s)) return
+            const given = Math.round(Math.floor(ctnEquiv / s.buyQty) * s.freeQty * upc)
+            freeQty += given
+            stackAgg.push({ id: s.id, name: s.name ?? 'Scheme', type: s.type, amount: 0, freeGiven: given })
+            return
+          }
+          const amount = s.type === 'PERCENT_DISCOUNT'
+            ? Math.round(ratePc * l.qtyPcs * (s.value / 100) * 100) / 100
+            : Math.round(s.value * ctnEquiv * 100) / 100
           disc += amount
-          stackAgg.push({ id: money.id, name: money.name ?? 'Scheme', type: money.type, amount, freeGiven: 0 })
-        }
-      }
+          stackAgg.push({ id: s.id, name: s.name ?? 'Scheme', type: s.type, amount, freeGiven: 0 })
+        })
       const gross = Math.round(ratePc * l.qtyPcs * 100) / 100
       // Task 45: GST per product (Products page ka rate — hardcoded nahi); TO discount ke ILAWA
       const gstRate = p.gstEnabled === false ? 0 : Math.max(0, Number(p.gstRate) || 0)
