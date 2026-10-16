@@ -12,20 +12,20 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR, fmtNum } from '@/lib/dms-api'
 import { fmtQty, packHint } from '@/components/dms/unit-qty'
-import type { ProductDTO, CompanyDTO } from '@/lib/dms-types'
+import type { ProductDTO, CompanyDTO, CategoryDTO } from '@/lib/dms-types'
 import { BulkImportDialog, type BulkColumn, type ParseOutcome } from '@/components/dms/bulk-import-dialog'
-import { Plus, Search, Loader2, Package, Building2, Pencil, Upload } from 'lucide-react'
+import { Plus, Search, Loader2, Package, Building2, Pencil, Upload, Tags } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
-// Task 48: Mondelez/Cadbury confectionery categories (invoice catalog ke mutabiq)
-const CATEGORIES = ['Tea', 'Beverages', 'Dairy', 'Snacks', 'Home Care', 'Personal Care', 'Chocolate', 'Candy', 'Wafer', 'Mints']
+// Task 53: categories ab DB-backed (per-tenant) — GET /api/categories first run par
+// defaults seed karta hai, "＋" button se user apni marzi ki category bana sakta hai.
 
 const PRODUCT_IMPORT_COLUMNS: BulkColumn[] = [
   { key: 'sku', label: 'SKU', required: true, hint: 'Duplicate SKU skip hoga' },
   { key: 'name', label: 'Product Name', required: true },
   { key: 'brand', label: 'Brand', required: true, hint: 'Naya brand khud ban jayega' },
   { key: 'company', label: 'Company', hint: 'Nayi company khud ban jayegi' },
-  { key: 'category', label: 'Category', hint: 'Tea/Beverages/Dairy/Snacks/Home Care/Personal Care' },
+  { key: 'category', label: 'Category', hint: 'Koi bhi naam — nayi category khud ban jayegi' },
   { key: 'unitsPerCarton', label: 'Pcs/Carton', hint: 'Ya phir Boxes + Pcs/Box dono dein' },
   { key: 'boxesPerCarton', label: 'Boxes/Carton', hint: 'Box level ho to ye + Pcs/Box' },
   { key: 'pcsPerBox', label: 'Pcs/Box' },
@@ -81,6 +81,7 @@ export function ProductsView() {
   const user = useDMS((s) => s.user)
   const [products, setProducts] = useState<ProductDTO[]>([])
   const [companies, setCompanies] = useState<CompanyDTO[]>([])
+  const [categories, setCategories] = useState<CategoryDTO[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [companyFilter, setCompanyFilter] = useState('ALL')
@@ -97,6 +98,8 @@ export function ProductsView() {
       setProducts(r.products)
       const c = await api<{ companies: CompanyDTO[] }>(`/api/companies?userId=${user.id}`)
       setCompanies(c.companies)
+      const cat = await api<{ categories: CategoryDTO[] }>(`/api/categories?userId=${user.id}`)
+      setCategories(cat.categories)
     } finally { setLoading(false) }
   }
   useEffect(() => { load() }, [user])
@@ -216,8 +219,8 @@ export function ProductsView() {
         </CardContent>
       </Card>
 
-      <ProductFormDialog open={addOpen} onOpenChange={setAddOpen} onSaved={load} companies={companies} />
-      <ProductFormDialog open={!!editProduct} onOpenChange={(v) => { if (!v) setEditProduct(null) }} onSaved={load} companies={companies} product={editProduct} />
+      <ProductFormDialog open={addOpen} onOpenChange={setAddOpen} onSaved={load} companies={companies} categories={categories} onCategoriesChanged={load} />
+      <ProductFormDialog open={!!editProduct} onOpenChange={(v) => { if (!v) setEditProduct(null) }} onSaved={load} companies={companies} categories={categories} onCategoriesChanged={load} product={editProduct} />
       <CompaniesDialog open={companiesOpen} onOpenChange={setCompaniesOpen} companies={companies} onChanged={load} />
       <BulkImportDialog
         open={importOpen}
@@ -260,11 +263,13 @@ function parseProductRow(r: Record<string, string>): ParseOutcome<Record<string,
 }
 
 /** Add + Edit dono ek hi form se — edit mode mein SKU change allowed hai (unique check server karta hai) */
-function ProductFormDialog({ open, onOpenChange, onSaved, companies, product }: {
+function ProductFormDialog({ open, onOpenChange, onSaved, companies, categories, onCategoriesChanged, product }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   onSaved: () => void
   companies: CompanyDTO[]
+  categories: CategoryDTO[]
+  onCategoriesChanged: () => void
   product?: ProductDTO | null
 }) {
   const user = useDMS((s) => s.user)
@@ -272,6 +277,7 @@ function ProductFormDialog({ open, onOpenChange, onSaved, companies, product }: 
   const [form, setForm] = useState<ProductForm>(EMPTY_FORM)
   const [packMode, setPackMode] = useState<'box' | 'pcs'>('box')
   const [saving, setSaving] = useState(false)
+  const [catOpen, setCatOpen] = useState(false) // Task 53: naya category mini-dialog
 
   useEffect(() => {
     if (open) {
@@ -336,6 +342,7 @@ function ProductFormDialog({ open, onOpenChange, onSaved, companies, product }: 
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
         <DialogHeader>
@@ -363,9 +370,15 @@ function ProductFormDialog({ open, onOpenChange, onSaved, companies, product }: 
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div className="grid gap-1.5"><Label>Category</Label>
-              <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm">
-                {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
-              </select>
+              <div className="flex gap-1.5">
+                <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="flex h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-sm">
+                  {/* Task 53: DB categories + legacy value (purana product agar list se bahar category par ho) */}
+                  {Array.from(new Set([...categories.map((c) => c.name), form.category].filter(Boolean))).map((c) => <option key={c}>{c}</option>)}
+                </select>
+                <Button type="button" variant="outline" size="icon" onClick={() => setCatOpen(true)} title="Nayi category banayein" className="h-9 w-9 shrink-0 border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
             <div className="grid gap-1.5"><Label>Consumer (Rs/unit)</Label><Input type="number" value={form.consumerPrice} onChange={(e) => setForm({ ...form, consumerPrice: e.target.value })} placeholder="130" /></div>
           </div>
@@ -444,6 +457,70 @@ function ProductFormDialog({ open, onOpenChange, onSaved, companies, product }: 
           <Button onClick={save} disabled={saving} className="w-full bg-emerald-600 hover:bg-emerald-700">
             {saving && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
             {editing ? 'Save Changes' : 'Add Product'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <NewCategoryDialog
+      open={catOpen}
+      onOpenChange={setCatOpen}
+      onCreated={(name) => setForm((f) => ({ ...f, category: name }))}
+      onChanged={onCategoriesChanged}
+    />
+    </>
+  )
+}
+
+/** Task 53: nayi category — POST /api/categories, list refresh + form mein auto-select */
+function NewCategoryDialog({ open, onOpenChange, onCreated, onChanged }: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  onCreated: (name: string) => void
+  onChanged: () => void
+}) {
+  const user = useDMS((s) => s.user)
+  const [name, setName] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => { if (open) setName('') }, [open])
+
+  async function save() {
+    if (!name.trim()) {
+      toast({ title: 'Category ka naam likhein', variant: 'destructive' }); return
+    }
+    setSaving(true)
+    try {
+      const r = await api<{ category: { id: string; name: string } }>('/api/categories', {
+        method: 'POST',
+        body: JSON.stringify({ userId: user?.id, name: name.trim() }),
+      })
+      toast({ title: 'Category Added ✓', description: r.category.name })
+      onCreated(r.category.name)
+      onChanged()
+      onOpenChange(false)
+    } catch (e) {
+      toast({ title: 'Failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' })
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><Tags className="h-5 w-5 text-emerald-600" /> Nayi Category</DialogTitle>
+          <DialogDescription>Product group ka naam likhein (misal: Biscuits, Spices, Frozen) — ye sabhi product forms mein available hogi</DialogDescription>
+        </DialogHeader>
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); save() } }}
+          placeholder="Biscuits"
+          autoFocus
+        />
+        <DialogFooter>
+          <Button onClick={save} disabled={saving} className="w-full bg-emerald-600 hover:bg-emerald-700">
+            {saving && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+            Add Category
           </Button>
         </DialogFooter>
       </DialogContent>

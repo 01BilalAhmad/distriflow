@@ -43,6 +43,7 @@ export async function POST(req: Request) {
     const warnings: { row: number; name: string; reason: string }[] = []
 
     const created: { id: string; sku: string; name: string }[] = []
+    const usedCategories = new Set<string>() // Task 53: import ki categories Category table mein bhi auto-create
     await db.$transaction(async (tx) => {
       for (let i = 0; i < rows.length; i++) {
         const raw = rows[i] ?? {}
@@ -126,9 +127,19 @@ export async function POST(req: Request) {
             gstRate,
           },
         })
+        const impCat = get('category') || 'General'
+        if (impCat) usedCategories.add(impCat)
         created.push({ id: rec.id, sku: rec.sku, name: rec.name })
       }
     })
+
+    // Task 53: import hui categories dropdown mein bhi dikhein (duplicate-safe)
+    if (usedCategories.size > 0) {
+      await db.category.createMany({
+        data: [...usedCategories].map((name) => ({ name, distributorId: tenantId })),
+        skipDuplicates: true,
+      })
+    }
 
     return Response.json({ imported: created.length, skipped, warnings, created })
   } catch (e) {

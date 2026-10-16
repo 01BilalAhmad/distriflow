@@ -71,6 +71,7 @@ model DistributorProfile {
   purchaseInvoices PurchaseInvoice[]
   ledgerEntries   CompanyLedgerEntry[]
   appSettings     AppSetting[]
+  categories      Category[]
 }
 
 // ============ PRODUCT CATALOG ============
@@ -104,6 +105,17 @@ model Brand {
   distributorId String
   distributor   DistributorProfile @relation(fields: [distributorId], references: [id])
   products      Product[]
+  @@unique([name, distributorId])
+}
+
+// Task 53: product categories per-tenant — fixed list hat gayi, user apni marzi ki
+// category bana sakta hai (Product.category string isi ka naam rakhta hai).
+model Category {
+  id            String              @id @default(cuid())
+  name          String
+  distributorId String
+  distributor   DistributorProfile @relation(fields: [distributorId], references: [id])
+  createdAt     DateTime            @default(now())
   @@unique([name, distributorId])
 }
 

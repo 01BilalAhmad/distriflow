@@ -107,6 +107,13 @@ export interface CompanyDTO {
   salesmanCount?: number
 }
 
+// Task 53: per-tenant product categories (naya category banane ka option)
+export interface CategoryDTO {
+  id: string
+  name: string
+  productCount?: number
+}
+
 // ---- Procurement: companies + purchase invoices + payable ledger ----
 export interface CompanyFullDTO extends CompanyDTO {
   contactPerson: string | null
