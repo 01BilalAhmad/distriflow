@@ -215,15 +215,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       // Advance Tax: order ka SNAPSHOT rate preserve hota hai (booking waqt ka),
       // sirf amount naye total par recompute. Purana order (rate null) ho to
       // outlet ke CURRENT filer status + current settings se fresh compute.
+      // Task 76 (Option A): base = Net − Trade Offer + GST (purchase invoice jaisa) —
+      // POST route ke sath SAME math, PREVIEW aur booking preview exact match.
       let taxRate = order.advanceTaxRate
       let taxStatus = order.filerStatus
+      const advBase = Math.max(0, Math.round((total - tradeOfferTotal + gstTotal) * 100) / 100)
       if (taxRate == null || taxStatus == null) {
         const outletFresh = await db.outlet.findUnique({ where: { id: order.outletId }, select: { filerStatus: true } })
         const ratesNow = await getTaxRates(tenantId)
         taxStatus = outletFresh?.filerStatus ?? 'NON_FILER'
-        taxRate = advanceTaxFor(total, taxStatus, ratesNow).rate
+        taxRate = advanceTaxFor(advBase, taxStatus, ratesNow).rate
       }
-      const tax = advanceTaxFor(total, taxStatus, { filer: taxRate, nonFiler: taxRate })
+      const tax = advanceTaxFor(advBase, taxStatus, { filer: taxRate, nonFiler: taxRate })
 
       if (action === 'PREVIEW_ITEMS') {
         return Response.json({

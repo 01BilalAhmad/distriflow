@@ -390,7 +390,9 @@ model Order {
   advanceTaxRate Float?       // % snapshot (rate-preserve principle)
   advanceTax     Float        @default(0)
   // Task 45: purchase-invoice jaisa tax mechanism — GST per product + Trade Offer per SKU.
-  // total (goods net) aur advanceTax ka base UNCHANGED (settlement/ledger safe);
+  // Task 76: advanceTax base = total − tradeOfferTotal + gstTotal (Net − TO + GST —
+  // 236H withholding ab goods + tax par, bilkul purchase invoice jaisa; purane orders ke
+  // snapshots waise hi chalte hain — settlement/ledger pro-rata order.advanceTax par hai);
   // Grand Payable = total − tradeOfferTotal + gstTotal + advanceTax
   tradeOfferTotal Float      @default(0) // Σ line trade offer (per-SKU Rs snapshot)
   gstTotal        Float      @default(0) // Σ line GST (product gstRate × line net)

@@ -529,15 +529,18 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
   }, [computed, manualDiscount])
 
   // Advance Tax live preview (bill par ADD hota hai) — shop ke filer status + settings rate se (server bhi yehi karta hai)
+  // Task 76 (Option A): base = Net − Trade Offer + GST — purchase invoice jaisa (booking preview == booked bill)
+  const toTotal = Math.round(merged.rows.reduce((s, r) => s + r.tradeOffer, 0) * 100) / 100
   const advTaxPreview = useMemo(() => {
     if (!outlet || !taxRates || netTotal <= 0) return 0
     const rate = outlet.filerStatus === 'FILER' ? taxRates.filer : taxRates.nonFiler
-    return Math.round(netTotal * rate / 100 * 100) / 100
-  }, [outlet, taxRates, netTotal])
+    const advBase = Math.max(0, Math.round((netTotal - toTotal + merged.gstTotal) * 100) / 100)
+    return Math.round(advBase * rate / 100 * 100) / 100
+  }, [outlet, taxRates, netTotal, toTotal, merged.gstTotal])
 
   // Task 45: Grand payable = goods net − trade offer + GST + advance tax (purchase invoice chain)
   // Task 52: GST merged (manual ke baad wale) net par — jaisa server book karta hai
-  const grandPayable = Math.round((netTotal - merged.rows.reduce((s, r) => s + r.tradeOffer, 0) + merged.gstTotal + advTaxPreview) * 100) / 100
+  const grandPayable = Math.round((netTotal - toTotal + merged.gstTotal + advTaxPreview) * 100) / 100
 
   function deleteDiscount() {
     setDiscType('NONE')

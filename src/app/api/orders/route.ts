@@ -152,9 +152,15 @@ export async function POST(req: Request) {
     const seq = await nextSeq('order')
 
     // ---- Advance Tax — shop ke filer status + DISTRIBUTOR ke apne settings rate par snapshot (bill par add) ----
+    // Task 76 (Option A — user confirm): base ab purchase invoice jaisa — Net (goods) − Trade Offer + GST.
+    // Pehle sirf goods net par lagta tha, isliye purchase (Net+GST base) vs order (Net base) mein
+    // per-ctn 20-40 Rs ka farq aata tha. Ab dono invoices ka tax mechanism SAME:
+    // farq = GST × advRate purchase aur order par barabar. Purane orders ke snapshots
+    // (total/advanceTax) waise hi rahenge — sirf naye bookings naye base par.
     const orderTotal = Math.round((subtotal - schemeDiscount - manualDiscount) * 100) / 100
     const rates = await getTaxRates(tenantId)
-    const tax = advanceTaxFor(orderTotal, outlet.filerStatus, rates)
+    const advBase = Math.max(0, Math.round((orderTotal - tradeOfferTotal + gstTotal) * 100) / 100)
+    const tax = advanceTaxFor(advBase, outlet.filerStatus, rates)
 
     const order = await db.order.create({
       data: {
