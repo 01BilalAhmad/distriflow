@@ -9,12 +9,12 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR, fmtDate, STATUS_STYLES, statusLabel } from '@/lib/dms-api'
-import type { PJPPlanDTO, PjpTodayDTO, ProductDTO, OrderDTO, RecoveryData, RecoveryRowDTO, RecoveryShopDTO, SalesmanPerfDTO } from '@/lib/dms-types'
+import type { PJPPlanDTO, PjpTodayDTO, ProductDTO, OrderDTO, RecoveryData, RecoveryRowDTO, RecoveryShopDTO, SalesmanPerfDTO, LedgerEntryDTO } from '@/lib/dms-types'
 import { UnitQtyInputs, splitPcs, fmtQty, packHint } from '@/components/dms/unit-qty'
 import { orderGrandPayable } from '@/lib/dms-order-calc'
 import { DAY_LIST, DAY_LABELS, VisitDayChips } from '@/components/dms/outlets-view'
 import { karachiDayCode, isSameKarachiDay } from '@/lib/dms-day'
-import { Route, Store, ShoppingCart, ClipboardList, User, MapPin, LogIn, LogOut, Plus, Trash2, Loader2, CheckCircle2, Navigation, Wallet, Percent, XCircle, HandCoins, CalendarDays, Clock3, Eye, Banknote, Lock, RefreshCw, Play, Square, CloudUpload, WifiOff, ReceiptText, Target } from 'lucide-react'
+import { Route, Store, ShoppingCart, ClipboardList, User, MapPin, LogIn, LogOut, Plus, Trash2, Loader2, CheckCircle2, Navigation, Wallet, Percent, XCircle, HandCoins, CalendarDays, Clock3, Eye, Banknote, Lock, RefreshCw, Play, Square, CloudUpload, WifiOff, ReceiptText, Target, BookText } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 import { addToQueue, clearSnapshot, getQueue, isNetworkError, saveSnapshot, syncQueue, useRouteState, todayStr, type PendingSync, type RouteSnapshot } from '@/lib/route-cache'
 
@@ -512,6 +512,8 @@ function ShopsTab({ online, onGoDay }: { online: boolean; onGoDay: () => void })
   const [allRoutes, setAllRoutes] = useState(false)
   const [collectShop, setCollectShop] = useState<RecoveryShopDTO | null>(null)
   const [actionShop, setActionShop] = useState<RecoveryShopDTO | null>(null)
+  // Task 84: booker apni shop ka ledger dekhe
+  const [ledgerShop, setLedgerShop] = useState<RecoveryShopDTO | null>(null)
   const [orderShop, setOrderShop] = useState<RecoveryShopDTO | null>(null)
   const [showAllHistory, setShowAllHistory] = useState(false)
   // Task 82: PJP flags — Jumma OFF + Unplanned allowed (admin settings se)
@@ -758,14 +760,20 @@ function ShopsTab({ online, onGoDay }: { online: boolean; onGoDay: () => void })
         />
       )}
 
-      {/* Shop tap popup — 2 options: Recovery / Order */}
+      {/* Shop tap popup — 3 options: Recovery / Order / Ledger */}
       {actionShop && (
         <ShopActionDialog
           shop={actionShop}
           onRecovery={() => { setCollectShop(actionShop); setActionShop(null) }}
           onOrder={() => { setOrderShop(actionShop); setActionShop(null) }}
+          onLedger={() => { setLedgerShop(actionShop); setActionShop(null) }}
           onClose={() => setActionShop(null)}
         />
+      )}
+
+      {/* Task 84: shop ledger — booker apni shop ka poora khata dekhe */}
+      {ledgerShop && user && (
+        <ShopLedgerDialog shop={ledgerShop} userId={user.id} onClose={() => setLedgerShop(null)} />
       )}
 
       {/* Shop-wise order punch (popup ke Order option se, ya Unplanned picker se) */}
@@ -961,11 +969,12 @@ async function captureGps(): Promise<{ lat: number; lng: number; accuracy?: numb
   }
 }
 
-/* ================= SHOP ACTION POPUP (Recovery / Order — 2 options) ================= */
-function ShopActionDialog({ shop, onRecovery, onOrder, onClose }: {
+/* ================= SHOP ACTION POPUP (Recovery / Order / Ledger — 3 options) ================= */
+function ShopActionDialog({ shop, onRecovery, onOrder, onLedger, onClose }: {
   shop: RecoveryShopDTO
   onRecovery: () => void
   onOrder: () => void
+  onLedger: () => void
   onClose: () => void
 }) {
   const hasUdhaar = shop.balance > 0.005
@@ -1009,6 +1018,80 @@ function ShopActionDialog({ shop, onRecovery, onOrder, onClose }: {
               <span className="block text-[11px] leading-snug mt-0.5 text-violet-100">Is shop ka naya order book karein — schemes auto-apply hongi</span>
             </span>
           </button>
+          {/* Task 84: shop ledger — booker ka poora khata */}
+          <button type="button" onClick={onLedger}
+            className="flex items-center gap-3 rounded-xl border border-indigo-200 bg-indigo-50 p-3.5 text-left text-indigo-900 hover:bg-indigo-100 transition-colors">
+            <span className="h-10 w-10 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
+              <BookText className="h-5 w-5 text-indigo-600" />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-sm font-bold leading-tight">Shop Ledger Dekhein</span>
+              <span className="block text-[11px] leading-snug mt-0.5 text-indigo-600">Poora khata — purani invoices, wasooli aur returns ki entries</span>
+            </span>
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/* ================= SHOP LEDGER (Task 84 — booker apni shop ka poora khata dekhe) ================= */
+function ShopLedgerDialog({ shop, userId, onClose }: {
+  shop: RecoveryShopDTO
+  userId: string
+  onClose: () => void
+}) {
+  const [data, setData] = useState<{ balance: number; entries: LedgerEntryDTO[] } | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    api<{ balance: number; entries: LedgerEntryDTO[] }>(`/api/ledgers?userId=${userId}&outletId=${shop.outletId}`)
+      .then((r) => setData({ balance: r.balance, entries: r.entries }))
+      .catch(() => setFailed(true))
+  }, [userId, shop.outletId])
+
+  const balance = data?.balance ?? shop.balance
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
+      <DialogContent className="max-w-md max-h-[88vh] p-0 gap-0 overflow-hidden flex flex-col" aria-describedby={undefined}>
+        <DialogTitle className="sr-only">Shop Ledger — {shop.name}</DialogTitle>
+        {/* Header — shop + current balance */}
+        <div className="shrink-0 border-b bg-slate-50 p-3.5 pr-12">
+          <p className="font-bold text-slate-900 text-sm flex items-center gap-1.5"><BookText className="h-4 w-4 text-indigo-600 shrink-0" /> {shop.name} — Ledger</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">{shop.code} • {shop.channel} • {shop.city}</p>
+          <span className={`mt-2 inline-flex items-center rounded-md border px-2 py-1 text-[10px] font-bold ${balance > 0.005 ? 'bg-red-50 border-red-200 text-red-600' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+            Current Balance: {fmtPKR(Math.max(0, balance))}{balance > 0.005 ? ' (Udhaar)' : ' (Clear)'}
+          </span>
+        </div>
+        {/* Entries — scrollable, newest first */}
+        <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
+          {!data && !failed && <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-16 rounded-xl" />)}</div>}
+          {failed && <p className="py-8 text-center text-xs text-red-500">Ledger load nahi hua — dialog band kar ke dobara koshish karein</p>}
+          {data && data.entries.length === 0 && (
+            <p className="py-8 text-center text-xs text-slate-400">Abhi koi entry nahi — order settle hone ke baad entries yahan aayengi</p>
+          )}
+          {data && data.entries.map((e) => (
+            <div key={e.id} className="rounded-lg border border-slate-200 p-2.5">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-slate-800 truncate">{e.note ?? e.refType}</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">{fmtDate(e.date)} • {e.refNo}</p>
+                </div>
+                <div className="text-right shrink-0">
+                  {e.debit > 0 ? (
+                    <p className="text-xs font-bold text-red-600">+{fmtPKR(e.debit)}</p>
+                  ) : (
+                    <p className="text-xs font-bold text-emerald-600">−{fmtPKR(e.credit)}</p>
+                  )}
+                  <p className="text-[10px] text-slate-400 mt-0.5">Bal: {fmtPKR(e.balance)}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        {/* Footer hint */}
+        <div className="shrink-0 border-t p-3">
+          <p className="text-[10px] text-slate-400 text-center flex items-center justify-center gap-1"><BookText className="h-3 w-3" /> Udhaar (laal) badhta hai, wasooli/wapsi (sabz) kam karti hai — Bal running balance hai</p>
         </div>
       </DialogContent>
     </Dialog>
