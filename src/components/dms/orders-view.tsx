@@ -366,6 +366,7 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
   // Task 67: searchable shop picker + shop-focused prefill
   const [outletPickerOpen, setOutletPickerOpen] = useState(false)
   const [outletsLoaded, setOutletsLoaded] = useState(false)
+  const [salesmenLoaded, setSalesmenLoaded] = useState(false)
   const prefillDone = useRef<string | null>(null)
 
   useEffect(() => {
@@ -373,33 +374,42 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
     setOutletId(''); setBookerId(''); setLines([]); setNotes('')
     setDiscType('NONE'); setDiscValue('')
     setOutletsLoaded(false)
+    setSalesmenLoaded(false)
     prefillDone.current = null // har opening par prefill fresh apply ho
     setBookerTouched(false)
     api<{ outlets: OutletDTO[] }>(`/api/outlets?userId=${user.id}`).then((r) => { setOutlets(r.outlets); setOutletsLoaded(true) }).catch(() => {})
     api<{ products: ProductDTO[] }>(`/api/products?userId=${user.id}`).then((r) => setProducts(r.products)).catch(() => {})
     api<{ schemes: SchemeDTO[] }>(`/api/schemes?userId=${user.id}`).then((r) => setSchemes(r.schemes.filter((s) => s.isActive))).catch(() => {})
-    api<{ salesmen: SalesmanPerfDTO[] }>(`/api/field-force?userId=${user.id}`).then((r) => setSalesmen(r.salesmen)).catch(() => {})
+    api<{ salesmen: SalesmanPerfDTO[] }>(`/api/field-force?userId=${user.id}`).then((r) => { setSalesmen(r.salesmen); setSalesmenLoaded(true) }).catch(() => {})
     api<{ settings: { filerTaxRate: number; nonFilerTaxRate: number } }>(`/api/settings?userId=${user.id}`).then((r) => setTaxRates({ filer: r.settings.filerTaxRate, nonFiler: r.settings.nonFilerTaxRate })).catch(() => {})
   }, [open, user])
 
-  // Task 67: Outlets/Zero-Purchase se aya shop prefill — outlets load hote hi apply (booker bhi auto)
+  // Task 67: Outlets/Zero-Purchase se aya shop prefill — outlets + salesmen dono load hone par apply
+  // Task 68: booker ab salesmanId se match hota hai (name-match duplicate names par toot sakta tha)
   useEffect(() => {
-    if (!open || !prefillOutletId || !outletsLoaded) return
+    if (!open || !prefillOutletId || !outletsLoaded || !salesmenLoaded) return
     if (prefillDone.current === prefillOutletId) return
     prefillDone.current = prefillOutletId
     const o = outlets.find((x) => x.id === prefillOutletId)
     if (o) {
       setOutletId(o.id)
-      const match = o.salesmanName ? salesmen.find((s) => s.name === o.salesmanName) : null
+      const match = o.salesmanId ? salesmen.find((s) => s.id === o.salesmanId) : null
       if (match) setBookerId(match.id)
     } else {
       toast({ title: 'Shop nahi mili', description: 'Jo shop aayi thi wo ab mojood nahi — dobara select karein', variant: 'destructive' })
     }
     onPrefillApplied?.()
-  }, [open, prefillOutletId, outletsLoaded])
+  }, [open, prefillOutletId, outletsLoaded, salesmenLoaded])
 
   const outlet = outlets.find((o) => o.id === outletId)
   const booker = salesmen.find((s) => s.id === bookerId)
+
+  // Task 68: CASCADING FILTER — booker select hua to shop picker mein sirf USI ki assigned shops.
+  // Booker khali = saari shops (unassigned shops bhi). Shop jis booker ki hai wo doosre ki list mein kabhi nahi.
+  const visibleOutlets = useMemo(
+    () => (bookerId ? outlets.filter((o) => o.salesmanId === bookerId) : outlets),
+    [outlets, bookerId]
+  )
 
   // Outlet select hote hi uska default order booker auto-fill — LEKIN sirf jab booker manually
   // chuna na gaya ho (bookerTouched): shop badla to booker bhi shop ke route par shift hota hai
@@ -407,8 +417,9 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
     setOutletId(id)
     if (bookerTouched) return
     const o = outlets.find((x) => x.id === id)
-    if (!o?.salesmanName) return
-    const match = salesmen.find((s) => s.name === o.salesmanName)
+    if (!o) return
+    // Task 68: salesmanId se direct match (pehle name matching thi)
+    const match = o.salesmanId ? salesmen.find((s) => s.id === o.salesmanId) : null
     if (match) setBookerId(match.id)
   }
 
@@ -546,6 +557,11 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
       toast({ title: 'Order Booker select karein', description: 'Bill kis order booker ka hai — pehle select karein', variant: 'destructive' })
       return
     }
+    // Task 68: assigned shop ka order sirf apne booker ke account par — mismatch UI se bhi block
+    if (outlet?.salesmanId && outlet.salesmanId !== bookerId) {
+      toast({ title: 'Booker mismatch', description: `${outlet.name} kisi aur booker ki assigned shop hai — order usi ke account par book hoga`, variant: 'destructive' })
+      return
+    }
     if (discType !== 'NONE' && !discInputValid) {
       toast({ title: 'Discount value galat hai', description: discType === 'PERCENT' ? 'Percentage 0 se 100 ke darmiyan ho' : 'Flat amount 0 se bara hona chahiye', variant: 'destructive' })
       return
@@ -599,13 +615,22 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
       <DialogContent className="max-w-[calc(100%-2rem)] sm:max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><ShoppingCart className="h-5 w-5 text-emerald-600" /> New Order Booking</DialogTitle>
-          <DialogDescription>Shop search kar ke select karein — schemes order time par auto-apply hongi</DialogDescription>
+          <DialogDescription>Order booker select karein — usi ki assigned shops list mein aayengi. Schemes order time par auto-apply hongi</DialogDescription>
         </DialogHeader>
         <div className="grid gap-3 overflow-y-auto pr-1">
           <div className="grid sm:grid-cols-2 gap-3">
             <div className="grid gap-1.5">
               <Label>Order Booker <span className="text-red-500">*</span></Label>
-              <Select value={bookerId} onValueChange={(v) => { setBookerId(v); setBookerTouched(true) }}>
+              <Select value={bookerId} onValueChange={(v) => {
+                setBookerId(v); setBookerTouched(true)
+                // Task 68: booker badla to doosre booker ki assigned shop selected thi to reset —
+                // shop picker ab naye booker ki assigned shops dikhayega
+                const o = outlets.find((x) => x.id === outletId)
+                if (o?.salesmanId && o.salesmanId !== v) {
+                  setOutletId('')
+                  toast({ title: 'Shop reset ho gayi', description: `${o.name} ${salesmen.find((s) => s.id === o.salesmanId)?.name ?? 'doosre booker'} ki assigned shop hai — naye booker ki shops list hongi` })
+                }
+              }}>
                 <SelectTrigger className={bookerId ? 'border-emerald-300' : 'border-amber-300'}><SelectValue placeholder="Bill kis order booker ka?" /></SelectTrigger>
                 <SelectContent>
                   {salesmen.map((s) => (
@@ -613,8 +638,10 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
                   ))}
                 </SelectContent>
               </Select>
-              {booker && (
+              {booker ? (
                 <p className="text-[11px] text-emerald-700 font-medium">✓ Ye bill <b>{booker.name}</b> ke booker account par book ho raha hai</p>
+              ) : (
+                <p className="text-[11px] text-slate-500">Pehle booker select karein — <b>usi ki shops</b> shop list mein aayengi</p>
               )}
             </div>
             <div className="grid gap-1.5">
@@ -635,14 +662,19 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
                   <Command>
                     <CommandInput placeholder="Shop ka naam ya code likhein..." />
                     <CommandList className="max-h-72">
-                      <CommandEmpty>Koi shop nahi mili — Outlets page se add karein</CommandEmpty>
-                      {outlets.map((o) => (
+                      {/* Task 68: empty message booker-filtered state ke hisab se — assign karne ka rasta bhi bataye */}
+                      <CommandEmpty>
+                        {bookerId && outlets.length > 0 && visibleOutlets.length === 0
+                          ? `${booker?.name ?? 'Is booker'} ki koi shop assign nahi — Outlets page se shop Edit kar ke assign karein`
+                          : 'Koi shop nahi mili — Outlets page se add karein'}
+                      </CommandEmpty>
+                      {visibleOutlets.map((o) => (
                         <CommandItem key={o.id} value={`${o.name} ${o.code} ${o.channel} ${o.salesmanName ?? ''}`}
                           onSelect={() => { selectOutlet(o.id); setOutletPickerOpen(false) }}>
                           <Store className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
                           <div className="min-w-0 flex-1">
                             <p className="text-sm font-medium text-slate-800 truncate">{o.name}</p>
-                            <p className="text-[10px] text-slate-400 truncate">{o.code} • {o.channel} • {o.salesmanName ?? 'booker nahi'} • credit {o.creditDays}d</p>
+                            <p className="text-[10px] text-slate-400 truncate">{o.code} • {o.channel} • {bookerId ? `credit ${o.creditDays}d` : `${o.salesmanName ?? 'booker nahi'} • credit ${o.creditDays}d`}</p>
                           </div>
                           <Check className={`h-3.5 w-3.5 shrink-0 ${outletId === o.id ? 'opacity-100 text-emerald-600' : 'opacity-0'}`} />
                         </CommandItem>
@@ -651,6 +683,14 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
                   </Command>
                 </PopoverContent>
               </Popover>
+              {/* Task 68: booker-filtered state ka live hint — kitni shops aur kis booker ki */}
+              {booker && !outlet && (
+                <p className="text-[11px] text-emerald-700 font-medium">
+                  {visibleOutlets.length > 0
+                    ? `Sirf ${booker.name} ki ${visibleOutlets.length} shop${visibleOutlets.length > 1 ? 's' : ''} nazar aa rahi hain ✓`
+                    : `${booker.name} ki koi shop assign nahi — Outlets page se assign karein`}
+                </p>
+              )}
             </div>
             {outlet && (
               <div className="sm:col-span-2 text-xs text-slate-500 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">

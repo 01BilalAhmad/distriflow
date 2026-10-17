@@ -21,7 +21,7 @@ export async function GET(req: Request) {
       where,
       include: {
         distributor: { select: { businessName: true } },
-        salesman: { select: { name: true } },
+        salesman: { select: { id: true, name: true } },
         orders: { select: { total: true } },
       },
       orderBy: { name: 'asc' },
@@ -44,6 +44,7 @@ export async function GET(req: Request) {
       filerStatus: o.filerStatus,
       visitDays: o.visitDays,
       distributorName: o.distributor.businessName,
+      salesmanId: o.salesman?.id ?? null,
       salesmanName: o.salesman?.name ?? null,
       totalOrders: o.orders.length,
       totalValue: o.orders.reduce((s, x) => s + x.total, 0),

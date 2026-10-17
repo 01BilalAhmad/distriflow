@@ -265,6 +265,8 @@ export interface OutletDTO {
   /** Visit schedule — "MON,WED,SAT" | empty = roz visit */
   visitDays: string
   distributorName: string
+  /** Task 68: assigned route booker — null = unassigned (order booking mein kisi booker ki list mein nahi) */
+  salesmanId: string | null
   salesmanName: string | null
   totalOrders: number
   totalValue: number

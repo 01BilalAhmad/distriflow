@@ -12,9 +12,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR } from '@/lib/dms-api'
-import type { OutletDTO } from '@/lib/dms-types'
+import type { OutletDTO, SalesmanPerfDTO } from '@/lib/dms-types'
 import { BulkImportDialog, type BulkColumn, type ParseOutcome } from '@/components/dms/bulk-import-dialog'
-import { Plus, Search, MapPin, Loader2, Phone, Store, Pencil, Settings2, FileText, CalendarDays, Upload, ShoppingCart } from 'lucide-react'
+import { Plus, Search, MapPin, Loader2, Phone, Store, Pencil, Settings2, FileText, CalendarDays, Upload, ShoppingCart, UserCheck } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
 export const DAY_LIST = [
@@ -166,7 +166,9 @@ export function OutletsView() {
                 </div>
                 <div className="mt-2.5 pt-2 border-t flex items-center justify-between text-xs">
                   <div>
-                    <p className="text-slate-400">Salesman: <span className="text-slate-600 font-medium">{o.salesmanName ?? '—'}</span></p>
+                    <p className="text-slate-400">Booker: {o.salesmanName
+                      ? <span className="text-emerald-700 font-medium">{o.salesmanName}</span>
+                      : <span className="text-amber-600 font-medium">assign nahi ⚠</span>}</p>
                     <p className="text-slate-400">Credit: <span className="text-slate-600 font-medium">{o.creditDays} days</span></p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -244,10 +246,12 @@ function OutletFormDialog({ open, onOpenChange, onCreated, onSaved, outlet }: {
 }) {
   const user = useDMS((s) => s.user)
   const editing = !!outlet
-  const [form, setForm] = useState({ name: '', ownerName: '', phone: '', address: '', city: 'Lahore', channel: 'KIRYANA', creditDays: '7', ntn: '', cnic: '', filerStatus: 'NON_FILER', visitDays: [] as string[] })
+  const [form, setForm] = useState({ name: '', ownerName: '', phone: '', address: '', city: 'Lahore', channel: 'KIRYANA', creditDays: '7', ntn: '', cnic: '', filerStatus: 'NON_FILER', visitDays: [] as string[], salesmanId: '' })
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null)
   const [gettingLoc, setGettingLoc] = useState(false)
   const [saving, setSaving] = useState(false)
+  // Task 68: route booker assignment — shop jis booker ko assign hogi, order booking mein sirf usi ko dikhegi
+  const [salesmen, setSalesmen] = useState<SalesmanPerfDTO[]>([])
 
   useEffect(() => {
     if (open) {
@@ -256,10 +260,12 @@ function OutletFormDialog({ open, onOpenChange, onCreated, onSaved, outlet }: {
         city: outlet.city, channel: outlet.channel, creditDays: String(outlet.creditDays),
         ntn: outlet.ntn ?? '', cnic: outlet.cnic ?? '', filerStatus: outlet.filerStatus,
         visitDays: outlet.visitDays ? outlet.visitDays.split(',').filter(Boolean) : [],
-      } : { name: '', ownerName: '', phone: '', address: '', city: 'Lahore', channel: 'KIRYANA', creditDays: '7', ntn: '', cnic: '', filerStatus: 'NON_FILER', visitDays: [] })
+        salesmanId: outlet.salesmanId ?? '',
+      } : { name: '', ownerName: '', phone: '', address: '', city: 'Lahore', channel: 'KIRYANA', creditDays: '7', ntn: '', cnic: '', filerStatus: 'NON_FILER', visitDays: [], salesmanId: '' })
       setCoords(null)
+      if (user) api<{ salesmen: SalesmanPerfDTO[] }>(`/api/field-force?userId=${user.id}`).then((r) => setSalesmen(r.salesmen)).catch(() => {})
     }
-  }, [open, outlet])
+  }, [open, outlet, user])
 
   const toggleDay = (code: string) => {
     setForm((f) => ({
@@ -290,13 +296,14 @@ function OutletFormDialog({ open, onOpenChange, onCreated, onSaved, outlet }: {
       if (editing && outlet) {
         await api(`/api/outlets/${outlet.id}`, {
           method: 'PATCH',
-          body: JSON.stringify({ ...form, creditDays: Number(form.creditDays), ntn: form.ntn.trim() || null, cnic: form.cnic.trim() || null, visitDays }),
+          body: JSON.stringify({ ...form, creditDays: Number(form.creditDays), ntn: form.ntn.trim() || null, cnic: form.cnic.trim() || null, visitDays, salesmanId: form.salesmanId || null }),
         })
-        toast({ title: 'Outlet Updated ✓', description: `${form.name} — visit days: ${form.visitDays.length ? form.visitDays.join(', ') : 'Roz'} save ho gaya` })
+        const assigned = salesmen.find((s) => s.id === form.salesmanId)
+        toast({ title: 'Outlet Updated ✓', description: `${form.name} — booker: ${assigned?.name ?? 'unassigned'}, visit days: ${form.visitDays.length ? form.visitDays.join(', ') : 'Roz'} save ho gaya` })
       } else {
         await api('/api/outlets', {
           method: 'POST',
-          body: JSON.stringify({ ...form, creditDays: Number(form.creditDays), distributorId: user.profile.id, lat: coords?.lat, lng: coords?.lng, ntn: form.ntn.trim() || null, cnic: form.cnic.trim() || null, visitDays }),
+          body: JSON.stringify({ ...form, creditDays: Number(form.creditDays), distributorId: user.profile.id, lat: coords?.lat, lng: coords?.lng, ntn: form.ntn.trim() || null, cnic: form.cnic.trim() || null, visitDays, salesmanId: form.salesmanId || null }),
         })
         toast({ title: 'Outlet Registered ✓', description: `${form.name} geo-tagged with ${coords ? 'GPS location' : 'no location'}` })
       }
@@ -321,6 +328,27 @@ function OutletFormDialog({ open, onOpenChange, onCreated, onSaved, outlet }: {
             <div className="grid gap-1.5"><Label>Phone</Label><Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="+92 3xx xxxxxxx" /></div>
           </div>
           <div className="grid gap-1.5"><Label>Address</Label><Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Area, street..." /></div>
+
+          {/* Task 68: Route Booker assignment — shop jis booker ko assign hogi wo order booking mein
+              sirf usi booker ki shop list mein nazar aayegi (cascading filter) */}
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-2.5">
+            <p className="text-[11px] font-semibold text-slate-700 mb-1.5 flex items-center gap-1"><UserCheck className="h-3.5 w-3.5 text-emerald-600" /> Order Booker (Route) — kis booker ki shop hai?</p>
+            <Select value={form.salesmanId} onValueChange={(v) => setForm({ ...form, salesmanId: v })}>
+              <SelectTrigger className={form.salesmanId ? 'border-emerald-300 bg-white' : 'border-amber-300 bg-white'}>
+                <SelectValue placeholder="Booker select karein..." />
+              </SelectTrigger>
+              <SelectContent>
+                {salesmen.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>{s.name}{s.region ? ` — ${s.region}` : ''}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[10px] text-slate-500 mt-1.5">
+              {form.salesmanId
+                ? `✓ Ye shop order booking mein sirf is booker ki list mein aayegi — order isi ke account par book hoga`
+                : '⚠ Bina booker ki shop order booking mein sab bookers ko nazar aayegi — assign karna best hai'}
+            </p>
+          </div>
 
           {/* Filer / Non-Filer + NTN */}
           <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-2.5">
