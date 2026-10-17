@@ -157,7 +157,7 @@ export function OrdersView() {
                     <TableHead className="hidden md:table-cell">Salesman</TableHead>
                     <TableHead className="hidden lg:table-cell">Date</TableHead>
                     <TableHead className="text-right">Items</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
+                    <TableHead className="text-right">Total Payable</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -173,7 +173,15 @@ export function OrdersView() {
                       <TableCell className="hidden md:table-cell text-slate-600">{o.salesmanName ?? '—'}</TableCell>
                       <TableCell className="hidden lg:table-cell text-slate-500 text-xs">{fmtDate(o.orderDate)}</TableCell>
                       <TableCell className="text-right text-slate-600">{o.itemCount}</TableCell>
-                      <TableCell className="text-right font-semibold">{fmtPKR(o.total)}</TableCell>
+                      <TableCell className="text-right">
+                        {/* Task 77: list par bill ka FINAL amount (Total Payable = Net − TO + GST + Adv Tax) —
+                            pehle sirf goods net (o.total) dikhta tha jo bill ke aakhir ke Net Amount se kam lagta tha;
+                            neeche chhota sub-line goods net bhi dikhata hai jab taxes/TO mojood hon */}
+                        <p className="font-semibold text-slate-900 whitespace-nowrap">{fmtPKR(orderGrandPayable(o))}</p>
+                        {(o.gstTotal ?? 0) > 0 || (o.tradeOfferTotal ?? 0) > 0 || (o.advanceTax ?? 0) > 0 ? (
+                          <p className="text-[10px] text-slate-400 whitespace-nowrap">Net {fmtPKR(o.total)}</p>
+                        ) : null}
+                      </TableCell>
                       <TableCell>
                         <Badge variant="outline" className={`${STATUS_STYLES[o.status] ?? ''} text-[10px] whitespace-nowrap`}>{statusLabel(o.status)}</Badge>
                       </TableCell>

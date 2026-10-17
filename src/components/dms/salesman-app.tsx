@@ -11,6 +11,7 @@ import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR, fmtDate, STATUS_STYLES, statusLabel } from '@/lib/dms-api'
 import type { PJPPlanDTO, ProductDTO, OrderDTO, RecoveryData, RecoveryRowDTO, RecoveryShopDTO, SalesmanPerfDTO } from '@/lib/dms-types'
 import { UnitQtyInputs, splitPcs, fmtQty, packHint } from '@/components/dms/unit-qty'
+import { orderGrandPayable } from '@/lib/dms-order-calc'
 import { DAY_LIST, DAY_LABELS, VisitDayChips } from '@/components/dms/outlets-view'
 import { Route, Store, ShoppingCart, ClipboardList, User, MapPin, LogIn, LogOut, Plus, Trash2, Loader2, CheckCircle2, Navigation, Wallet, Percent, XCircle, HandCoins, CalendarDays, Clock3, Eye, Banknote, Lock, RefreshCw, Play, Square, CloudUpload, WifiOff, ReceiptText, Target } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
@@ -1278,7 +1279,8 @@ function MyOrdersTab() {
               <p className="text-xs text-slate-500 truncate">{o.outletName} • {o.itemCount} items • {fmtDate(o.orderDate)}</p>
             </div>
             <div className="text-right shrink-0">
-              <p className="font-bold text-sm">{fmtPKR(o.total)}</p>
+              {/* Task 77: bill ka final payable (Net − TO + GST + Adv Tax) — goods net nahi */}
+              <p className="font-bold text-sm">{fmtPKR(orderGrandPayable(o))}</p>
               <Badge variant="outline" className={`${STATUS_STYLES[o.status]} text-[9px]`}>{statusLabel(o.status)}</Badge>
             </div>
           </CardContent>
