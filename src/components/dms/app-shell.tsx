@@ -97,59 +97,100 @@ const MODULES: { name: string; icon: typeof LayoutDashboard }[] = [
 
 // Task 71 — sidebar ki grouped list (desktop expanded / collapsed rail / mobile drawer
 // teeno isi ek component se render hote hain — markup duplicate nahi hota).
-function SidebarNav({ modules, activeKey, collapsed, itemClick }: {
+function SidebarNav({ modules, activeKey, collapsed, itemClick, openGroups, toggleGroup }: {
   modules: NavModule[]
   activeKey: string
   collapsed: boolean
   itemClick: (key: string) => (e: React.MouseEvent) => void
+  openGroups: Record<string, boolean>
+  toggleGroup: (name: string) => void
 }) {
   return (
     <>
-      {modules.map((m) => (
-        <div key={m.name}>
-          {collapsed ? (
-            <div className="mx-4 my-2 h-px bg-white/10" aria-hidden />
-          ) : (
-            <div className="px-2.5 pb-1 pt-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">{m.name}</div>
-          )}
-          {m.items.map((n) => {
-            const on = n.key === activeKey
-            if (collapsed) {
-              // Icon-only rail — native title tooltip se label milta hai
-              return (
-                <Link
-                  key={n.key}
-                  href={VIEW_PATH[n.key as NavKey]}
-                  onClick={itemClick(n.key)}
-                  title={n.label}
-                  className={`mx-auto my-0.5 flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-                    on
-                      ? 'bg-gradient-to-br from-emerald-600 to-emerald-500 text-white shadow-lg shadow-emerald-600/25'
-                      : 'text-slate-400 hover:bg-white/5 hover:text-white'
-                  }`}
-                >
-                  <n.icon className="h-4 w-4" />
-                </Link>
-              )
-            }
-            return (
-              <Link
-                key={n.key}
-                href={VIEW_PATH[n.key as NavKey]}
-                onClick={itemClick(n.key)}
-                className={`group/i mt-0.5 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] transition-colors ${
-                  on
-                    ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 font-semibold text-white shadow-lg shadow-emerald-600/20'
-                    : 'font-medium text-slate-400 hover:bg-white/5 hover:text-white'
-                }`}
-              >
-                <n.icon className={`h-4 w-4 shrink-0 ${on ? 'text-white' : 'text-slate-500 group-hover/i:text-emerald-300'}`} />
-                <span className="min-w-0 flex-1 truncate">{n.label}</span>
-              </Link>
-            )
-          })}
-        </div>
-      ))}
+      {modules.map((m) => {
+        // Task 72 — FOLDER/ACCORDION groups (user request): header click se group ka
+        // drop-down khulta/band hota hai (smooth grid-rows animation). Folder ke andar
+        // active page ho aur folder band ho to header par emerald DOT nazar aata hai.
+        const hasActive = m.items.some((i) => i.key === activeKey)
+        if (collapsed) {
+          // Icon-only rail — folders yahan apply nahi hote, group divider + icons
+          return (
+            <div key={m.name}>
+              <div className="mx-4 my-2 h-px bg-white/10" aria-hidden />
+              {m.items.map((n) => {
+                const on = n.key === activeKey
+                return (
+                  <Link
+                    key={n.key}
+                    href={VIEW_PATH[n.key as NavKey]}
+                    onClick={itemClick(n.key)}
+                    title={n.label}
+                    className={`mx-auto my-0.5 flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
+                      on
+                        ? 'bg-gradient-to-br from-emerald-600 to-emerald-500 text-white shadow-lg shadow-emerald-600/25'
+                        : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                    }`}
+                  >
+                    <n.icon className="h-4 w-4" />
+                  </Link>
+                )
+              })}
+            </div>
+          )
+        }
+        const open = openGroups[m.name] ?? false
+        return (
+          <div key={m.name}>
+            {/* Folder header — click se drop-down (chevron rotate + body animate) */}
+            <button
+              type="button"
+              onClick={() => toggleGroup(m.name)}
+              aria-expanded={open}
+              title={`${m.name} — ${m.items.length} pages`}
+              className={`group/h mt-1 flex w-full items-center gap-1.5 rounded-lg px-2.5 py-2 text-[10.5px] font-bold uppercase tracking-widest transition-colors ${
+                open || hasActive ? 'text-slate-300' : 'text-slate-500 hover:bg-white/5 hover:text-slate-200'
+              }`}
+            >
+              <ChevronRight className={`h-3 w-3 shrink-0 transition-transform duration-200 ${open ? 'rotate-90 text-emerald-400' : ''}`} />
+              <span className="min-w-0 flex-1 truncate text-left">{m.name}</span>
+              {hasActive && !open && (
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)]" aria-label="active page andar hai" />
+              )}
+              <span className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold tracking-normal transition-colors ${
+                open ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/5 text-slate-500 group-hover/h:text-slate-400'
+              }`}>
+                {m.items.length}
+              </span>
+            </button>
+            {/* Folder body — grid-rows 0fr→1fr smooth height animation */}
+            <div
+              className="grid transition-[grid-template-rows] duration-200 ease-out"
+              style={{ gridTemplateRows: open ? '1fr' : '0fr' }}
+            >
+              <div className="min-h-0 overflow-hidden">
+                {m.items.map((n) => {
+                  const on = n.key === activeKey
+                  return (
+                    <Link
+                      key={n.key}
+                      href={VIEW_PATH[n.key as NavKey]}
+                      onClick={itemClick(n.key)}
+                      className={`group/i mt-0.5 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] transition-colors ${
+                        on
+                          ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 font-semibold text-white shadow-lg shadow-emerald-600/20'
+                          : 'font-medium text-slate-400 hover:bg-white/5 hover:text-white'
+                      }`}
+                    >
+                      <n.icon className={`h-4 w-4 shrink-0 ${on ? 'text-white' : 'text-slate-500 group-hover/i:text-emerald-300'}`} />
+                      <span className="min-w-0 flex-1 truncate">{n.label}</span>
+                    </Link>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        )
+      })}
     </>
   )
 }
@@ -179,12 +220,53 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
   const [quickOpen, setQuickOpen] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
+  // Task 72 — folder (accordion) open/close state: kaunse module folders khule hain
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
+  const [groupsInit, setGroupsInit] = useState(false)
 
   // Task 65: active view URL se — refresh/back/forward sab par sahi section milta hai
   const activeView = viewFromPath(pathname ?? '/')
   // Task 70: purchase-entry full-page form hai — nav highlight uske parent module
   // (Stock & Catalog) par rakhein, warna koi tab active nazar nahi aata.
   const highlightView = activeView === 'purchase-entry' ? 'products' : activeView
+  // Task 72: active page ka module folder — NAV ke group field se (hooks ke pehle
+  // chahiye kyunki early returns ke baad wala activeModule effects mein allowed nahi)
+  const activeModuleName = useMemo(
+    () => NAV.find((n) => n.key === highlightView)?.group ?? 'Overview',
+    [highlightView]
+  )
+
+  // Task 72: pehli mount par localStorage se folders restore — jo user ne khud khole/
+  // band kiye the wahi state wapis. Kuch save nahi to sab folders band (default),
+  // active folder neeche wale effect se auto-open hoga.
+  useEffect(() => {
+    let saved: Record<string, boolean> | null = null
+    try {
+      const raw = localStorage.getItem('dms_sidebar_groups')
+      if (raw) saved = JSON.parse(raw) as Record<string, boolean>
+    } catch { /* corrupt JSON — default par gir jao */ }
+    queueMicrotask(() => {
+      setOpenGroups(saved ?? {})
+      setGroupsInit(true)
+    })
+  }, [])
+
+  // Task 72: jis module ki page khuli hai uska folder HAMESHA khula (navigation par
+  // auto-open). Baqi folders user ki apni choice par rehte hain. (queueMicrotask —
+  // set-state-in-effect lint rule ke mutabiq, codebase ka established pattern)
+  useEffect(() => {
+    if (!groupsInit) return
+    queueMicrotask(() => {
+      setOpenGroups((prev) => (prev[activeModuleName] ? prev : { ...prev, [activeModuleName]: true }))
+    })
+  }, [activeModuleName, groupsInit])
+
+  // Folder header click — state + localStorage dono update (user ki choice yaad rehti hai)
+  function toggleGroup(name: string) {
+    const next = { ...openGroups, [name]: !openGroups[name] }
+    setOpenGroups(next)
+    try { localStorage.setItem('dms_sidebar_groups', JSON.stringify(next)) } catch {}
+  }
 
   // Task 71: collapsed rail ki choice persist — mount ke baad localStorage se (SSR safe).
   useEffect(() => {
@@ -397,7 +479,7 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
       >
         <SidebarBrand collapsed={collapsed} />
         <nav aria-label="Main navigation" className="sidebar-scroll min-h-0 flex-1 overflow-y-auto px-2.5 pb-4">
-          <SidebarNav modules={modules} activeKey={highlightView ?? ''} collapsed={collapsed} itemClick={guardNavClick} />
+          <SidebarNav modules={modules} activeKey={highlightView ?? ''} collapsed={collapsed} itemClick={guardNavClick} openGroups={openGroups} toggleGroup={toggleGroup} />
         </nav>
         {sidebarFooter(collapsed)}
       </aside>
@@ -418,7 +500,7 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
               </button>
             </div>
             <nav aria-label="Main navigation" className="sidebar-scroll min-h-0 flex-1 overflow-y-auto px-2.5 pb-4">
-              <SidebarNav modules={modules} activeKey={highlightView ?? ''} collapsed={false} itemClick={drawerNavClick} />
+              <SidebarNav modules={modules} activeKey={highlightView ?? ''} collapsed={false} itemClick={drawerNavClick} openGroups={openGroups} toggleGroup={toggleGroup} />
             </nav>
             {sidebarFooter(false)}
           </aside>
