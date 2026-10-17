@@ -491,6 +491,8 @@ export interface SummaryDTO {
   status: string // UNSETTLED | SETTLED
   billsCount: number
   subtotal: number
+  /** Task 80: final payable — unsettled: Σ orderGrandPayable(orders); settled: Σ posted (cash+credit) */
+  payable?: number
   settledCash: number
   settledCredit: number
   settledReturns: number
@@ -581,6 +583,9 @@ export interface SettlementRowDTO {
   billAmount: number
   returnAmount: number
   advanceTax?: number
+  /** Task 45: effective GST/TO (return reversal ke baad) — Task 80: settlement sheet Net Payable isi se */
+  gstTotal?: number
+  tradeOfferTotal?: number
   cashAmount: number
   creditAmount: number
   status: string

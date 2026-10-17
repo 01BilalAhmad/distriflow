@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
 import { fulfillOrder } from '@/lib/dms-fulfill'
+import { orderGrandPayable } from '@/lib/dms-order-calc'
 
 /** GET /api/summaries?userId=&status= — list delivery summaries (scoped by role) */
 export async function GET(req: Request) {
@@ -27,7 +28,7 @@ export async function GET(req: Request) {
         salesman: { select: { name: true } },
         distributor: { select: { businessName: true } },
         warehouse: { select: { name: true } },
-        orders: { select: { id: true } },
+        orders: { select: { total: true, tradeOfferTotal: true, gstTotal: true, advanceTax: true } },
         settlements: true,
       },
       orderBy: { createdAt: 'desc' },
@@ -35,7 +36,13 @@ export async function GET(req: Request) {
     })
 
     return Response.json({
-      summaries: summaries.map((s) => ({
+      summaries: summaries.map((s) => {
+        // Task 80: card/table par FINAL payable — unsettled: booking chain (grand payable);
+        // settled: posted net (cash + credit — late-return ke baad bhi exact)
+        const payable = s.settlements.length > 0
+          ? Math.round(s.settlements.reduce((a, st) => a + st.cashAmount + st.creditAmount, 0) * 100) / 100
+          : Math.round(s.orders.reduce((a, o) => a + orderGrandPayable(o), 0) * 100) / 100
+        return {
         id: s.id,
         summaryNo: s.summaryNo,
         salesmanName: s.salesman.name,
@@ -46,12 +53,14 @@ export async function GET(req: Request) {
         status: s.status,
         billsCount: s.orders.length,
         subtotal: s.subtotal,
+        payable,
         settledCash: s.settledCash,
         settledCredit: s.settledCredit,
         settledReturns: s.settledReturns,
         settledAt: s.settledAt ? new Date(s.settledAt).toISOString() : null,
         settledByName: s.settledByName,
-      })),
+        }
+      }),
     })
   } catch (e) {
     console.error(e)

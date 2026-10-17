@@ -150,7 +150,7 @@ export function SummariesView() {
                       <TableCell className="hidden md:table-cell text-xs text-slate-500">
                         {fmtDate(s.orderDate)} → <b className="text-emerald-700">{fmtDate(s.deliveryDate)}</b>
                       </TableCell>
-                      <TableCell className="text-right font-semibold">{fmtPKR(s.subtotal)}</TableCell>
+                      <TableCell className="text-right font-semibold">{fmtPKR(s.payable ?? s.subtotal)}</TableCell>
                       <TableCell>
                         <Badge variant="outline" className={`${STATUS_STYLES[s.status] ?? ''} text-[10px] whitespace-nowrap`}>{statusLabel(s.status)}</Badge>
                         {s.status === 'SETTLED' && (

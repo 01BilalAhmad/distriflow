@@ -838,12 +838,16 @@ export function CblSettlementDoc({ detail }: { detail: SummaryDetailDTO }) {
     const s = st.get(o.id)
     const bill = s?.billAmount ?? o.total
     const ret = s?.returnAmount ?? (o.returns ?? []).reduce((a, r) => a + r.totalValue, 0)
+    // Task 80: effective GST/TO (settlement row se — return reversal ke baad ka) — pehle
+    // net sirf bill − ret + tax tha is liye Net Payable aur Udhaar (ledger) match nahi karte the
+    const gst = s?.gstTotal ?? o.gstTotal ?? 0
+    const to = s?.tradeOfferTotal ?? o.tradeOfferTotal ?? 0
     const tax = s?.advanceTax ?? o.advanceTax ?? 0
     const cash = s?.cashAmount ?? 0
     const credit = s?.creditAmount ?? 0
     return {
-      i, o, bill, ret, tax, cash, credit,
-      net: Math.round((bill - ret + tax) * 100) / 100,
+      i, o, bill, ret, gst, to, tax, cash, credit,
+      net: Math.round((bill - ret + gst - to + tax) * 100) / 100,
       type: s?.status ?? 'CASH',
     }
   })
@@ -851,6 +855,8 @@ export function CblSettlementDoc({ detail }: { detail: SummaryDetailDTO }) {
   const T = {
     bills: rows.reduce((a, r) => a + r.bill, 0),
     ret: rows.reduce((a, r) => a + r.ret, 0),
+    gst: rows.reduce((a, r) => a + r.gst, 0),
+    to: rows.reduce((a, r) => a + r.to, 0),
     tax: rows.reduce((a, r) => a + r.tax, 0),
     net: rows.reduce((a, r) => a + r.net, 0),
     cash: rows.reduce((a, r) => a + r.cash, 0),
@@ -894,9 +900,11 @@ export function CblSettlementDoc({ detail }: { detail: SummaryDetailDTO }) {
         <table style={{ fontSize: 9 }}>
           <colgroup>
             {/* Type col 8% — "Udhaar" label 4% mein "Udha/ar" break ho raha tha */}
-            <col style={{ width: '5%' }} /><col style={{ width: '10%' }} /><col style={{ width: '19%' }} />
-            <col style={{ width: '11%' }} /><col style={{ width: '10%' }} /><col style={{ width: '8%' }} />
-            <col style={{ width: '11%' }} /><col style={{ width: '11%' }} /><col style={{ width: '7%' }} /><col style={{ width: '8%' }} />
+            {/* Task 80: GST column add — Net Payable ab bill−ret+GST−TO+tax hai, breakup nazar aaye */}
+            <col style={{ width: '4%' }} /><col style={{ width: '9%' }} /><col style={{ width: '17%' }} />
+            <col style={{ width: '10%' }} /><col style={{ width: '8%' }} /><col style={{ width: '8%' }} />
+            <col style={{ width: '7%' }} /><col style={{ width: '11%' }} /><col style={{ width: '10%' }} />
+            <col style={{ width: '7%' }} /><col style={{ width: '9%' }} />
           </colgroup>
           <thead>
             <tr>
@@ -905,6 +913,7 @@ export function CblSettlementDoc({ detail }: { detail: SummaryDetailDTO }) {
               <th style={{ textAlign: 'left' }}>Shop Name</th>
               <th>Bill Amount</th>
               <th>Stock Return</th>
+              <th>GST</th>
               <th>Adv Tax</th>
               <th>Net Payable</th>
               <th>Cash Received</th>
@@ -920,6 +929,7 @@ export function CblSettlementDoc({ detail }: { detail: SummaryDetailDTO }) {
                 <td style={{ textAlign: 'left' }}>{r.o.outletName.toUpperCase()} [ {r.o.outletCode} ]</td>
                 <Num v={r.bill} dec={2} />
                 <Num v={r.ret} dec={2} />
+                <Num v={r.gst} dec={2} />
                 <Num v={r.tax} dec={2} />
                 <Num v={r.net} dec={2} />
                 <Num v={r.cash} dec={2} />
@@ -931,6 +941,7 @@ export function CblSettlementDoc({ detail }: { detail: SummaryDetailDTO }) {
               <td colSpan={3} style={{ textAlign: 'right' }}>Total ({rows.length} shops)</td>
               <Num v={T.bills} dec={2} />
               <Num v={T.ret} dec={2} />
+              <Num v={T.gst} dec={2} />
               <Num v={T.tax} dec={2} />
               <Num v={T.net} dec={2} />
               <Num v={T.cash} dec={2} />
@@ -939,6 +950,11 @@ export function CblSettlementDoc({ detail }: { detail: SummaryDetailDTO }) {
             </tr>
           </tbody>
         </table>
+        {(T.gst > 0 || T.to > 0) && (
+          <p style={{ fontSize: 7.5, marginTop: 2, textAlign: 'right', fontStyle: 'italic' }}>
+            Net Payable = Bill − Stock Return + GST − Trade Offer + Adv Tax (Trade Offer breakup niche summary mein)
+          </p>
+        )}
 
         {/* SECTION B: item-wise return detail */}
         <p className="mb-1 mt-4 text-[11px] font-bold uppercase" style={{ letterSpacing: 0.5 }}>B) Return Detail (Item Wise)</p>
@@ -997,6 +1013,8 @@ export function CblSettlementDoc({ detail }: { detail: SummaryDetailDTO }) {
               <tbody>
                 <tr><td style={{ textAlign: 'center' }}>Total Bill Amount:</td><td className="num" style={{ width: 95 }}>{fmt2(T.bills)}</td></tr>
                 <tr><td style={{ textAlign: 'center' }}>Less: Stock Returns:</td><td className="num">- {fmt2(T.ret)}</td></tr>
+                {T.gst > 0 && <tr><td style={{ textAlign: 'center' }}>Add: GST:</td><td className="num">+ {fmt2(T.gst)}</td></tr>}
+                {T.to > 0 && <tr><td style={{ textAlign: 'center' }}>Less: Trade Offer:</td><td className="num">- {fmt2(T.to)}</td></tr>}
                 {T.tax > 0 && <tr><td style={{ textAlign: 'center' }}>Add: Advance Tax:</td><td className="num">+ {fmt2(T.tax)}</td></tr>}
                 <tr style={{ fontWeight: 'bold' }}><td style={{ textAlign: 'center' }}>Net Payable:</td><td className="num" style={{ fontWeight: 'bold' }}>{fmt2(T.net)}</td></tr>
                 <tr><td style={{ textAlign: 'center', fontWeight: 'bold' }}>Cash Jama Karwaya:</td><td className="num" style={{ fontWeight: 'bold' }}>{fmt2(T.cash)}</td></tr>

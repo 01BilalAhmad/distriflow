@@ -615,6 +615,7 @@ export function SettlementView() {
   const totalCredit = rows.reduce((s, r) => s + r.credit, 0)
   const totalReturns = rows.reduce((s, r) => s + r.returnValue, 0)
   const totalTax = rows.reduce((s, r) => s + r.tax, 0)
+  const totalPayable = rows.reduce((s, r) => s + r.net, 0)
 
   function setCash(orderId: string, val: string) { setCashInputs({ ...cashInputs, [orderId]: { cash: val } }) }
   function fullCash(orderId: string, net: number) { setCash(orderId, String(net)) }
@@ -730,7 +731,7 @@ export function SettlementView() {
                         <span className="font-semibold text-emerald-700 text-sm">{s.summaryNo}</span>
                         <Badge variant="outline" className={`${STATUS_STYLES[s.status]} text-[9px]`}>{statusLabel(s.status)}</Badge>
                       </div>
-                      <p className="text-xs text-slate-600 mt-0.5">{s.salesmanName} • {s.billsCount} bills • {fmtPKR(s.subtotal)}</p>
+                      <p className="text-xs text-slate-600 mt-0.5">{s.salesmanName} • {s.billsCount} bills • <span className="font-semibold">Payable {fmtPKR(s.payable ?? s.subtotal)}</span></p>
                       <p className="text-[10px] text-slate-400">Delivery: {fmtDate(s.deliveryDate)}</p>
                     </button>
                   ))}
@@ -762,7 +763,7 @@ export function SettlementView() {
                           </Button>
                         </div>
                       </div>
-                      <p className="text-xs text-slate-600 mt-0.5">{s.salesmanName} • {s.billsCount} bills</p>
+                      <p className="text-xs text-slate-600 mt-0.5">{s.salesmanName} • {s.billsCount} bills • <span className="font-semibold">Payable {fmtPKR(s.payable ?? s.subtotal)}</span></p>
                       <p className="text-[11px] mt-1">
                         <span className="text-emerald-700 font-semibold">Cash {fmtPKR(s.settledCash)}</span>
                         {' • '}
@@ -795,7 +796,7 @@ export function SettlementView() {
                 <div className="px-4 py-3 border-b bg-slate-50/70 flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="font-bold text-slate-800">{detail.summaryNo} — {detail.salesmanName}</p>
-                    <p className="text-xs text-slate-500">Delivery: {fmtDate(detail.deliveryDate)} • {detail.orders.length} invoices • Total {fmtPKR(detail.subtotal)}</p>
+                    <p className="text-xs text-slate-500">Delivery: {fmtDate(detail.deliveryDate)} • {detail.orders.length} invoices • Payable <b className="text-slate-700">{fmtPKR(totalPayable)}</b></p>
                   </div>
                   <Badge variant="outline" className={STATUS_STYLES[detail.status]}>{statusLabel(detail.status)}</Badge>
                 </div>
@@ -816,8 +817,8 @@ export function SettlementView() {
                           <span className="text-[10px] font-bold text-slate-400 uppercase mt-1 shrink-0">Payable</span>
                           <div className="text-right min-w-0">
                             <p className="font-semibold text-slate-900">{fmtPKR(r.net)}</p>
-                            {(r.returnValue > 0 || r.tax > 0) && (
-                              <p className="text-[10px] text-orange-600">Bill {fmtPKR(r.bill)}{r.returnValue > 0 ? ` − Ret ${fmtPKR(r.returnValue)}` : ''}{r.tax > 0 ? ` + Tax ${fmtPKR(r.tax)}` : ''}{r.taxReversal > 0 ? <span className="text-blue-500"> (−{fmtPKR(r.taxReversal)} rev)</span> : ''}</p>
+                            {(r.returnValue > 0 || r.tax > 0 || r.gst > 0 || r.to > 0) && (
+                              <p className="text-[10px] text-orange-600">Bill {fmtPKR(r.bill)}{r.returnValue > 0 ? ` − Ret ${fmtPKR(r.returnValue)}` : ''}{r.gst > 0 ? ` + GST ${fmtPKR(r.gst)}` : ''}{r.to > 0 ? ` − TO ${fmtPKR(r.to)}` : ''}{r.tax > 0 ? ` + Tax ${fmtPKR(r.tax)}` : ''}{r.taxReversal > 0 ? <span className="text-blue-500"> (−{fmtPKR(r.taxReversal)} rev)</span> : ''}</p>
                             )}
                             {r.credit > 0 && <p className="text-[10px] text-red-600 font-semibold">Udhaar {fmtPKR(r.credit)}</p>}
                           </div>
@@ -860,10 +861,10 @@ export function SettlementView() {
                             <p className="text-[11px] text-slate-400">{r.order.orderNo} • {r.order.channel}</p>
                           </TableCell>
                           <TableCell className="text-right">
-                            {r.returnValue > 0 || r.tax > 0 ? (
+                            {r.returnValue > 0 || r.tax > 0 || r.gst > 0 || r.to > 0 ? (
                               <>
                                 <p className="font-semibold">{fmtPKR(r.net)}</p>
-                                <p className="text-[10px] text-orange-600">Bill {fmtPKR(r.bill)}{r.returnValue > 0 ? ` − Ret ${fmtPKR(r.returnValue)}` : ''}{r.tax > 0 ? ` + Tax ${fmtPKR(r.tax)}` : ''}{r.taxReversal > 0 ? <span className="text-blue-500"> (−{fmtPKR(r.taxReversal)} rev)</span> : ''}</p>
+                                <p className="text-[10px] text-orange-600">Bill {fmtPKR(r.bill)}{r.returnValue > 0 ? ` − Ret ${fmtPKR(r.returnValue)}` : ''}{r.gst > 0 ? ` + GST ${fmtPKR(r.gst)}` : ''}{r.to > 0 ? ` − TO ${fmtPKR(r.to)}` : ''}{r.tax > 0 ? ` + Tax ${fmtPKR(r.tax)}` : ''}{r.taxReversal > 0 ? <span className="text-blue-500"> (−{fmtPKR(r.taxReversal)} rev)</span> : ''}</p>
                               </>
                             ) : (
                               <p className="font-semibold">{fmtPKR(r.bill)}</p>

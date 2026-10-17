@@ -129,6 +129,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
           billAmount: st.billAmount,
           returnAmount: st.returnAmount,
           advanceTax: st.advanceTax,
+          gstTotal: st.gstTotal, // Task 80: settlement sheet Net Payable = bill − ret + GST − TO + tax
+          tradeOfferTotal: st.tradeOfferTotal,
           cashAmount: st.cashAmount,
           creditAmount: st.creditAmount,
           status: st.status,
