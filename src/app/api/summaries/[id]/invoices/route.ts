@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
 import { orderGrandPayable } from '@/lib/dms-order-calc'
+import { getDistributorAddress } from '@/lib/dms-settings'
 
 /**
  * GET /api/summaries/[id]/invoices
@@ -25,6 +26,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       },
     })
     if (!summary) return jsonError('Summary not found', 404)
+    // Task 78b: bill print header par Address (AppSetting KV — settings page se, zero migration)
+    const distributorAddress = await getDistributorAddress(summary.distributorId)
 
     const invoices = summary.orders.map((o) => ({
       orderNo: o.orderNo,
@@ -43,6 +46,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       distributorCity: summary.distributor.city,
       // Task 78: bill print header par Cell No — settings page se manage hota hai
       distributorPhone: summary.distributor.user?.phone ?? null,
+      // Task 78b: Name → Address → Cell No (bill header ka naya order)
+      distributorAddress,
       summaryNo: summary.summaryNo,
       status: o.status,
       subtotal: o.subtotal,

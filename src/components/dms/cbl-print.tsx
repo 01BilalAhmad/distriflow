@@ -480,6 +480,8 @@ export interface InvoiceData {
   distributorCity?: string | null
   /** Task 78: distributor ka cell number (settings page se) — bill header par naam ke neeche */
   distributorPhone?: string | null
+  /** Task 78b: distributor ka poora address (AppSetting KV, settings page se) — Name → Address → Cell No */
+  distributorAddress?: string | null
   summaryNo?: string | null
   status: string
   subtotal: number
@@ -627,11 +629,15 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
     <div className="cbl-doc">
       <div className="cbl-page bg-white px-8 py-6">
         {/* header — center: distributor + address line (real invoice jaisa underlined).
-            Task 78: naam ki SIRF 1 line (user: "Name ki ak line hi chahiye Jo 1st wali hy") —
-            2nd repeated uppercase line REMOVE, uski jagah Cell No (settings page se manage).
-            Phone na seta ho to sirf naam line dikhti hai. */}
+            Task 78 FINAL (user: "pehly Name us k nichy Address or fr Cell No") —
+            naam ki SIRF 1 line, uske neeche ADDRESS (settings page se, AppSetting KV),
+            phir Cell No. 2nd repeated naam line pehle hi hata di gayi hai.
+            Address/Phone na seta ho to woh line print hi nahi hoti. */}
         <div className="text-center">
           <p className="text-[17px] font-bold underline">{inv.distributorName} ({inv.distributorCity ?? ''})</p>
+          {inv.distributorAddress?.trim() ? (
+            <p className="mt-0.5 text-[11px] font-semibold">{inv.distributorAddress.trim()}</p>
+          ) : null}
           {inv.distributorPhone?.trim() ? (
             <p className="mt-1 text-[11px] font-bold">Cell No: {inv.distributorPhone.trim()}</p>
           ) : null}

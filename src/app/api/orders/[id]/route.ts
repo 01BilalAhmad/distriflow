@@ -2,7 +2,7 @@ import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
 import { fulfillOrder } from '@/lib/dms-fulfill'
 import { computeOrderLines, recalcManualDiscount, applyManualMerge, orderGrandPayable, type CalcIncomingItem } from '@/lib/dms-order-calc'
-import { advanceTaxFor, getTaxRates } from '@/lib/dms-settings'
+import { advanceTaxFor, getTaxRates, getDistributorAddress } from '@/lib/dms-settings'
 import { getAvailableToPromise, groupQtyByProduct, oversellMessage } from '@/lib/dms-inventory'
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -20,6 +20,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       },
     })
     if (!order) return jsonError('Order not found', 404)
+    // Task 78b: bill print header par Address (AppSetting KV — settings page se, zero migration)
+    const distributorAddress = await getDistributorAddress(order.distributorId)
 
     return Response.json({
       order: {
@@ -31,6 +33,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         distributorCity: order.distributor.city,
         // Task 78: bill print header par Cell No — settings page se manage hota hai
         distributorPhone: order.distributor.user?.phone ?? null,
+        // Task 78b: Name → Address → Cell No (bill header ka naya order)
+        distributorAddress,
         summaryNo: order.summary?.summaryNo ?? null,
         summaryDeliveryDate: order.summary ? new Date(order.summary.deliveryDate).toISOString() : null,
         status: order.status,

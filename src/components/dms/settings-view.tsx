@@ -9,7 +9,7 @@ import { Switch } from '@/components/ui/switch'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useDMS, saveSession } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
-import { Loader2, Save, Store, Receipt, Phone, Percent } from 'lucide-react'
+import { Loader2, Save, Store, Receipt, Phone, Percent, MapPin } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
 /**
@@ -18,9 +18,10 @@ import { toast } from '@/hooks/use-toast'
  *
  * 2 sections:
  *  1. Distributor Profile — Distribution (business) name + Distributor name + Cell number +
- *     City. Ye wahi fields hain jo BILL PRINT ke header par chapte hain (Cell No naam ke
- *     neeche). Storage: businessName/city → DistributorProfile, name/phone → User
- *     (koi naya DB column nahi).
+ *     Address + City. Ye wahi fields hain jo BILL PRINT ke header par is order mein chapte
+ *     hain: Name → Address → Cell No (user: "pehly Name us k nichy Address or fr Cell No").
+ *     Storage: businessName/city → DistributorProfile, name/phone → User,
+ *     address → AppSetting KV (distributorAddress — zero migration).
  *  2. Bill & Tax — Filer/Non-Filer advance tax rates + GST on/off + GST rate
  *     (yehi rates order booking + purchase invoice use karte hain).
  */
@@ -29,6 +30,7 @@ interface ProfileForm {
   businessName: string
   distributorName: string
   phone: string
+  address: string
   city: string
 }
 
@@ -45,7 +47,7 @@ export function SettingsView() {
   const [loading, setLoading] = useState(true)
   const [savingProfile, setSavingProfile] = useState(false)
   const [savingTax, setSavingTax] = useState(false)
-  const [profile, setProfile] = useState<ProfileForm>({ businessName: '', distributorName: '', phone: '', city: '' })
+  const [profile, setProfile] = useState<ProfileForm>({ businessName: '', distributorName: '', phone: '', address: '', city: '' })
   const [tax, setTax] = useState<TaxForm>({ filerTaxRate: '0.5', nonFilerTaxRate: '2.5', gstEnabled: true, gstRate: '18' })
 
   async function load() {
@@ -54,12 +56,13 @@ export function SettingsView() {
     try {
       const res = await api<{
         settings: { filerTaxRate: number; nonFilerTaxRate: number; gstEnabled: boolean; gstRate: number }
-        profile: { distributorName: string; phone: string; businessName: string; city: string }
+        profile: { distributorName: string; phone: string; businessName: string; city: string; address: string }
       }>(`/api/settings?userId=${user.id}`)
       setProfile({
         businessName: res.profile.businessName ?? '',
         distributorName: res.profile.distributorName ?? '',
         phone: res.profile.phone ?? '',
+        address: res.profile.address ?? '',
         city: res.profile.city ?? '',
       })
       setTax({
@@ -96,6 +99,7 @@ export function SettingsView() {
           businessName: profile.businessName.trim(),
           distributorName: profile.distributorName.trim(),
           phone: profile.phone.trim(),
+          address: profile.address.trim(),
           city: profile.city.trim(),
         }),
       })
@@ -104,13 +108,14 @@ export function SettingsView() {
         businessName: res.profile.businessName ?? p.businessName,
         distributorName: res.profile.distributorName ?? p.distributorName,
         phone: res.profile.phone ?? p.phone,
+        address: res.profile.address ?? p.address,
         city: res.profile.city ?? p.city,
       }))
       // Sidebar/topbar ka naam + phone live update (localStorage session bhi)
       const next = { ...user, name: res.profile.distributorName || user.name, phone: res.profile.phone || null }
       setUser(next)
       saveSession(next)
-      toast({ title: 'Profile Save ✓', description: 'Ab naya print Cell No ke sath aayega' })
+      toast({ title: 'Profile Save ✓', description: 'Ab naya print Name → Address → Cell No ke sath aayega' })
     } catch (e) {
       toast({ title: 'Error', description: e instanceof Error ? e.message : 'Save failed', variant: 'destructive' })
     } finally {
@@ -182,7 +187,7 @@ export function SettingsView() {
               Distributor Profile
             </CardTitle>
             <CardDescription>
-              Ye details <b>bill print</b> ke header par chapte hain — Cell No naam ke neeche &ldquo;Cell No:&rdquo; ki tarah
+              Ye details <b>bill print</b> ke header par chapte hain — Name ke neeche Address, phir &ldquo;Cell No:&rdquo;
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3.5">
@@ -199,6 +204,10 @@ export function SettingsView() {
                 <Label htmlFor="phone" className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 text-slate-400" />Cell Number</Label>
                 <Input id="phone" value={profile.phone} onChange={(e) => setProfile((p) => ({ ...p, phone: e.target.value }))} placeholder="03001234567" inputMode="tel" />
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="address" className="flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-slate-400" />Address</Label>
+              <Input id="address" value={profile.address} onChange={(e) => setProfile((p) => ({ ...p, address: e.target.value }))} placeholder="e.g. Main Bazar Road, Near Jamia Masjid" />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="city">City</Label>

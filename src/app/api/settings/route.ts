@@ -1,6 +1,6 @@
 import { db } from '@/lib/db'
 import { jsonError, tenantProfileId, distributorTenant } from '@/lib/dms-scope'
-import { getTaxRates, getGstSettings, TAX_KEYS, GST_KEYS } from '@/lib/dms-settings'
+import { getTaxRates, getGstSettings, getDistributorAddress, setDistributorAddress, TAX_KEYS, GST_KEYS } from '@/lib/dms-settings'
 
 /** Per-tenant settings (Task 23) — GET ?userId= => us distributor ke apne tax/GST rates.
  * Task 78: ab profile (distribution name, distributor name, cell, city) bhi — bill print isi se. */
@@ -9,12 +9,13 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url)
     const userId = searchParams.get('userId')
     const tenantId = userId ? await tenantProfileId(userId) : null
-    const [rates, gst, user] = await Promise.all([
+    const [rates, gst, user, address] = await Promise.all([
       getTaxRates(tenantId),
       getGstSettings(tenantId),
       userId
         ? db.user.findUnique({ where: { id: userId }, include: { profile: true } })
         : null,
+      getDistributorAddress(tenantId),
     ])
     return Response.json({
       settings: {
@@ -24,11 +25,13 @@ export async function GET(req: Request) {
         gstRate: gst.rate,
       },
       // Task 78: distributor profile — Settings page isi se form fill karta hai
+      // Task 78b: address bhi (AppSetting KV) — bill header Name → Address → Cell No
       profile: {
         distributorName: user?.name ?? '',
         phone: user?.phone ?? '',
         businessName: user?.profile?.businessName ?? '',
         city: user?.profile?.city ?? '',
+        address,
       },
     })
   } catch (e) {
@@ -43,7 +46,7 @@ export async function GET(req: Request) {
 export async function PUT(req: Request) {
   try {
     const body = await req.json()
-    const { userId, filerTaxRate, nonFilerTaxRate, gstEnabled, gstRate, distributorName, phone, businessName, city } = body as {
+    const { userId, filerTaxRate, nonFilerTaxRate, gstEnabled, gstRate, distributorName, phone, businessName, city, address } = body as {
       userId: string
       filerTaxRate?: number
       nonFilerTaxRate?: number
@@ -53,6 +56,7 @@ export async function PUT(req: Request) {
       phone?: string
       businessName?: string
       city?: string
+      address?: string
     }
     if (!userId) return jsonError('userId required')
 
@@ -67,11 +71,17 @@ export async function PUT(req: Request) {
     const pPhone = typeof phone === 'string' ? phone.trim() : undefined
     const pBiz = typeof businessName === 'string' ? businessName.trim() : undefined
     const pCity = typeof city === 'string' ? city.trim() : undefined
+    const pAddr = typeof address === 'string' ? address.trim() : undefined
     if (pName !== undefined && !pName) return jsonError('Distributor ka naam khali nahi ho sakta')
     if (pBiz !== undefined && !pBiz) return jsonError('Distribution (business) ka naam khali nahi ho sakta')
     if (pPhone !== undefined && pPhone && !/^[0-9+\-\s()]{7,20}$/.test(pPhone)) {
       return jsonError('Cell number 7-20 digits ka hona chahiye (03001234567 ya +92 300 1234567)')
     }
+    if (pAddr !== undefined && pAddr.length > 200) {
+      return jsonError('Address 200 characters se zyada na ho')
+    }
+    // Task 78b: address AppSetting KV mein (zero migration) — khali value purani line hata deta hai
+    if (pAddr !== undefined) await setDistributorAddress(tenantId, pAddr)
     if (pName !== undefined || pPhone !== undefined) {
       await db.user.update({
         where: { id: userId },
@@ -119,7 +129,7 @@ export async function PUT(req: Request) {
       return jsonError(err instanceof Error ? err.message : 'Invalid setting')
     }
 
-    const [rates, gst] = await Promise.all([getTaxRates(tenantId), getGstSettings(tenantId)])
+    const [rates, gst, freshAddr] = await Promise.all([getTaxRates(tenantId), getGstSettings(tenantId), getDistributorAddress(tenantId)])
     const fresh = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
     return Response.json({
       settings: {
@@ -133,6 +143,7 @@ export async function PUT(req: Request) {
         phone: fresh?.phone ?? '',
         businessName: fresh?.profile?.businessName ?? '',
         city: fresh?.profile?.city ?? '',
+        address: freshAddr,
       },
     })
   } catch (e) {

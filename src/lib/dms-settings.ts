@@ -52,3 +52,32 @@ export async function getGstSettings(tenantId?: string | null): Promise<GstSetti
   const rate = Number.isFinite(rateNum) && rateNum >= 0 && rateNum <= 100 ? rateNum : DEFAULT_GST.rate
   return { enabled, rate }
 }
+
+// ============ DISTRIBUTOR PROFILE extras (Task 78) ============
+// Address DistributorProfile/User model mein nahi hai — production Neon schema sync risk se
+// bachne ke liye AppSetting KV use kiya (tax rates/GST jaisa hi pattern, ZERO migration).
+
+export const PROFILE_KEYS = {
+  address: 'distributorAddress',
+} as const
+
+/** Distributor ka poora address — bill print header par naam ke neeche (settings page se manage) */
+export async function getDistributorAddress(tenantId?: string | null): Promise<string> {
+  if (!tenantId) return ''
+  const row = await db.appSetting.findUnique({ where: { key_distributorId: { key: PROFILE_KEYS.address, distributorId: tenantId } } })
+  return row?.value?.trim() ?? ''
+}
+
+/** Settings page save par address upsert (empty string par purani value delete — khali = print par line nahi) */
+export async function setDistributorAddress(tenantId: string, address: string) {
+  const value = address.trim()
+  if (!value) {
+    await db.appSetting.deleteMany({ where: { key: PROFILE_KEYS.address, distributorId: tenantId } })
+    return
+  }
+  await db.appSetting.upsert({
+    where: { key_distributorId: { key: PROFILE_KEYS.address, distributorId: tenantId } },
+    update: { value },
+    create: { key: PROFILE_KEYS.address, value, distributorId: tenantId },
+  })
+}
