@@ -6,8 +6,8 @@ import { useMemo, useState } from 'react'
 import { useDMS } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
 import {
-  FilterBar, useRangeFilter, KpiRow, DataTable, SectionCard, CSVButton, PrintButton,
-  downloadCSV, printReport, useReport, fmtMoney, rangeLabel, type Col, type Option,
+  FilterBar, useRangeFilter, KpiRow, DataTable, SectionCard, ExportButtons,
+  useReport, fmtMoney, rangeLabel, type Col, type Option,
 } from './reports-kit'
 
 interface ProdRow extends Record<string, unknown> {
@@ -99,19 +99,17 @@ export function SalesProfitTab() {
   const rows = view === 'product' ? (data?.productWise ?? []) : view === 'booker' ? (data?.bookerWise ?? []) : (data?.companyWise ?? [])
   const curCols = cols[view] as Col<Record<string, unknown>>[]
 
-  const csvRows = rows.map((r) => curCols.map((c) => String((r as Record<string, unknown>)[c.key] ?? '')))
-
-  const doPrint = () => {
-    printReport({
-      title: 'Sales & Profit Report',
-      subtitle: `View: ${view.toUpperCase()}${booker ? ' • Filtered' : ''}`,
-      distributor: user?.profile?.businessName ?? '—',
-      period: rangeLabel(range),
-      cols: curCols.map((c) => ({ label: c.label, align: c.align })),
-      rows: rows.map((r) => curCols.map((c) => String((r as Record<string, unknown>)[c.key] ?? ''))),
-      totalsRow: curCols.map((c, i) => (i === 0 ? 'TOTAL' : c.total ? fmtTotal(rows as Record<string, unknown>[], c.key) : '')),
-      footerNote: 'Cost basis: purchase invoices weighted average • Free units ki cost included • Returns net effect included',
-    })
+  // Task 69: ek hi export opts — Excel + PDF + CSV + Print sab isi se bante hain
+  const exportOpts = {
+    title: 'Sales & Profit Report',
+    subtitle: `View: ${view.toUpperCase()}${booker ? ' • Filtered' : ''}`,
+    distributor: user?.profile?.businessName ?? '—',
+    period: rangeLabel(range),
+    filename: `sales-profit-${view}-${range.from}_${range.to}`,
+    cols: curCols.map((c) => ({ label: c.label, align: c.align, money: c.money })),
+    rows: rows.map((r) => curCols.map((c) => ((r as Record<string, unknown>)[c.key] ?? '') as string | number)),
+    totalsRow: curCols.map((c, i) => (i === 0 ? 'TOTAL' : c.total ? fmtTotal(rows as Record<string, unknown>[], c.key) : '')),
+    footerNote: 'Cost basis: purchase invoices weighted average • Free units ki cost included • Returns net effect included',
   }
 
   return (
@@ -145,8 +143,7 @@ export function SalesProfitTab() {
                 </button>
               ))}
             </div>
-            <CSVButton onClick={() => downloadCSV(`sales-profit-${view}-${range.from}_${range.to}`, curCols.map((c) => c.label), csvRows)} />
-            <PrintButton onClick={doPrint} />
+            <ExportButtons opts={exportOpts} />
           </div>
         }
       >

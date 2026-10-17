@@ -25,14 +25,32 @@ export const VIEW_PATH: Record<ViewKey, string> = {
   'field-force': '/field-force',
   schemes: '/schemes',
   returns: '/returns',
+  // Task 69 — Reports apna poora module: har report ka apna URL (bookmark/copy-link friendly)
   reports: '/reports',
+  'reports-sales-profit': '/reports/sales-profit',
+  'reports-zero-purchase': '/reports/zero-purchase',
+  'reports-tax': '/reports/tax',
+  'reports-recovery': '/reports/recovery',
+  'reports-targets': '/reports/targets',
+  'reports-stock': '/reports/stock',
+  'reports-booker-perf': '/reports/booker-perf',
+  'reports-company-purchase': '/reports/company-purchase',
+  'reports-returns-claims': '/reports/returns-claims',
+  'reports-top-shops': '/reports/top-shops',
   'sales-app': '/sales-app',
 }
 
-/** pathname → ViewKey (pehla segment). Unknown ho to null — shell home par bhej dega. */
+/** pathname → ViewKey (pehla segment; /reports/<tab> 2-segment special case).
+ * Unknown ho to null — shell home par bhej dega. */
 export function viewFromPath(pathname: string): ViewKey | null {
   if (!pathname || pathname === '/') return 'dashboard'
-  const seg = '/' + pathname.replace(/^\/+/, '').split('/')[0]
+  const parts = pathname.replace(/^\/+/, '').split('/')
+  const seg = '/' + parts[0]
+  // Task 69: /reports/sales-profit jaisa 2-segment path pehle report sub-key se match karo
+  if (seg === '/reports' && parts[1]) {
+    const sub = ('reports-' + parts[1]) as ViewKey
+    if (sub !== 'reports' && VIEW_PATH[sub]) return sub
+  }
   for (const key of Object.keys(VIEW_PATH) as ViewKey[]) {
     const p = VIEW_PATH[key]
     if (p !== '/' && p === seg) return key

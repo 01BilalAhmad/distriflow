@@ -35,7 +35,7 @@ import {
   LayoutDashboard, ShoppingCart, Warehouse, Package, Store, Network, Route,
   Users, Gift, Undo2, BarChart3, Package2, LogOut, Building2,
   ClipboardList, FileStack, Wallet, BookText, HandCoins, Landmark,
-  Database, Map as MapIcon,
+  Database, Map as MapIcon, TrendingUp, Receipt, Target, Boxes,
 } from 'lucide-react'
 
 // group = module ka naam (primary tab) — items us module ke sub-nav tiles isi order mein
@@ -52,11 +52,22 @@ const NAV: { key: string; label: string; icon: typeof LayoutDashboard; roles: st
   { key: 'unprocessed', label: 'Unprocessed Bills', icon: ClipboardList, roles: ['DISTRIBUTOR'], group: 'Sales' },
   { key: 'summaries', label: 'Delivery Summaries', icon: FileStack, roles: ['DISTRIBUTOR'], group: 'Sales' },
   { key: 'settlement', label: 'Settlement', icon: Wallet, roles: ['DISTRIBUTOR'], group: 'Sales' },
-  // Finance — khata / wapasi / reports
+  // Finance — khata / wapasi / returns
   { key: 'ledgers', label: 'Shop Ledgers', icon: BookText, roles: ['DISTRIBUTOR'], group: 'Finance' },
   { key: 'recovery', label: 'Recovery (Wasooli)', icon: HandCoins, roles: ['DISTRIBUTOR'], group: 'Finance' },
   { key: 'returns', label: 'Returns & Claims', icon: Undo2, roles: ['DISTRIBUTOR'], group: 'Finance' },
-  { key: 'reports', label: 'Reports & Analytics', icon: BarChart3, roles: ['DISTRIBUTOR'], group: 'Finance' },
+  // Task 69 — Reports APNA POORA MODULE (pehle Finance ke andar tha) — har report ka apna URL
+  { key: 'reports', label: 'Overview', icon: BarChart3, roles: ['DISTRIBUTOR'], group: 'Reports' },
+  { key: 'reports-sales-profit', label: 'Sales & Profit', icon: TrendingUp, roles: ['DISTRIBUTOR'], group: 'Reports' },
+  { key: 'reports-zero-purchase', label: 'Zero Purchase', icon: ShoppingCart, roles: ['DISTRIBUTOR'], group: 'Reports' },
+  { key: 'reports-tax', label: 'Tax (GST/WHT)', icon: Receipt, roles: ['DISTRIBUTOR'], group: 'Reports' },
+  { key: 'reports-recovery', label: 'Recovery', icon: HandCoins, roles: ['DISTRIBUTOR'], group: 'Reports' },
+  { key: 'reports-targets', label: 'Targets', icon: Target, roles: ['DISTRIBUTOR'], group: 'Reports' },
+  { key: 'reports-stock', label: 'Stock', icon: Boxes, roles: ['DISTRIBUTOR'], group: 'Reports' },
+  { key: 'reports-booker-perf', label: 'Booker Perf', icon: Users, roles: ['DISTRIBUTOR'], group: 'Reports' },
+  { key: 'reports-company-purchase', label: 'Purchases', icon: Building2, roles: ['DISTRIBUTOR'], group: 'Reports' },
+  { key: 'reports-returns-claims', label: 'Returns', icon: Undo2, roles: ['DISTRIBUTOR'], group: 'Reports' },
+  { key: 'reports-top-shops', label: 'Top Shops', icon: Store, roles: ['DISTRIBUTOR'], group: 'Reports' },
   // Stock & Catalog — stock aur items
   { key: 'inventory', label: 'Inventory', icon: Warehouse, roles: ['DISTRIBUTOR'], group: 'Stock & Catalog' },
   { key: 'products', label: 'Products', icon: Package, roles: ['DISTRIBUTOR'], group: 'Stock & Catalog' },
@@ -80,6 +91,7 @@ const MODULES: { name: string; icon: typeof LayoutDashboard }[] = [
   { name: 'Overview', icon: LayoutDashboard },
   { name: 'Sales', icon: ShoppingCart },
   { name: 'Finance', icon: Wallet },
+  { name: 'Reports', icon: BarChart3 },
   { name: 'Stock & Catalog', icon: Package },
   { name: 'Field Operations', icon: Route },
   { name: 'Business Network', icon: Network },

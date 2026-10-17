@@ -6,8 +6,8 @@ import { useState } from 'react'
 import { useDMS } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
 import {
-  KpiRow, DataTable, SectionCard, CSVButton, PrintButton, downloadCSV, printReport, useReport,
-  fmtMoney, type Col,
+  KpiRow, DataTable, SectionCard, ExportButtons, useReport,
+  type Col,
 } from './reports-kit'
 
 interface BookerRow extends Record<string, unknown> {
@@ -72,17 +72,17 @@ export function TargetsTab() {
       <SectionCard
         title={`Booker-wise Target vs Achievement — ${data?.monthLabel ?? ''}`}
         right={
-          <div className="flex items-center gap-2">
-            <CSVButton onClick={() => downloadCSV(`targets-${month}`, cols.map((c) => c.label), (data?.bookers ?? []).map((r) => [r.bookerName, r.orders, r.target, r.achieved, r.gap, r.achievementPct]))} />
-            <PrintButton onClick={() => printReport({
+          <ExportButtons
+            opts={{
               title: 'Target vs Achievement Report',
               distributor: user?.profile?.businessName ?? '—',
               period: data?.monthLabel ?? month,
-              cols: [{ label: 'Booker' }, { label: 'Orders', align: 'right' }, { label: 'Target', align: 'right' }, { label: 'Achieved', align: 'right' }, { label: 'Gap', align: 'right' }, { label: 'Achv %', align: 'right' }],
-              rows: (data?.bookers ?? []).map((r) => [r.bookerName, r.orders, fmtMoney(r.target), fmtMoney(r.achieved), fmtMoney(r.gap), `${r.achievementPct}%`]),
-              totalsRow: ['TOTAL', data?.bookers.reduce((t, x) => t + x.orders, 0) ?? 0, fmtMoney(data?.summary.totalTarget ?? 0), fmtMoney(data?.summary.totalAchieved ?? 0), fmtMoney((data?.summary.totalTarget ?? 0) - (data?.summary.totalAchieved ?? 0)), `${data?.summary.achievementPct ?? 0}%`],
-            })} />
-          </div>
+              filename: `targets-${month}`,
+              cols: [{ label: 'Booker' }, { label: 'Orders', align: 'right' }, { label: 'Target', align: 'right', money: true }, { label: 'Achieved', align: 'right', money: true }, { label: 'Gap', align: 'right', money: true }, { label: 'Achv %', align: 'right' }],
+              rows: (data?.bookers ?? []).map((r) => [r.bookerName, r.orders, r.target, r.achieved, r.gap, `${r.achievementPct}%`]),
+              totalsRow: ['TOTAL', data?.bookers.reduce((t, x) => t + x.orders, 0) ?? 0, data?.summary.totalTarget ?? 0, data?.summary.totalAchieved ?? 0, (data?.summary.totalTarget ?? 0) - (data?.summary.totalAchieved ?? 0), `${data?.summary.achievementPct ?? 0}%`],
+            }}
+          />
         }
       >
         <DataTable cols={cols} rows={data?.bookers ?? []} empty="Is month ke targets set nahi hue" />

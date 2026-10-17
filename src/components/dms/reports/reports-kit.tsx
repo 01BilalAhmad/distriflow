@@ -6,12 +6,16 @@
 //   • FilterBar  — date presets + custom range + booker/company selects
 //   • KpiRow     — summary cards
 //   • DataTable  — generic table + totals row (right-aligned money cols)
-//   • downloadCSV / printReport — export + print (distributor header ke sath)
+//   • ExportButtons — Task 69: Excel (.xlsx) + PDF + CSV + Print — ek hi jagah 4 exports
+//   • downloadCSV / downloadExcel / downloadPDF / printReport — export + print
 // Sab reports ek jaisi dikhein — styling yahan centralized hai.
 // ============================================================
 
 import { useEffect, useState } from 'react'
-import { Download, Printer, RefreshCw } from 'lucide-react'
+import * as XLSX from 'xlsx'
+import { jsPDF } from 'jspdf'
+import autoTable from 'jspdf-autotable'
+import { Download, Printer, RefreshCw, FileSpreadsheet, FileDown } from 'lucide-react'
 
 export interface DateRange { from: string; to: string } // yyyy-mm-dd
 
@@ -248,6 +252,180 @@ export function downloadCSV(filename: string, headers: string[], rows: (string |
   a.download = filename.endsWith('.csv') ? filename : `${filename}.csv`
   a.click()
   URL.revokeObjectURL(url)
+}
+
+// ---------------- Excel export (Task 69 — SheetJS .xlsx) ----------------
+export interface ExportCol { label: string; align?: 'left' | 'right' | 'center'; money?: boolean }
+export interface ExportSection {
+  heading: string
+  cols: ExportCol[]
+  rows: (string | number)[][]
+  totalsRow?: (string | number)[]
+}
+export interface ReportExportOpts {
+  title: string
+  subtitle?: string
+  distributor: string
+  period: string
+  /** file name without extension — sab formats isi naam se save honge */
+  filename: string
+  cols: ExportCol[]
+  rows: (string | number)[][]
+  totalsRow?: (string | number)[]
+  sections?: ExportSection[]
+  footerNote?: string
+  landscape?: boolean
+}
+
+const stampStr = () => new Date().toLocaleString('en-PK', { day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })
+
+export function exportSections(opts: ReportExportOpts): ExportSection[] {
+  return opts.sections ?? [{ heading: '', cols: opts.cols, rows: opts.rows, totalsRow: opts.totalsRow }]
+}
+
+/** "12,345.50" / 12345.5 dono se number — comma-safe */
+function toNum(v: string | number | undefined): number {
+  return Number(String(v ?? '').replace(/,/g, '').trim())
+}
+
+/** Money col ke cell ko number banayo (Excel sum/formula ke liye), warna string */
+function excelCell(v: string | number | undefined, money: boolean): string | number {
+  if (money) { const n = toNum(v); return Number.isFinite(n) ? n : 0 }
+  return v ?? ''
+}
+
+export function downloadExcel(opts: ReportExportOpts) {
+  const wb = XLSX.utils.book_new()
+  const aoa: (string | number)[][] = [
+    [opts.title],
+    [opts.distributor],
+    [`Period: ${opts.period}${opts.subtitle ? ` • ${opts.subtitle}` : ''}`],
+    [`Generated: ${stampStr()} — DistriFlow`],
+    [],
+  ]
+  // per-section: header row ki position + money col indexes — number formats isi range par lagenge
+  const ranges: { headerRow: number; lastRow: number; moneyIdx: number[] }[] = []
+  for (const s of exportSections(opts)) {
+    if (s.heading) { aoa.push([]); aoa.push([s.heading]) }
+    const headerRow = aoa.length
+    aoa.push(s.cols.map((c) => c.label))
+    const moneyIdx = s.cols.map((c, i) => (c.money ? i : -1)).filter((i) => i >= 0)
+    for (const r of s.rows) aoa.push(r.map((v, i) => excelCell(v, moneyIdx.includes(i))))
+    if (s.totalsRow) aoa.push(s.totalsRow.map((v, i) => excelCell(v, moneyIdx.includes(i))))
+    ranges.push({ headerRow, lastRow: aoa.length - 1, moneyIdx })
+  }
+  const ws = XLSX.utils.aoa_to_sheet(aoa)
+  // money number format (#,##0.00) — sirf data/totals rows par
+  for (const rg of ranges) {
+    for (let R = rg.headerRow + 1; R <= rg.lastRow; R++) {
+      for (const C of rg.moneyIdx) {
+        const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })] as XLSX.CellObject | undefined
+        if (cell && typeof cell.v === 'number') cell.z = '#,##0.00'
+      }
+    }
+  }
+  // column widths — max content length (cap 44)
+  const widths: number[] = []
+  for (const row of aoa) row.forEach((v, i) => {
+    const l = String(v ?? '').length + 2
+    widths[i] = Math.max(widths[i] ?? 8, Math.min(l, 44))
+  })
+  ws['!cols'] = widths.map((wch) => ({ wch }))
+  XLSX.utils.book_append_sheet(wb, ws, 'Report')
+  XLSX.writeFile(wb, `${opts.filename}.xlsx`)
+}
+
+// ---------------- PDF export (Task 69 — jsPDF + autotable) ----------------
+export function downloadPDF(opts: ReportExportOpts) {
+  const tables = exportSections(opts)
+  const landscape = opts.landscape ?? (opts.cols.length > 9 || tables.some((t) => t.cols.length > 9))
+  const doc = new jsPDF({ orientation: landscape ? 'landscape' : 'portrait', unit: 'mm', format: 'a4' })
+  const pw = doc.internal.pageSize.getWidth()
+  const pdfCell = (v: string | number | undefined, money?: boolean) => {
+    if (!money || v === '' || v === undefined || v === null) return String(v ?? '')
+    const n = toNum(v)
+    return Number.isFinite(n) ? fmtMoney(n) : String(v)
+  }
+
+  // header block
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor('#065f46')
+  doc.text(opts.title, 14, 15)
+  doc.setFontSize(11); doc.setTextColor('#0f172a')
+  doc.text(opts.distributor, 14, 21)
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor('#64748b')
+  doc.text(`Period: ${opts.period}${opts.subtitle ? ` • ${opts.subtitle}` : ''} • Generated: ${stampStr()} — DistriFlow`, 14, 26)
+  doc.setDrawColor('#059669'); doc.setLineWidth(0.5); doc.line(14, 28.5, pw - 14, 28.5)
+
+  let startY = 34
+  for (const s of tables) {
+    if (s.heading) {
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor('#065f46')
+      doc.text(s.heading, 14, startY)
+      startY += 5
+    }
+    autoTable(doc, {
+      head: [s.cols.map((c) => c.label)],
+      body: s.rows.map((r) => r.map((v, i) => pdfCell(v, s.cols[i]?.money))),
+      foot: s.totalsRow ? [s.totalsRow.map((v, i) => pdfCell(v, s.cols[i]?.money))] : undefined,
+      startY,
+      margin: { left: 14, right: 14, top: 18 },
+      styles: { fontSize: 7.5, cellPadding: 1.6, lineColor: '#e5e7eb', lineWidth: 0.1 },
+      headStyles: { fillColor: '#ecfdf5', textColor: '#065f46', fontStyle: 'bold', lineColor: '#d1d5db' },
+      footStyles: { fillColor: '#ecfdf5', textColor: '#065f46', fontStyle: 'bold', lineColor: '#059669', lineWidth: 0.2 },
+      alternateRowStyles: { fillColor: '#f8fafc' },
+      columnStyles: Object.fromEntries(s.cols.map((c, i) => [i, { halign: c.align === 'right' ? 'right' : c.align === 'center' ? 'center' : 'left' }])),
+    })
+    const la = (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable
+    startY = (la?.finalY ?? startY) + 7
+  }
+  if (opts.footerNote) {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor('#475569')
+    doc.text(opts.footerNote, 14, startY + 1, { maxWidth: pw - 28 })
+  }
+  // har page par footer
+  const pages = doc.getNumberOfPages()
+  for (let p = 1; p <= pages; p++) {
+    doc.setPage(p)
+    doc.setFontSize(7); doc.setTextColor('#94a3b8')
+    doc.text('DistriFlow — FMCG Distribution Management', 14, doc.internal.pageSize.getHeight() - 7)
+    doc.text(`Page ${p}/${pages} • Signature: ____________________`, pw - 14, doc.internal.pageSize.getHeight() - 7, { align: 'right' })
+  }
+  doc.save(`${opts.filename}.pdf`)
+}
+
+// ---------------- Export buttons (Task 69 — Excel + PDF + CSV + Print) ----------------
+const expBtn = 'flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors'
+
+export function ExportButtons({ opts, printLabel }: { opts: ReportExportOpts; printLabel?: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        onClick={() => downloadExcel(opts)}
+        title="Excel (.xlsx) download karein — numbers proper Excel cells mein honge"
+        className={`${expBtn} border border-emerald-600 bg-emerald-600 text-white shadow-sm hover:bg-emerald-700`}
+      >
+        <FileSpreadsheet className="h-3.5 w-3.5" /> Excel
+      </button>
+      <button
+        onClick={() => downloadPDF(opts)}
+        title="PDF download karein — header, table aur totals ke sath"
+        className={`${expBtn} border border-rose-500 bg-rose-500 text-white shadow-sm hover:bg-rose-600`}
+      >
+        <FileDown className="h-3.5 w-3.5" /> PDF
+      </button>
+      <button
+        onClick={() => downloadCSV(opts.filename, exportSections(opts)[0].cols.map((c) => c.label), [
+          ...exportSections(opts)[0].rows,
+          ...(exportSections(opts)[0].totalsRow ? [exportSections(opts)[0].totalsRow as (string | number)[]] : []),
+        ])}
+        title="CSV download karein"
+        className={`${expBtn} border border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700`}
+      >
+        <Download className="h-3.5 w-3.5" /> CSV
+      </button>
+      <PrintButton onClick={() => printReport(opts)} label={printLabel} />
+    </div>
+  )
 }
 
 export function CSVButton(props: { onClick: () => void; label?: string }) {

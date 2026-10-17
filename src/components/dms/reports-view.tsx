@@ -15,7 +15,9 @@
 //  10. Returns & Claims (loss control)
 //  11. Top Shops (ABC Pareto)
 // Har report: date range + booker/company filters, KPIs, detailed table,
-// CSV download aur print (distributor header ke sath).
+// Excel (.xlsx) + PDF + CSV download aur print (distributor header ke sath).
+// Task 69 — Reports ab APNA MODULE hai: har report ka apna URL (/reports/<tab>) —
+// app-shell ke Reports tiles isi page ko URL ke sath kholte hain (pill row hata di).
 // ============================================================
 
 import { useEffect, useState } from 'react'
@@ -57,37 +59,27 @@ const TABS = [
 
 type TabKey = (typeof TABS)[number]['key']
 
-export function ReportsView() {
-  const [tab, setTab] = useState<TabKey>('overview')
+const TAB_KEYS = new Set<string>(TABS.map((t) => t.key))
+
+export function ReportsView({ tab: tabProp }: { tab?: string }) {
+  // Task 69: tab URL se aata hai (/reports/<tab>) — unknown/gayab ho to Overview
+  const tab: TabKey = tabProp && TAB_KEYS.has(tabProp) ? (tabProp as TabKey) : 'overview'
+  const active = TABS.find((t) => t.key === tab)
 
   return (
     <div className="h-full flex flex-col gap-3">
       <div className="shrink-0">
-        <h2 className="text-xl font-bold text-slate-900">Reports & Analytics</h2>
-        <p className="text-sm text-slate-500">Business ka poora hisaab — 11 detailed reports, filters ke sath</p>
+        <h2 className="text-xl font-bold text-slate-900">Reports &amp; Analytics</h2>
+        <p className="text-sm text-slate-500">
+          {active && active.key !== 'overview' ? (
+            <>Business ka poora hisaab — <b className="text-emerald-700">{active.label}</b> report • Excel, PDF, CSV export aur print sab reports mein mojood</>
+          ) : (
+            'Business ka poora hisaab — 11 detailed reports, filters ke sath'
+          )}
+        </p>
       </div>
 
-      {/* Report tabs — scrollable pill row */}
-      <div className="shrink-0 overflow-x-auto pb-0.5 [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-emerald-100">
-        <div className="flex w-max gap-1.5">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={`flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition-all ${
-                tab === t.key
-                  ? 'bg-gradient-to-r from-emerald-600 to-teal-500 text-white shadow-md shadow-emerald-600/25'
-                  : 'border border-slate-200 bg-white text-slate-500 hover:border-emerald-200 hover:text-emerald-700'
-              }`}
-            >
-              <t.icon className="h-3.5 w-3.5" />
-              {t.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Active report — internal scroll */}
+      {/* Active report — internal scroll (report switcher ab shell ke Reports tiles se hota hai — har report ka apna URL) */}
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         {tab === 'overview' && <OverviewTab />}
         {tab === 'sales-profit' && <SalesProfitTab />}

@@ -10,8 +10,8 @@ import { api } from '@/lib/dms-api'
 import { Button } from '@/components/ui/button'
 import { ShoppingCart } from 'lucide-react'
 import {
-  FilterBar, KpiRow, DataTable, SectionCard, CSVButton, PrintButton,
-  downloadCSV, printReport, useReport, fmtMoney, fmtDay, type Col, type Option,
+  FilterBar, KpiRow, DataTable, SectionCard, ExportButtons,
+  useReport, fmtMoney, fmtDay, type Col, type Option,
 } from './reports-kit'
 
 interface ZeroRow extends Record<string, unknown> {
@@ -106,18 +106,18 @@ export function ZeroPurchaseTab() {
       <SectionCard
         title={`Zero Purchase Shops — ${data?.monthLabel ?? ''}`}
         right={
-          <div className="flex items-center gap-2">
-            <CSVButton onClick={() => downloadCSV(`zero-purchase-${month}`, cols.map((c) => c.label), data?.zeroRows.map((r) => [r.shop, r.code, r.city, r.channel, r.booker, r.lastOrderDate ?? 'Kabhi nahi', r.daysSinceLastOrder ?? '', r.lastOrderValue, r.avg3m]) ?? [])} />
-            <PrintButton onClick={() => printReport({
+          <ExportButtons
+            opts={{
               title: 'Zero Purchase Report (Month-wise)',
               subtitle: 'Rule: har shop ko month mein kam az kam 1 bill',
               distributor: user?.profile?.businessName ?? '—',
               period: data?.monthLabel ?? month,
-              cols: cols.map((c) => ({ label: c.label, align: c.align })),
-              rows: data?.zeroRows.map((r) => [r.shop, r.city, r.channel, r.booker, r.lastOrderDate ? fmtDay(r.lastOrderDate) : 'Kabhi nahi', r.daysSinceLastOrder != null ? `${r.daysSinceLastOrder}` : '—', fmtMoney(r.lastOrderValue), fmtMoney(r.avg3m)]) ?? [],
-              totalsRow: ['TOTAL', '', '', '', '', '', '', fmtMoney(data?.zeroRows.reduce((t, r) => t + r.avg3m, 0) ?? 0)],
-            })} />
-          </div>
+              filename: `zero-purchase-${month}`,
+              cols: cols.map((c) => ({ label: c.label, align: c.align, money: c.money })),
+              rows: data?.zeroRows.map((r) => [r.shop, r.city, r.channel, r.booker, r.lastOrderDate ? fmtDay(r.lastOrderDate) : 'Kabhi nahi', r.daysSinceLastOrder != null ? `${r.daysSinceLastOrder}` : '—', r.lastOrderValue, r.avg3m]) ?? [],
+              totalsRow: ['TOTAL', '', '', '', '', '', '', data?.zeroRows.reduce((t, r) => t + r.avg3m, 0) ?? 0],
+            }}
+          />
         }
       >
         <DataTable cols={tableCols} rows={data?.zeroRows ?? []} empty="Mubarak ho — sab shops ne is month bill banaya ✓" />

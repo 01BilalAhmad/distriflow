@@ -6,8 +6,8 @@ import { useState } from 'react'
 import { useDMS } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
 import {
-  FilterBar, useRangeFilter, KpiRow, DataTable, SectionCard, CSVButton, PrintButton,
-  downloadCSV, printReport, useReport, fmtDay, rangeLabel, type Col, type Option,
+  FilterBar, useRangeFilter, KpiRow, DataTable, SectionCard, ExportButtons,
+  useReport, fmtDay, rangeLabel, type Col, type Option,
 } from './reports-kit'
 
 interface ShopRow extends Record<string, unknown> {
@@ -67,17 +67,17 @@ export function TaxTab() {
   ]
 
   const o = data?.output
-  const doAnnexPrint = () => {
-    printReport({
-      title: 'Sales Tax Invoice Annex (FBR Style)',
-      subtitle: 'Output tax — shop-wise bills annex',
-      distributor: user?.profile?.businessName ?? '—',
-      period: rangeLabel(range),
-      cols: annexCols.map((c) => ({ label: c.label, align: c.align })),
-      rows: (o?.annex ?? []).map((r) => [r.orderNo, new Date(r.date).toLocaleDateString('en-PK'), r.shop, r.ntn ?? r.cnic ?? '—', r.filerStatus, r.taxable, r.gst, r.wht, r.grand]),
-      totalsRow: ['TOTAL', '', '', '', '', o?.summary.taxable ?? 0, o?.summary.gst ?? 0, o?.summary.wht ?? 0, o?.summary.grand ?? 0],
-      footerNote: `Output GST: Rs ${o?.summary.gst} • Input GST: Rs ${data?.input.gst} • Net GST Payable: Rs ${data?.netStatement.netGstPayable}`,
-    })
+  // Task 69: FBR Annex — Excel/PDF/CSV/Print sab formats
+  const annexOpts = {
+    title: 'Sales Tax Invoice Annex (FBR Style)',
+    subtitle: 'Output tax — shop-wise bills annex',
+    distributor: user?.profile?.businessName ?? '—',
+    period: rangeLabel(range),
+    filename: `tax-annex-${range.from}_${range.to}`,
+    cols: annexCols.map((c) => ({ label: c.label, align: c.align, money: c.money })),
+    rows: (o?.annex ?? []).map((r) => [r.orderNo, new Date(r.date).toLocaleDateString('en-PK'), r.shop, r.ntn ?? r.cnic ?? '—', r.filerStatus, r.taxable, r.gst, r.wht, r.grand]),
+    totalsRow: ['TOTAL', '', '', '', '', o?.summary.taxable ?? 0, o?.summary.gst ?? 0, o?.summary.wht ?? 0, o?.summary.grand ?? 0],
+    footerNote: `Output GST: Rs ${o?.summary.gst} • Input GST: Rs ${data?.input.gst} • Net GST Payable: Rs ${data?.netStatement.netGstPayable}`,
   }
 
   return (
@@ -115,17 +115,23 @@ export function TaxTab() {
       <SectionCard
         title="Shop-wise Tax Breakdown"
         right={
-          <div className="flex items-center gap-2">
-            <CSVButton onClick={() => downloadCSV(`tax-shopwise-${range.from}_${range.to}`, cols.map((c) => c.label), (o?.shopWise ?? []).map((r) => [r.shop, r.city, r.filerStatus, r.ntn ?? r.cnic ?? '', r.orders, r.taxable, r.gst, r.wht, r.grand]))} />
-            <PrintButton onClick={doAnnexPrint} label="Print FBR Annex" />
-          </div>
+          <ExportButtons
+            opts={{
+              title: 'Tax Report — Shop-wise Breakdown (GST + WHT 236H)',
+              distributor: user?.profile?.businessName ?? '—',
+              period: rangeLabel(range),
+              filename: `tax-shopwise-${range.from}_${range.to}`,
+              cols: cols.map((c) => ({ label: c.label, align: c.align, money: c.money })),
+              rows: (o?.shopWise ?? []).map((r) => [r.shop, r.city, r.filerStatus, r.ntn ?? r.cnic ?? '', r.orders, r.taxable, r.gst, r.wht, r.grand]),
+            }}
+          />
         }
       >
         <DataTable cols={cols} rows={o?.shopWise ?? []} />
       </SectionCard>
       <SectionCard
         title="Bill-wise Annex (Output Tax)"
-        right={<CSVButton onClick={() => downloadCSV(`tax-annex-${range.from}_${range.to}`, annexCols.map((c) => c.label), (o?.annex ?? []).map((r) => [r.orderNo, r.date.slice(0, 10), r.shop, r.ntn ?? r.cnic ?? '', r.filerStatus, r.taxable, r.gst, r.wht, r.grand]))} />}
+        right={<ExportButtons opts={annexOpts} printLabel="Print FBR Annex" />}
       >
         <DataTable cols={annexCols} rows={o?.annex ?? []} maxH="max-h-[45vh]" />
       </SectionCard>

@@ -5,8 +5,8 @@
 import { useDMS } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
 import {
-  FilterBar, useRangeFilter, KpiRow, DataTable, SectionCard, CSVButton, PrintButton,
-  downloadCSV, printReport, useReport, rangeLabel, type Col,
+  FilterBar, useRangeFilter, KpiRow, DataTable, SectionCard, ExportButtons,
+  useReport, rangeLabel, type Col,
 } from './reports-kit'
 
 interface ShopRow extends Record<string, unknown> {
@@ -75,15 +75,17 @@ export function ReturnsClaimsTab() {
         title="Shop-wise Returns (Loss Control)"
         right={
           <div className="flex items-center gap-2">
-            <CSVButton onClick={() => downloadCSV(`returns-shopwise-${range.from}_${range.to}`, shopCols.map((c) => c.label), (data?.shopWise ?? []).map((r) => [r.shop, r.city, r.booker, r.returnsCount, r.returnsValue, r.salesInPeriod, r.returnRatePct, r.damaged, r.expired, r.unsold, r.pending, r.approved, r.rejected]))} />
-            <PrintButton onClick={() => printReport({
-              title: 'Returns & Claims Report — Shop-wise',
-              distributor: user?.profile?.businessName ?? '—',
-              period: rangeLabel(range),
-              cols: shopCols.map((c) => ({ label: c.label, align: c.align })),
-              rows: (data?.shopWise ?? []).map((r) => [r.shop, r.city, r.booker, r.returnsCount, r.returnsValue, r.salesInPeriod, `${r.returnRatePct}%`, r.damaged, r.expired, r.unsold, r.pending, r.approved, r.rejected]),
-              totalsRow: ['TOTAL', '', '', data?.shopWise.reduce((t, x) => t + x.returnsCount, 0) ?? 0, data?.shopWise.reduce((t, x) => t + x.returnsValue, 0) ?? 0, data?.shopWise.reduce((t, x) => t + x.salesInPeriod, 0) ?? 0, `${data?.summary.returnRatePct ?? 0}%`, '', '', '', '', '', ''],
-            })} />
+            <ExportButtons
+              opts={{
+                title: 'Returns & Claims Report — Shop-wise',
+                distributor: user?.profile?.businessName ?? '—',
+                period: rangeLabel(range),
+                filename: `returns-shopwise-${range.from}_${range.to}`,
+                cols: shopCols.map((c) => ({ label: c.label, align: c.align, money: c.money })),
+                rows: (data?.shopWise ?? []).map((r) => [r.shop, r.city, r.booker, r.returnsCount, r.returnsValue, r.salesInPeriod, `${r.returnRatePct}%`, r.damaged, r.expired, r.unsold, r.pending, r.approved, r.rejected]),
+                totalsRow: ['TOTAL', '', '', data?.shopWise.reduce((t, x) => t + x.returnsCount, 0) ?? 0, data?.shopWise.reduce((t, x) => t + x.returnsValue, 0) ?? 0, data?.shopWise.reduce((t, x) => t + x.salesInPeriod, 0) ?? 0, `${data?.summary.returnRatePct ?? 0}%`, '', '', '', '', '', ''],
+              }}
+            />
           </div>
         }
       >

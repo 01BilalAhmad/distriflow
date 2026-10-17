@@ -5,8 +5,8 @@
 import { useDMS } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
 import {
-  FilterBar, useRangeFilter, KpiRow, DataTable, SectionCard, CSVButton, PrintButton,
-  downloadCSV, printReport, useReport, fmtDay, rangeLabel, type Col,
+  FilterBar, useRangeFilter, KpiRow, DataTable, SectionCard, ExportButtons,
+  useReport, fmtDay, rangeLabel, type Col,
 } from './reports-kit'
 
 interface ShopRow extends Record<string, unknown> {
@@ -74,16 +74,18 @@ export function TopShopsTab() {
         title="ABC Ranking (sales ke hisab se)"
         right={
           <div className="flex items-center gap-2">
-            <CSVButton onClick={() => downloadCSV(`top-shops-${range.from}_${range.to}`, cols.map((c) => c.label), (data?.rows ?? []).map((r) => [r.abc, r.shop, r.city, r.channel, r.booker, r.orders, r.sales, r.avgOrder, r.lastOrderDate ?? '', r.sharePct, r.cumPct]))} />
-            <PrintButton onClick={() => printReport({
-              title: 'Top Shops Report (ABC Analysis)',
-              subtitle: 'A = top 80% cumulative sales • B = 80-95% • C = tail',
-              distributor: user?.profile?.businessName ?? '—',
-              period: rangeLabel(range),
-              cols: cols.map((c) => ({ label: c.label, align: c.align })),
-              rows: (data?.rows ?? []).map((r) => [r.abc, r.shop, r.city, r.channel, r.booker, r.orders, r.sales, r.avgOrder, r.lastOrderDate ? fmtDay(r.lastOrderDate) : '—', `${r.sharePct}%`, `${r.cumPct}%`]),
-              totalsRow: ['TOTAL', '', '', '', '', data?.rows.reduce((t, x) => t + x.orders, 0) ?? 0, data?.summary.totalSales ?? 0, '', '', '100%', '100%'],
-            })} />
+            <ExportButtons
+              opts={{
+                title: 'Top Shops Report (ABC Analysis)',
+                subtitle: 'A = top 80% cumulative sales • B = 80-95% • C = tail',
+                distributor: user?.profile?.businessName ?? '—',
+                period: rangeLabel(range),
+                filename: `top-shops-${range.from}_${range.to}`,
+                cols: cols.map((c) => ({ label: c.label, align: c.align, money: c.money })),
+                rows: (data?.rows ?? []).map((r) => [r.abc, r.shop, r.city, r.channel, r.booker, r.orders, r.sales, r.avgOrder, r.lastOrderDate ? fmtDay(r.lastOrderDate) : '—', `${r.sharePct}%`, `${r.cumPct}%`]),
+                totalsRow: ['TOTAL', '', '', '', '', data?.rows.reduce((t, x) => t + x.orders, 0) ?? 0, data?.summary.totalSales ?? 0, '', '', '100%', '100%'],
+              }}
+            />
           </div>
         }
       >

@@ -25,6 +25,16 @@ export type ViewKey =
   | 'schemes'
   | 'returns'
   | 'reports'
+  | 'reports-sales-profit'
+  | 'reports-zero-purchase'
+  | 'reports-tax'
+  | 'reports-recovery'
+  | 'reports-targets'
+  | 'reports-stock'
+  | 'reports-booker-perf'
+  | 'reports-company-purchase'
+  | 'reports-returns-claims'
+  | 'reports-top-shops'
   | 'sales-app'
 
 /**

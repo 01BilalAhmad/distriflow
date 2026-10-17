@@ -5,8 +5,8 @@
 import { useDMS } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
 import {
-  FilterBar, useRangeFilter, KpiRow, DataTable, SectionCard, CSVButton, PrintButton,
-  downloadCSV, printReport, useReport, fmtDay, rangeLabel, type Col,
+  FilterBar, useRangeFilter, KpiRow, DataTable, SectionCard, ExportButtons,
+  useReport, fmtDay, rangeLabel, type Col,
 } from './reports-kit'
 
 interface PerfRow extends Record<string, unknown> {
@@ -64,15 +64,17 @@ export function BookerPerformanceTab() {
         title="Booker Performance Breakdown"
         right={
           <div className="flex items-center gap-2">
-            <CSVButton onClick={() => downloadCSV(`booker-performance-${range.from}_${range.to}`, cols.map((c) => c.label), (data?.rows ?? []).map((r) => [r.bookerName, r.orders, r.shopsServed, r.shopsAssigned, r.coveragePct, r.netSales, r.discountGiven, r.avgOrderValue, r.linesPerDrop, r.freeUnits, r.recoveryCollected, r.lastOrderDate ?? '']))} />
-            <PrintButton onClick={() => printReport({
-              title: 'Order Booker Performance Report',
-              distributor: user?.profile?.businessName ?? '—',
-              period: rangeLabel(range),
-              cols: cols.map((c) => ({ label: c.label, align: c.align })),
-              rows: (data?.rows ?? []).map((r) => [r.bookerName, r.orders, r.shopsServed, r.shopsAssigned, `${r.coveragePct}%`, r.netSales, r.discountGiven, r.avgOrderValue, r.linesPerDrop, r.freeUnits, r.recoveryCollected, r.lastOrderDate ? fmtDay(r.lastOrderDate) : '—']),
-              totalsRow: ['TOTAL', data?.rows.reduce((t, x) => t + x.orders, 0) ?? 0, '', '', '', data?.rows.reduce((t, x) => t + x.netSales, 0) ?? 0, data?.rows.reduce((t, x) => t + x.discountGiven, 0) ?? 0, '', '', data?.rows.reduce((t, x) => t + x.freeUnits, 0) ?? 0, data?.rows.reduce((t, x) => t + x.recoveryCollected, 0) ?? 0, ''],
-            })} />
+            <ExportButtons
+              opts={{
+                title: 'Order Booker Performance Report',
+                distributor: user?.profile?.businessName ?? '—',
+                period: rangeLabel(range),
+                filename: `booker-performance-${range.from}_${range.to}`,
+                cols: cols.map((c) => ({ label: c.label, align: c.align, money: c.money })),
+                rows: (data?.rows ?? []).map((r) => [r.bookerName, r.orders, r.shopsServed, r.shopsAssigned, `${r.coveragePct}%`, r.netSales, r.discountGiven, r.avgOrderValue, r.linesPerDrop, r.freeUnits, r.recoveryCollected, r.lastOrderDate ? fmtDay(r.lastOrderDate) : '—']),
+                totalsRow: ['TOTAL', data?.rows.reduce((t, x) => t + x.orders, 0) ?? 0, '', '', '', data?.rows.reduce((t, x) => t + x.netSales, 0) ?? 0, data?.rows.reduce((t, x) => t + x.discountGiven, 0) ?? 0, '', '', data?.rows.reduce((t, x) => t + x.freeUnits, 0) ?? 0, data?.rows.reduce((t, x) => t + x.recoveryCollected, 0) ?? 0, ''],
+              }}
+            />
           </div>
         }
       >

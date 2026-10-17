@@ -6,8 +6,8 @@ import { useState } from 'react'
 import { useDMS } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
 import {
-  FilterBar, useRangeFilter, KpiRow, DataTable, SectionCard, CSVButton, PrintButton,
-  downloadCSV, printReport, useReport, fmtDay, rangeLabel, type Col, type Option,
+  FilterBar, useRangeFilter, KpiRow, DataTable, SectionCard, ExportButtons,
+  useReport, fmtDay, rangeLabel, type Col, type Option,
 } from './reports-kit'
 
 interface OutRow extends Record<string, unknown> {
@@ -83,25 +83,36 @@ export function RecoveryTab() {
       <SectionCard
         title="Shop-wise Outstanding (Udhaar)"
         right={
-          <div className="flex items-center gap-2">
-            <CSVButton onClick={() => downloadCSV(`recovery-outstanding-${range.from}_${range.to}`, ocols.map((c) => c.label), (data?.outstanding ?? []).map((r) => [r.shop, r.city, r.booker, r.creditDays, r.balance, r.totalBilled, r.totalCollected, r.lastPaymentDate ?? '', r.daysSinceLastPayment ?? '']))} />
-            <PrintButton onClick={() => printReport({
+          <ExportButtons
+            opts={{
               title: 'Recovery Report — Shop-wise Outstanding',
               subtitle: company ? 'Company-filtered shops' : 'Sab shops',
               distributor: user?.profile?.businessName ?? '—',
               period: rangeLabel(range),
-              cols: ocols.map((c) => ({ label: c.label, align: c.align })),
+              filename: `recovery-outstanding-${range.from}_${range.to}`,
+              cols: ocols.map((c) => ({ label: c.label, align: c.align, money: c.money })),
               rows: (data?.outstanding ?? []).map((r) => [r.shop, r.city, r.booker, r.creditDays, r.balance, r.totalBilled, r.totalCollected, r.lastPaymentDate ? fmtDay(r.lastPaymentDate) : '—', r.daysSinceLastPayment ?? '—']),
               totalsRow: ['TOTAL', '', '', '', data?.summary.outstandingTotal ?? 0, '', '', '', ''],
-            })} />
-          </div>
+            }}
+          />
         }
       >
         <DataTable cols={ocols} rows={data?.outstanding ?? []} empty="Kisi shop ka outstanding nahi — sab clear ✓" />
       </SectionCard>
       <SectionCard
         title={`Collection History (${rangeLabel(range)})`}
-        right={<CSVButton onClick={() => downloadCSV(`recovery-history-${range.from}_${range.to}`, hcols.map((c) => c.label), (data?.history ?? []).map((r) => [r.date.slice(0, 10), r.kind, r.refNo, r.shop, r.booker, r.method, r.status, r.amount]))} />}
+        right={
+          <ExportButtons
+            opts={{
+              title: 'Recovery Report — Collection History',
+              distributor: user?.profile?.businessName ?? '—',
+              period: rangeLabel(range),
+              filename: `recovery-history-${range.from}_${range.to}`,
+              cols: hcols.map((c) => ({ label: c.label, align: c.align, money: c.money })),
+              rows: (data?.history ?? []).map((r) => [r.date.slice(0, 10), r.kind, r.refNo, r.shop, r.booker, r.method, r.status, r.amount]),
+            }}
+          />
+        }
       >
         <DataTable cols={hcols} rows={data?.history ?? []} empty="Is period mein koi wasooli entry nahi" maxH="max-h-[40vh]" />
       </SectionCard>

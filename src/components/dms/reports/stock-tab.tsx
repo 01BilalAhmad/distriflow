@@ -6,8 +6,8 @@ import { useState } from 'react'
 import { useDMS } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
 import {
-  KpiRow, DataTable, SectionCard, CSVButton, PrintButton, downloadCSV, printReport, useReport,
-  fmtMoney, fmtDay, type Col,
+  KpiRow, DataTable, SectionCard, ExportButtons, useReport, type ReportExportOpts,
+  fmtDay, type Col,
 } from './reports-kit'
 
 interface StockRow extends Record<string, unknown> {
@@ -44,14 +44,26 @@ export function StockTab() {
   }, [user?.id, lowCtns, slowDays, expDays])
 
   const sel = 'h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700'
-  const printSection = (heading: string, rows: StockRow[]) => printReport({
-    title: `Stock Report — ${heading}`,
-    distributor: user?.profile?.businessName ?? '—',
-    period: `Thresholds: low ≤ ${lowCtns} ctn, slow ≥ ${slowDays} din, expiry ≤ ${expDays} din`,
-    cols: COLS.map((c) => ({ label: c.label, align: c.align })),
-    rows: rows.map((r) => [r.productName, r.company, r.qtyCtns, r.qtyUnits, r.unitCost, r.costValue, r.tradeValue, r.lastSoldDate ? fmtDay(r.lastSoldDate) : 'Kabhi nahi']),
-    totalsRow: ['TOTAL', '', '', rows.reduce((t, r) => t + r.qtyUnits, 0), '', rows.reduce((t, r) => t + r.costValue, 0), rows.reduce((t, r) => t + r.tradeValue, 0), ''],
-  })
+  // Task 69: har section ka apna export opts — Excel + PDF + CSV + Print
+  const exportSection = (heading: string, rows: StockRow[], extraCols: Col<StockRow>[] = []): ReportExportOpts => {
+    const ec = [...COLS, ...extraCols]
+    return {
+      title: `Stock Report — ${heading}`,
+      distributor: user?.profile?.businessName ?? '—',
+      period: `Thresholds: low ≤ ${lowCtns} ctn, slow ≥ ${slowDays} din, expiry ≤ ${expDays} din`,
+      filename: `stock-${heading.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+      cols: ec.map((c) => ({ label: c.label, align: c.align, money: c.money })),
+      rows: rows.map((r) => ec.map((c): string | number => c.key === 'lastSoldDate' ? (r.lastSoldDate ? fmtDay(r.lastSoldDate) : 'Kabhi nahi') : c.key === 'expSoonDate' ? (r.expSoonDate ? fmtDay(r.expSoonDate) : '—') : ((r as Record<string, unknown>)[c.key] ?? '') as string | number)),
+      totalsRow: ec.map((c) => {
+        if (c.key === 'productName') return 'TOTAL'
+        if (c.key === 'qtyUnits') return rows.reduce((t, r) => t + r.qtyUnits, 0)
+        if (c.key === 'costValue') return rows.reduce((t, r) => t + r.costValue, 0)
+        if (c.key === 'tradeValue') return rows.reduce((t, r) => t + r.tradeValue, 0)
+        if (c.key === 'expSoonQty') return rows.reduce((t, r) => t + r.expSoonQty, 0)
+        return ''
+      }),
+    }
+  }
 
   return (
     <div className="space-y-3">
@@ -83,24 +95,24 @@ export function StockTab() {
       )}
       <SectionCard
         title="Product-wise Stock"
-        right={<CSVButton onClick={() => downloadCSV('stock-report', COLS.map((c) => c.label), (data?.stock ?? []).map((r) => [r.productName, r.company, r.qtyCtns, r.qtyUnits, r.unitCost, r.costValue, r.tradeValue, r.lastSoldDate ?? '']))} />}
+        right={<ExportButtons opts={exportSection('Full Stock', data?.stock ?? [])} />}
       >
         <DataTable cols={COLS} rows={data?.stock ?? []} empty="Stock khaali hai" />
       </SectionCard>
       {(data?.lowStock.length ?? 0) > 0 && (
-        <SectionCard title={`⚠ Low Stock (≤ ${lowCtns} carton)`} right={<PrintButton onClick={() => printSection('Low Stock', data!.lowStock)} />}>
+        <SectionCard title={`⚠ Low Stock (≤ ${lowCtns} carton)`} right={<ExportButtons opts={exportSection('Low Stock', data!.lowStock)} />}>
           <DataTable cols={COLS} rows={data!.lowStock} maxH="max-h-[35vh]" />
         </SectionCard>
       )}
       {(data?.slowMoving.length ?? 0) > 0 && (
-        <SectionCard title={`🐢 Slow Moving (${slowDays}+ din se nahi bika)`} right={<PrintButton onClick={() => printSection('Slow Moving', data!.slowMoving)} />}>
+        <SectionCard title={`🐢 Slow Moving (${slowDays}+ din se nahi bika)`} right={<ExportButtons opts={exportSection('Slow Moving', data!.slowMoving)} />}>
           <DataTable cols={COLS} rows={data!.slowMoving} maxH="max-h-[35vh]" />
         </SectionCard>
       )}
       {(data?.expiring.length ?? 0) > 0 && (
-        <SectionCard title={`⏳ Expiring Soon (≤ ${expDays} din)`} right={<PrintButton onClick={() => printSection('Expiring Soon', data!.expiring)} />}>
+        <SectionCard title={`⏳ Expiring Soon (≤ ${expDays} din)`} right={<ExportButtons opts={exportSection('Expiring Soon', data!.expiring, EXPIRY_COLS)} />}>
           <DataTable
-            cols={[...COLS, { key: 'expSoonDate', label: 'Nearest Expiry', align: 'right', render: (r: StockRow) => r.expSoonDate ? fmtDay(r.expSoonDate) : '—' }, { key: 'expSoonQty', label: 'At Risk (Pcs)', align: 'right', total: true, cls: 'text-red-500' }] as Col<StockRow>[]}
+            cols={[...COLS, ...EXPIRY_COLS] as Col<StockRow>[]}
             rows={data!.expiring}
             maxH="max-h-[35vh]"
           />
@@ -114,6 +126,12 @@ export function StockTab() {
     </div>
   )
 }
+
+// Expiring section ke 2 extra columns (table + export dono use karte hain)
+const EXPIRY_COLS: Col<StockRow>[] = [
+  { key: 'expSoonDate', label: 'Nearest Expiry', align: 'right', render: (r) => r.expSoonDate ? fmtDay(r.expSoonDate) : '—' },
+  { key: 'expSoonQty', label: 'At Risk (Pcs)', align: 'right', total: true, cls: 'text-red-500' },
+]
 
 function fmt0(n: number): string {
   return Math.round(n).toLocaleString('en-PK')

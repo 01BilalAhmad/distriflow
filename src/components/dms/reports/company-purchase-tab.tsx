@@ -5,8 +5,8 @@
 import { useDMS } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
 import {
-  FilterBar, useRangeFilter, KpiRow, DataTable, SectionCard, CSVButton, PrintButton,
-  downloadCSV, printReport, useReport, rangeLabel, type Col,
+  FilterBar, useRangeFilter, KpiRow, DataTable, SectionCard, ExportButtons,
+  useReport, rangeLabel, type Col,
 } from './reports-kit'
 
 interface CompRow extends Record<string, unknown> {
@@ -64,15 +64,17 @@ export function CompanyPurchaseTab() {
         title="Company-wise Purchase & Payables"
         right={
           <div className="flex items-center gap-2">
-            <CSVButton onClick={() => downloadCSV(`company-purchase-${range.from}_${range.to}`, cols.map((c) => c.label), (data?.rows ?? []).map((r) => [r.company, r.invoices, r.units, r.subtotal, r.discount, r.netPurchase, r.gst, r.wht, r.tradeOffer, r.total, r.paid, r.outstanding, r.ledgerBalance]))} />
-            <PrintButton onClick={() => printReport({
-              title: 'Company-wise Purchase & Payables Report',
-              distributor: user?.profile?.businessName ?? '—',
-              period: rangeLabel(range),
-              cols: cols.map((c) => ({ label: c.label, align: c.align })),
-              rows: (data?.rows ?? []).map((r) => [r.company, r.invoices, r.units, r.subtotal, r.discount, r.netPurchase, r.gst, r.wht, r.tradeOffer, r.total, r.paid, r.outstanding, r.ledgerBalance]),
-              totalsRow: ['TOTAL', data?.rows.reduce((t, x) => t + x.invoices, 0) ?? 0, data?.rows.reduce((t, x) => t + x.units, 0) ?? 0, data?.rows.reduce((t, x) => t + x.subtotal, 0) ?? 0, data?.rows.reduce((t, x) => t + x.discount, 0) ?? 0, data?.summary.netPurchase ?? 0, data?.summary.gstInput ?? 0, data?.rows.reduce((t, x) => t + x.wht, 0) ?? 0, data?.rows.reduce((t, x) => t + x.tradeOffer, 0) ?? 0, data?.rows.reduce((t, x) => t + x.total, 0) ?? 0, data?.summary.paid ?? 0, data?.summary.totalPayable ?? 0, ''],
-            })} />
+            <ExportButtons
+              opts={{
+                title: 'Company-wise Purchase & Payables Report',
+                distributor: user?.profile?.businessName ?? '—',
+                period: rangeLabel(range),
+                filename: `company-purchase-${range.from}_${range.to}`,
+                cols: cols.map((c) => ({ label: c.label, align: c.align, money: c.money })),
+                rows: (data?.rows ?? []).map((r) => [r.company, r.invoices, r.units, r.subtotal, r.discount, r.netPurchase, r.gst, r.wht, r.tradeOffer, r.total, r.paid, r.outstanding, r.ledgerBalance]),
+                totalsRow: ['TOTAL', data?.rows.reduce((t, x) => t + x.invoices, 0) ?? 0, data?.rows.reduce((t, x) => t + x.units, 0) ?? 0, data?.rows.reduce((t, x) => t + x.subtotal, 0) ?? 0, data?.rows.reduce((t, x) => t + x.discount, 0) ?? 0, data?.summary.netPurchase ?? 0, data?.summary.gstInput ?? 0, data?.rows.reduce((t, x) => t + x.wht, 0) ?? 0, data?.rows.reduce((t, x) => t + x.tradeOffer, 0) ?? 0, data?.rows.reduce((t, x) => t + x.total, 0) ?? 0, data?.summary.paid ?? 0, data?.summary.totalPayable ?? 0, ''],
+              }}
+            />
           </div>
         }
       >
