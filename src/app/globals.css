@@ -155,9 +155,39 @@
   outline-offset: 2px;
   border-radius: 4px;
 }
-/* Dark bar ke andar apna focus ring (light ring dark par) */
-.dark-topbar :focus-visible {
+/* Dark sidebar ke andar apna focus ring (light ring dark par) */
+.df-sidebar :focus-visible {
   outline-color: rgba(52, 211, 153, 0.6);
+}
+/* Dark sidebar ka apna scrollbar (light thumb dark track par) */
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #334155 transparent;
+}
+.sidebar-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 999px;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+/* Mobile drawer slide-in + overlay fade (Task 71) */
+@keyframes df-drawer-in {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+.df-drawer {
+  animation: df-drawer-in 0.2s ease-out;
+}
+@keyframes df-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.df-overlay {
+  animation: df-fade-in 0.15s ease-out;
 }
 
 /* ============ PRINT: sirf .print-area / .cbl-print-root print hogi ============ */

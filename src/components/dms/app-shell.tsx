@@ -1,22 +1,21 @@
 'use client'
 
-// Task 70 — PROFESSIONAL DARK TOP BAR (user-selected Mockup B, Shopify/ClickUp style):
-// Pehla 3-row light top bar tha (brand row + module pills + icon tiles) — ab EK dark bar:
-//   1) DARK BAR (h-14, slate-900): brand + ERP tag | module tabs (hover par MEGA-DROPDOWN
-//      jo module ke sab pages icons + 1-line desc ke sath dikhata hai) | right: ⌘K quick
-//      search + user menu (role, business, logout)
-//   2) BREADCRUMB STRIP (h-11, white): Module / Page trail + date chip
-//   3) SUB-NAV CHIPS sirf <lg screens par (mega-dropdown hover-based hai, touch ke liye
-//      chips fallback) — active module ke pages horizontal scrollable pills mein
-// - Emerald/teal brand wahi rahega (user choice). Active module = white text + emerald
-//   gradient underline (mockup B jaisa).
+// Task 71 — PROFESSIONAL SIDEBAR NAVIGATION (user directive: "Navigation ko side pr kr do,
+// upr acha nai lag rha") — Task 70 ka dark top bar ab LEFT SIDEBAR ban gaya hai:
+//   1) DARK SIDEBAR (slate-900, w-264px): brand | module-wise grouped nav (sab pages hamesha
+//      visible — hover-dropdown ki zaroorat khatam) | neeche user chip + logout
+//   2) TOP STRIP (h-12, white): collapse toggle (desktop) / hamburger (mobile) + breadcrumb
+//      Module / Page + ⌘K quick search + date chip
+//   3) COLLAPSED RAIL (w-72px): sirf icons (title tooltip) — 1366px laptops ko content width
+//      milta hai; choice localStorage mein persist hoti hai.
+//   4) MOBILE (<lg): sidebar drawer ban kar slide-in hota hai (overlay click / Esc / item
+//      click par band). Drawer mein nav hamesha full labels ke sath.
+// - Emerald/teal brand wahi (user choice, Task 70 se continuity). Active item = emerald
+//   gradient pill + white text; group headers uppercase slate.
 // - Task 65-b rule INTACT: har nav item REAL <Link> hai — right-click copy link, middle
 //   click new tab, Ctrl/Cmd click sab native browser behavior karta hai.
 // - Task 49 rule INTACT: purchase-entry ke adhoore draft par navigation confirm guard.
-// - Mega-dropdown pure CSS hover hai (group-hover) — koi JS state nahi, is liye kabhi
-//   stuck-open nahi hota. Panels `hidden lg:block` (chhoti screens par chips strip).
-// - ⌘K / Ctrl+K se QuickNav dialog khulta hai — saare sections fuzzy search + keyboard
-//   navigation (↑ ↓ ↵ esc). Yahan bhi purchase-draft guard apply hota hai.
+// - ⌘K / Ctrl+K QuickNav dialog wahi (Task 70) — fuzzy search + keyboard nav + draft guard.
 // Role model wahi (Task 22): MEGA_ADMIN = sirf Distributor Accounts, SALESMAN = apna app.
 
 import { useEffect, useMemo, useState } from 'react'
@@ -31,11 +30,11 @@ import {
   Users, Gift, Undo2, BarChart3, Package2, LogOut, Building2,
   ClipboardList, FileStack, Wallet, BookText, HandCoins, Landmark,
   Database, Map as MapIcon, TrendingUp, Receipt, Target, Boxes,
-  ChevronDown, ChevronRight, Search, Calendar,
+  ChevronRight, Search, Calendar, Menu, PanelLeftClose, PanelLeftOpen, X,
 } from 'lucide-react'
 
-// group = module ka naam (primary tab) — items us module ke mega-dropdown isi order mein
-// desc = mega-dropdown item ke neeche 1-line explanation (Task 70)
+// group = sidebar section header — items usi order mein neeche aate hain
+// desc = QuickNav (⌘K) search ke liye 1-line explanation
 // Task 22 role model: MEGA_ADMIN = sirf Distributor Accounts console (business data locked);
 // DISTRIBUTOR = poora business portal (apne data par), SALESMAN = field app.
 const NAV: { key: string; label: string; icon: typeof LayoutDashboard; roles: string[]; group: string; desc?: string }[] = [
@@ -82,8 +81,10 @@ const NAV: { key: string; label: string; icon: typeof LayoutDashboard; roles: st
 ]
 
 type NavKey = string & keyof typeof VIEW_PATH
+type NavEntry = { key: string; label: string; icon: typeof LayoutDashboard }
+type NavModule = { name: string; icon: typeof LayoutDashboard; items: NavEntry[] }
 
-// Modules (primary tabs) — upar se neeche yahi order; icon = tab icon
+// Modules (sidebar sections) — upar se neeche yahi order
 const MODULES: { name: string; icon: typeof LayoutDashboard }[] = [
   { name: 'Overview', icon: LayoutDashboard },
   { name: 'Sales', icon: ShoppingCart },
@@ -94,19 +95,119 @@ const MODULES: { name: string; icon: typeof LayoutDashboard }[] = [
   { name: 'Business Network', icon: Network },
 ]
 
+// Task 71 — sidebar ki grouped list (desktop expanded / collapsed rail / mobile drawer
+// teeno isi ek component se render hote hain — markup duplicate nahi hota).
+function SidebarNav({ modules, activeKey, collapsed, itemClick }: {
+  modules: NavModule[]
+  activeKey: string
+  collapsed: boolean
+  itemClick: (key: string) => (e: React.MouseEvent) => void
+}) {
+  return (
+    <>
+      {modules.map((m) => (
+        <div key={m.name}>
+          {collapsed ? (
+            <div className="mx-4 my-2 h-px bg-white/10" aria-hidden />
+          ) : (
+            <div className="px-2.5 pb-1 pt-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">{m.name}</div>
+          )}
+          {m.items.map((n) => {
+            const on = n.key === activeKey
+            if (collapsed) {
+              // Icon-only rail — native title tooltip se label milta hai
+              return (
+                <Link
+                  key={n.key}
+                  href={VIEW_PATH[n.key as NavKey]}
+                  onClick={itemClick(n.key)}
+                  title={n.label}
+                  className={`mx-auto my-0.5 flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
+                    on
+                      ? 'bg-gradient-to-br from-emerald-600 to-emerald-500 text-white shadow-lg shadow-emerald-600/25'
+                      : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                  }`}
+                >
+                  <n.icon className="h-4 w-4" />
+                </Link>
+              )
+            }
+            return (
+              <Link
+                key={n.key}
+                href={VIEW_PATH[n.key as NavKey]}
+                onClick={itemClick(n.key)}
+                className={`group/i mt-0.5 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] transition-colors ${
+                  on
+                    ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 font-semibold text-white shadow-lg shadow-emerald-600/20'
+                    : 'font-medium text-slate-400 hover:bg-white/5 hover:text-white'
+                }`}
+              >
+                <n.icon className={`h-4 w-4 shrink-0 ${on ? 'text-white' : 'text-slate-500 group-hover/i:text-emerald-300'}`} />
+                <span className="min-w-0 flex-1 truncate">{n.label}</span>
+              </Link>
+            )
+          })}
+        </div>
+      ))}
+    </>
+  )
+}
+
+// Brand block — sidebar/drawer dono use karte hain
+function SidebarBrand({ collapsed }: { collapsed: boolean }) {
+  return (
+    <div className={`flex h-14 shrink-0 items-center gap-2.5 border-b border-white/10 ${collapsed ? 'justify-center px-0' : 'px-4'}`}>
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-600 to-teal-500 shadow-lg shadow-emerald-500/25">
+        <Package2 className="h-4.5 w-4.5 text-white" />
+      </span>
+      {!collapsed && (
+        <>
+          <span className="text-[15px] font-bold tracking-tight text-white">DistriFlow</span>
+          <span className="rounded border border-emerald-400/30 bg-emerald-400/10 px-1.5 py-0.5 text-[9px] font-bold tracking-widest text-emerald-300">ERP</span>
+        </>
+      )}
+    </div>
+  )
+}
+
 export function DMSApp({ children }: { children: React.ReactNode }) {
   const { user, setUser, purchaseDraftDirty } = useDMS()
   const router = useRouter()
   const pathname = usePathname()
   const [mounted, setMounted] = useState(false)
   const [quickOpen, setQuickOpen] = useState(false)
-  const [userMenu, setUserMenu] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)
 
   // Task 65: active view URL se — refresh/back/forward sab par sahi section milta hai
   const activeView = viewFromPath(pathname ?? '/')
   // Task 70: purchase-entry full-page form hai — nav highlight uske parent module
   // (Stock & Catalog) par rakhein, warna koi tab active nazar nahi aata.
   const highlightView = activeView === 'purchase-entry' ? 'products' : activeView
+
+  // Task 71: collapsed rail ki choice persist — mount ke baad localStorage se (SSR safe).
+  useEffect(() => {
+    const saved = localStorage.getItem('dms_sidebar_collapsed') === '1'
+    queueMicrotask(() => setCollapsed(saved))
+  }, [])
+
+  function toggleCollapsed() {
+    setCollapsed((v) => {
+      localStorage.setItem('dms_sidebar_collapsed', v ? '0' : '1')
+      return !v
+    })
+  }
+
+  // Drawer Esc par band (mobile)
+  useEffect(() => {
+    if (!drawerOpen) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setDrawerOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [drawerOpen])
 
   // Task 65-b: Link ke sath navigation khud <a href> karta hai — onClick sirf Task 49
   // ka purchase-draft confirm guard hai. Sirf plain left-click par chalta hai; Ctrl/Cmd
@@ -118,6 +219,14 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
         const ok = window.confirm('Purchase invoice form mein adhoora data hai — draft auto-save ho chuka hai, wapas aaoge to poora milega.\n\nPhir bhi page chhorein?')
         if (!ok) e.preventDefault()
       }
+    }
+  }
+
+  // Drawer ke items par: wahi guard + navigation hue to drawer band
+  function drawerNavClick(target: string) {
+    return (e: React.MouseEvent) => {
+      guardNavClick(target)(e)
+      if (!e.defaultPrevented) setDrawerOpen(false)
     }
   }
 
@@ -249,190 +358,136 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
   if (user.role === 'SALESMAN') return <SalesmanApp />
 
   const nav = NAV.filter((n) => n.roles.includes(user.role))
-  const modules = MODULES
+  const modules: NavModule[] = MODULES
     .map((m) => ({ ...m, items: nav.filter((n) => n.group === m.name) }))
     .filter((m) => m.items.length > 0)
   const activeModule = modules.find((m) => m.items.some((i) => i.key === highlightView)) ?? modules[0]
   const activeItem = nav.find((n) => n.key === activeView) ?? null
   const initials = user.name.split(' ').map((w) => w[0]).slice(0, 2).join('')
 
+  // Sidebar footer — user chip + logout (collapsed par sirf avatar + icon)
+  function sidebarFooter(collapsedMode: boolean) {
+    return (
+      <div className={`shrink-0 border-t border-white/10 p-2.5 ${collapsedMode ? 'flex flex-col items-center gap-1' : 'flex items-center gap-2.5'}`}>
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-600 to-teal-500 text-[11px] font-bold text-white">
+          {initials}
+        </span>
+        {!collapsedMode && (
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[12.5px] font-semibold text-white">{user!.name}</span>
+            <span className="block truncate text-[10px] font-medium text-emerald-400/90">{user!.role.replaceAll('_', ' ')}</span>
+          </span>
+        )}
+        <button
+          onClick={doLogout}
+          title="Logout"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-red-500/10 hover:text-red-400"
+        >
+          <LogOut className="h-4 w-4" />
+        </button>
+      </div>
+    )
+  }
+
   return (
-    <div className="h-screen overflow-hidden flex flex-col bg-[#f6f8fb]">
-      {/* ============ DARK TOP BAR (Mockup B) ============ */}
-      <header className="relative z-40 shrink-0 bg-slate-900">
-        <div className="flex h-14 items-stretch gap-1 pl-3 pr-3 sm:pl-4">
-          {/* Brand */}
-          <Link href="/" onClick={guardNavClick('dashboard')} className="mr-1 flex shrink-0 items-center gap-2.5 self-center">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-600 to-teal-500 shadow-lg shadow-emerald-500/25">
-              <Package2 className="h-4.5 w-4.5 text-white" />
+    <div className="h-screen overflow-hidden flex bg-[#f6f8fb]">
+      {/* ============ DARK SIDEBAR (desktop ≥lg) ============ */}
+      <aside
+        className={`df-sidebar hidden h-full shrink-0 flex-col bg-slate-900 transition-[width] duration-200 lg:flex ${collapsed ? 'w-[72px]' : 'w-[264px]'}`}
+      >
+        <SidebarBrand collapsed={collapsed} />
+        <nav aria-label="Main navigation" className="sidebar-scroll min-h-0 flex-1 overflow-y-auto px-2.5 pb-4">
+          <SidebarNav modules={modules} activeKey={highlightView ?? ''} collapsed={collapsed} itemClick={guardNavClick} />
+        </nav>
+        {sidebarFooter(collapsed)}
+      </aside>
+
+      {/* ============ MOBILE DRAWER (<lg) ============ */}
+      {drawerOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div className="df-overlay absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setDrawerOpen(false)} />
+          <aside className="df-sidebar df-drawer absolute left-0 top-0 flex h-full w-[280px] flex-col bg-slate-900 shadow-2xl">
+            <div className="relative">
+              <SidebarBrand collapsed={false} />
+              <button
+                onClick={() => setDrawerOpen(false)}
+                title="Band karein"
+                className="absolute right-2.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <nav aria-label="Main navigation" className="sidebar-scroll min-h-0 flex-1 overflow-y-auto px-2.5 pb-4">
+              <SidebarNav modules={modules} activeKey={highlightView ?? ''} collapsed={false} itemClick={drawerNavClick} />
+            </nav>
+            {sidebarFooter(false)}
+          </aside>
+        </div>
+      )}
+
+      {/* ============ RIGHT COLUMN — top strip + page ============ */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="z-20 flex h-12 shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-3 sm:px-5">
+          {/* Mobile hamburger */}
+          <button
+            onClick={() => setDrawerOpen(true)}
+            title="Menu"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-600 transition-colors hover:bg-slate-100 lg:hidden"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+          {/* Desktop collapse toggle */}
+          <button
+            onClick={toggleCollapsed}
+            title={collapsed ? 'Sidebar barhayein' : 'Sidebar chhota karein'}
+            className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 lg:flex"
+          >
+            {collapsed ? <PanelLeftOpen className="h-4.5 w-4.5" /> : <PanelLeftClose className="h-4.5 w-4.5" />}
+          </button>
+          {/* Breadcrumb */}
+          <nav className="flex min-w-0 items-center gap-1.5 text-[12.5px]">
+            <Link
+              href={VIEW_PATH[activeModule.items[0].key as NavKey]}
+              onClick={guardNavClick(activeModule.items[0].key)}
+              className="font-medium text-slate-500 transition-colors hover:text-emerald-700"
+            >
+              {activeModule.name}
+            </Link>
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />
+            <span className="truncate font-semibold text-slate-900">
+              {activeItem?.label ?? (activeView === 'purchase-entry' ? 'Purchase Entry' : 'Dashboard')}
             </span>
-            <span className="text-[15px] font-bold tracking-tight text-white">DistriFlow</span>
-            <span className="rounded border border-emerald-400/30 bg-emerald-400/10 px-1.5 py-0.5 text-[9px] font-bold tracking-widest text-emerald-300">ERP</span>
-          </Link>
-          <span className="my-3.5 w-px shrink-0 bg-white/10" />
-
-          {/* Module tabs + mega dropdowns (hover, pure CSS) */}
-          <nav className="flex min-w-0 flex-1 items-stretch overflow-x-auto lg:overflow-visible [&::-webkit-scrollbar]:h-0">
-            {modules.map((m, mi) => {
-              const on = m.name === activeModule.name
-              // aakhri modules ka dropdown right-align — screen se bahar na nikle
-              const alignRight = mi >= modules.length - 2
-              const wide = m.items.length > 4
-              return (
-                <div key={m.name} className="group relative flex shrink-0 items-stretch">
-                  <Link
-                    href={VIEW_PATH[m.items[0].key as NavKey]}
-                    onClick={guardNavClick(m.items[0].key)}
-                    title={`${m.name} — ${m.items.length} pages`}
-                    className={`relative flex items-center gap-1.5 whitespace-nowrap px-3 text-[13px] transition-colors ${
-                      on ? 'font-semibold text-white' : 'font-medium text-slate-400 hover:bg-white/5 hover:text-white'
-                    }`}
-                  >
-                    {m.name}
-                    <ChevronDown className="h-3 w-3 opacity-50" />
-                    {on && <span className="absolute inset-x-2.5 bottom-0 h-[3px] rounded-t bg-gradient-to-r from-emerald-500 to-teal-400" />}
-                  </Link>
-                  {/* MEGA DROPDOWN — hover/focus par khulta hai; pt-2 bridge hai */}
-                  <div className={`invisible absolute top-full z-50 translate-y-1 pt-2 opacity-0 transition-all duration-150 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100 ${alignRight ? 'right-0' : 'left-0'} hidden lg:block`}>
-                    <div className={`rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-900/25 ${wide ? 'w-[600px]' : 'w-[340px]'}`}>
-                      <div className={wide ? 'grid grid-cols-2 gap-0.5' : 'flex flex-col gap-0.5'}>
-                        {m.items.map((n) => {
-                          const itemOn = n.key === highlightView
-                          return (
-                            <Link
-                              key={n.key}
-                              href={VIEW_PATH[n.key as NavKey]}
-                              onClick={guardNavClick(n.key)}
-                              className={`group/i flex items-start gap-2.5 rounded-xl px-2.5 py-2 transition-colors ${
-                                itemOn ? 'bg-emerald-50' : 'hover:bg-slate-50'
-                              }`}
-                            >
-                              <span className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors ${
-                                itemOn ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-600/30' : 'bg-slate-100 text-slate-500 group-hover/i:bg-emerald-100 group-hover/i:text-emerald-700'
-                              }`}>
-                                <n.icon className="h-3.5 w-3.5" />
-                              </span>
-                              <span className="min-w-0">
-                                <span className={`block whitespace-nowrap text-[12.5px] font-semibold ${itemOn ? 'text-emerald-800' : 'text-slate-800'}`}>{n.label}</span>
-                                <span className="block whitespace-nowrap text-[10.5px] leading-tight text-slate-400">{n.desc}</span>
-                              </span>
-                            </Link>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
           </nav>
-
-          {/* Right — quick search + user */}
-          <div className="ml-auto flex shrink-0 items-center gap-2 self-center pl-2">
+          {/* Right — quick search + date */}
+          <div className="ml-auto flex shrink-0 items-center gap-2">
             <button
               onClick={() => setQuickOpen(true)}
-              className="hidden h-9 items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 text-slate-400 transition-colors hover:bg-white/10 hover:text-slate-200 md:flex"
+              className="hidden h-9 items-center gap-2 rounded-lg border border-slate-200 px-3 text-slate-500 transition-colors hover:border-emerald-300 hover:text-emerald-700 sm:flex"
               title="Quick search (Ctrl+K)"
             >
               <Search className="h-3.5 w-3.5" />
               <span className="text-[12.5px]">Search…</span>
-              <kbd className="rounded border border-white/10 bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-500">⌘K</kbd>
+              <kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] text-slate-500">⌘K</kbd>
             </button>
             <button
               onClick={() => setQuickOpen(true)}
-              className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white/10 hover:text-white md:hidden"
+              className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 sm:hidden"
               title="Search"
             >
               <Search className="h-4 w-4" />
             </button>
-            {/* User chip + menu */}
-            <div className="relative">
-              <button
-                onClick={() => setUserMenu((v) => !v)}
-                className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 py-1 pl-1 pr-2.5 transition-colors hover:bg-white/10"
-              >
-                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-emerald-600 to-teal-500 text-[10px] font-bold text-white">
-                  {initials}
-                </span>
-                <span className="hidden max-w-[130px] truncate text-[12.5px] font-semibold text-slate-200 lg:block">{user.name}</span>
-                <ChevronDown className={`h-3 w-3 text-slate-500 transition-transform ${userMenu ? 'rotate-180' : ''}`} />
-              </button>
-              {userMenu && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setUserMenu(false)} />
-                  <div className="absolute right-0 top-full z-50 mt-2 w-64 rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-900/25">
-                    <div className="flex items-center gap-3 rounded-xl px-2 py-2">
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-600 to-teal-500 text-[13px] font-bold text-white">
-                        {initials}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-[13px] font-bold text-slate-900">{user.name}</span>
-                        <span className="mt-0.5 inline-block rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[9.5px] font-bold text-emerald-700">
-                          {user.role.replaceAll('_', ' ')}
-                        </span>
-                      </span>
-                    </div>
-                    {user.role !== 'MEGA_ADMIN' && user.profile?.businessName && (
-                      <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-[11.5px] font-medium text-slate-600">
-                        <Building2 className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                        <span className="truncate">{user.profile.businessName}</span>
-                      </div>
-                    )}
-                    <div className="my-1.5 h-px bg-slate-100" />
-                    <button
-                      onClick={doLogout}
-                      className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-[12.5px] font-semibold text-slate-600 transition-colors hover:bg-red-50 hover:text-red-600"
-                    >
-                      <LogOut className="h-4 w-4" />
-                      Logout
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+            <span className="hidden shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11.5px] font-medium text-slate-500 md:inline-flex">
+              <Calendar className="h-3.5 w-3.5 text-slate-400" />
+              {new Date().toLocaleDateString('en-PK', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+            </span>
           </div>
-        </div>
-      </header>
+        </header>
 
-      {/* ============ BREADCRUMB STRIP ============ */}
-      <div className="z-30 flex h-11 shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-3 sm:px-5">
-        <nav className="flex min-w-0 items-center gap-1.5 text-[12.5px]">
-          <Link href={VIEW_PATH[activeModule.items[0].key as NavKey]} onClick={guardNavClick(activeModule.items[0].key)} className="font-medium text-slate-500 transition-colors hover:text-emerald-700">
-            {activeModule.name}
-          </Link>
-          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />
-          <span className="truncate font-semibold text-slate-900">{activeItem?.label ?? (activeView === 'purchase-entry' ? 'Purchase Entry' : 'Dashboard')}</span>
-        </nav>
-        <span className="hidden shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11.5px] font-medium text-slate-500 md:inline-flex">
-          <Calendar className="h-3.5 w-3.5 text-slate-400" />
-          {new Date().toLocaleDateString('en-PK', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
-        </span>
+        {/* ============ MAIN — page scroll nahi, har view apna internal layout manage karta hai ============ */}
+        <main className="mx-auto w-full max-w-[1500px] flex-1 min-h-0 overflow-hidden px-3 py-3 sm:px-5">
+          {children}
+        </main>
       </div>
-
-      {/* ============ SUB-NAV CHIPS — sirf <lg (mega-dropdown hover-based hai) ============ */}
-      <div className="z-20 flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-slate-200 bg-white px-3 py-2 lg:hidden [&::-webkit-scrollbar]:h-0">
-        {activeModule.items.map((n) => {
-          const on = n.key === highlightView
-          return (
-            <Link
-              key={n.key}
-              href={VIEW_PATH[n.key as NavKey]}
-              onClick={guardNavClick(n.key)}
-              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-[11.5px] font-semibold transition-colors ${
-                on ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm shadow-emerald-600/30' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700'
-              }`}
-            >
-              <n.icon className="h-3.5 w-3.5" />
-              {n.label}
-            </Link>
-          )
-        })}
-      </div>
-
-      {/* ============ MAIN — page scroll nahi, har view apna internal layout manage karta hai ============ */}
-      <main className="mx-auto w-full max-w-[1500px] flex-1 min-h-0 overflow-hidden px-3 py-3 sm:px-5">
-        {children}
-      </main>
 
       {/* ⌘K QuickNav dialog */}
       <QuickNav open={quickOpen} onOpenChange={setQuickOpen} items={quickItems} onNavigate={quickNavigate} />
