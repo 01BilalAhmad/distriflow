@@ -38,6 +38,8 @@ export const VIEW_PATH: Record<ViewKey, string> = {
   'reports-returns-claims': '/reports/returns-claims',
   'reports-top-shops': '/reports/top-shops',
   'sales-app': '/sales-app',
+  // Task 78 — distributor apni profile (bill print ka naam/cell) + tax/GST settings
+  settings: '/settings',
 }
 
 /** pathname → ViewKey (pehla segment; /reports/<tab> 2-segment special case).

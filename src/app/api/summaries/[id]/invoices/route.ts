@@ -14,7 +14,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       where: { id },
       include: {
         salesman: { select: { id: true, name: true } },
-        distributor: { select: { businessName: true, city: true } },
+        distributor: { select: { businessName: true, city: true, user: { select: { phone: true } } } },
         orders: {
           include: {
             outlet: { select: { name: true, code: true, channel: true, address: true, ownerName: true, phone: true, ntn: true, cnic: true } },
@@ -41,6 +41,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       salesmanName: summary.salesman.name,
       distributorName: summary.distributor.businessName,
       distributorCity: summary.distributor.city,
+      // Task 78: bill print header par Cell No — settings page se manage hota hai
+      distributorPhone: summary.distributor.user?.phone ?? null,
       summaryNo: summary.summaryNo,
       status: o.status,
       subtotal: o.subtotal,

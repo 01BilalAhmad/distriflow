@@ -30,7 +30,7 @@ import {
   Users, Gift, Undo2, BarChart3, Package2, LogOut, Building2,
   ClipboardList, FileStack, Wallet, BookText, HandCoins, Landmark,
   Database, Map as MapIcon, TrendingUp, Receipt, Target, Boxes,
-  ChevronRight, ChevronLeft, Search, Calendar, Menu, PanelLeftClose, PanelLeftOpen, X,
+  Settings as SettingsIcon, ChevronRight, ChevronLeft, Search, Calendar, Menu, PanelLeftClose, PanelLeftOpen, X,
 } from 'lucide-react'
 
 // group = sidebar section header — items usi order mein neeche aate hain
@@ -76,6 +76,8 @@ const NAV: { key: string; label: string; icon: typeof LayoutDashboard; roles: st
   // Business Network — company aur distribution tree
   { key: 'companies', label: 'Companies (Procurement)', icon: Building2, roles: ['DISTRIBUTOR'], group: 'Business Network', desc: 'Procurement & purchase rates' },
   { key: 'distributors', label: 'My Network', icon: Network, roles: ['DISTRIBUTOR'], group: 'Business Network', desc: 'Distribution network tree' },
+  // Task 78 — System: distributor apni profile + bill/tax settings khud manage kare
+  { key: 'settings', label: 'Settings', icon: SettingsIcon, roles: ['DISTRIBUTOR'], group: 'System', desc: 'Distributor profile, bill print & tax rates' },
   // SALESMAN top nav tak pohanchta hi nahi (SalesmanApp render hota hai) — sirf type fallback
   { key: 'sales-app', label: 'Order Booker App', icon: Package2, roles: ['SALESMAN'], group: 'Overview', desc: 'Field app for bookers' },
 ]
@@ -93,6 +95,7 @@ const MODULES: { name: string; icon: typeof LayoutDashboard }[] = [
   { name: 'Stock & Catalog', icon: Package },
   { name: 'Field Operations', icon: Route },
   { name: 'Business Network', icon: Network },
+  { name: 'System', icon: SettingsIcon },
 ]
 
 // Task 71 — sidebar ki grouped list (desktop expanded / collapsed rail / mobile drawer

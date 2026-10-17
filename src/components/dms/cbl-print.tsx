@@ -478,6 +478,8 @@ export interface InvoiceData {
   salesmanName: string | null
   distributorName: string
   distributorCity?: string | null
+  /** Task 78: distributor ka cell number (settings page se) — bill header par naam ke neeche */
+  distributorPhone?: string | null
   summaryNo?: string | null
   status: string
   subtotal: number
@@ -624,10 +626,15 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
   return (
     <div className="cbl-doc">
       <div className="cbl-page bg-white px-8 py-6">
-        {/* header — center: distributor + address line (real invoice jaisa underlined) */}
+        {/* header — center: distributor + address line (real invoice jaisa underlined).
+            Task 78: naam ki SIRF 1 line (user: "Name ki ak line hi chahiye Jo 1st wali hy") —
+            2nd repeated uppercase line REMOVE, uski jagah Cell No (settings page se manage).
+            Phone na seta ho to sirf naam line dikhti hai. */}
         <div className="text-center">
           <p className="text-[17px] font-bold underline">{inv.distributorName} ({inv.distributorCity ?? ''})</p>
-          <p className="mt-1 text-[11px] font-bold underline">{inv.distributorName.toUpperCase()} {inv.distributorCity?.toUpperCase()}</p>
+          {inv.distributorPhone?.trim() ? (
+            <p className="mt-1 text-[11px] font-bold">Cell No: {inv.distributorPhone.trim()}</p>
+          ) : null}
         </div>
 
         {/* customer block (left) + invoice meta (right) — real invoice jaisi field list */}

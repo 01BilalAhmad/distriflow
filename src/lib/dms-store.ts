@@ -36,6 +36,7 @@ export type ViewKey =
   | 'reports-returns-claims'
   | 'reports-top-shops'
   | 'sales-app'
+  | 'settings'
 
 /**
  * Task 65 — activeView zustand se HATA diya. Har section ka apna URL route hai

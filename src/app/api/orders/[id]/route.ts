@@ -13,7 +13,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       include: {
         outlet: true,
         salesman: { select: { id: true, name: true } },
-        distributor: { select: { businessName: true, city: true } },
+        distributor: { select: { businessName: true, city: true, user: { select: { phone: true } } } },
         summary: { select: { summaryNo: true, deliveryDate: true } },
         items: { include: { product: { select: { name: true, sku: true, unitsPerCarton: true, boxesPerCarton: true, pcsPerBox: true, consumerPrice: true, gstEnabled: true, gstRate: true } }, scheme: { select: { name: true } } } },
         deliveries: { include: { items: true } },
@@ -29,6 +29,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         salesmanName: order.salesman?.name ?? null,
         distributorName: order.distributor.businessName,
         distributorCity: order.distributor.city,
+        // Task 78: bill print header par Cell No — settings page se manage hota hai
+        distributorPhone: order.distributor.user?.phone ?? null,
         summaryNo: order.summary?.summaryNo ?? null,
         summaryDeliveryDate: order.summary ? new Date(order.summary.deliveryDate).toISOString() : null,
         status: order.status,
