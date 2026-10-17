@@ -30,7 +30,7 @@ import {
   Users, Gift, Undo2, BarChart3, Package2, LogOut, Building2,
   ClipboardList, FileStack, Wallet, BookText, HandCoins, Landmark,
   Database, Map as MapIcon, TrendingUp, Receipt, Target, Boxes,
-  ChevronRight, Search, Calendar, Menu, PanelLeftClose, PanelLeftOpen, X,
+  ChevronRight, ChevronLeft, Search, Calendar, Menu, PanelLeftClose, PanelLeftOpen, X,
 } from 'lucide-react'
 
 // group = sidebar section header — items usi order mein neeche aate hain
@@ -275,11 +275,27 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
   }, [])
 
   function toggleCollapsed() {
-    setCollapsed((v) => {
-      localStorage.setItem('dms_sidebar_collapsed', v ? '0' : '1')
-      return !v
-    })
+    // Task 73: closure-based (Task 72 toggleGroup jaisa) — pure updater + side-effect alag
+    const next = !collapsed
+    setCollapsed(next)
+    try { localStorage.setItem('dms_sidebar_collapsed', next ? '1' : '0') } catch {}
   }
+
+  // Task 73 — Ctrl+B / Cmd+B sidebar collapse toggle (VS Code standard shortcut —
+  // power users keyboard se sidebar collapse/expand kar sakte hain)
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault()
+        setCollapsed((v) => {
+          try { localStorage.setItem('dms_sidebar_collapsed', v ? '0' : '1') } catch {}
+          return !v
+        })
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   // Drawer Esc par band (mobile)
   useEffect(() => {
@@ -475,8 +491,20 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
     <div className="h-screen overflow-hidden flex bg-[#f6f8fb]">
       {/* ============ DARK SIDEBAR (desktop ≥lg) ============ */}
       <aside
-        className={`df-sidebar hidden h-full shrink-0 flex-col bg-slate-900 transition-[width] duration-200 lg:flex ${collapsed ? 'w-[72px]' : 'w-[264px]'}`}
+        className={`df-sidebar relative hidden h-full shrink-0 flex-col bg-slate-900 transition-[width] duration-200 lg:flex ${collapsed ? 'w-[72px]' : 'w-[264px]'}`}
       >
+        {/* Task 73 — EDGE COLLAPSE PIN: sidebar ke border par floating toggle (Notion/
+            Supabase style). User feedback tha ke collapse effect nazar nahi aata — ab
+            sidebar khud apna collapse control barhta hai, chhupaya nahi gaya. */}
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          title={collapsed ? 'Sidebar barhayein (Ctrl+B)' : 'Sidebar collapse karein (Ctrl+B)'}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className="absolute -right-3.5 top-4 z-30 hidden h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 shadow-md transition-all hover:scale-110 hover:border-emerald-300 hover:text-emerald-600 lg:flex"
+        >
+          {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
+        </button>
         <SidebarBrand collapsed={collapsed} />
         <nav aria-label="Main navigation" className="sidebar-scroll min-h-0 flex-1 overflow-y-auto px-2.5 pb-4">
           <SidebarNav modules={modules} activeKey={highlightView ?? ''} collapsed={collapsed} itemClick={guardNavClick} openGroups={openGroups} toggleGroup={toggleGroup} />
