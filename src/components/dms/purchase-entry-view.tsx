@@ -27,6 +27,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { api, fmtPKR, fmtNum } from '@/lib/dms-api'
 import type { CompanyFullDTO, ProductDTO } from '@/lib/dms-types'
+import { ProductCombobox } from '@/components/dms/product-combobox'
 import { useDMS } from '@/lib/dms-store'
 import { CompanyLogo } from './companies-view'
 import { toast } from '@/hooks/use-toast'
@@ -382,14 +383,15 @@ export function PurchaseEntryView() {
             <div key={it.key} className="relative grid grid-cols-12 gap-2 items-end rounded-lg border bg-slate-50/50 p-3 pr-9">
               <div className="col-span-12 sm:col-span-4 space-y-0.5">
                 <Label className="text-[10px] text-slate-400">Product {idx + 1}</Label>
-                <Select value={it.productId} onValueChange={(v) => onProductChange(it.key, v)}>
-                  <SelectTrigger className="h-9 w-full bg-white"><SelectValue placeholder="Product" /></SelectTrigger>
-                  <SelectContent>
-                    {companyProducts.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>{p.sku} — {p.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {/* Task 81: SEARCHABLE product picker — naam/SKU likh kar dhoond ke add karo */}
+                <ProductCombobox
+                  products={companyProducts.map((p) => ({ id: p.id, name: p.name, sku: p.sku, brand: p.brand }))}
+                  value={it.productId}
+                  onSelect={(v) => onProductChange(it.key, v)}
+                  placeholder="Product"
+                  searchPlaceholder="Product ka naam ya SKU likhein..."
+                  triggerClassName="h-9 w-full bg-white"
+                />
               </div>
               <div className="col-span-4 sm:col-span-2 space-y-0.5">
                 <Label className="text-[10px] text-slate-400">Cartons *</Label>

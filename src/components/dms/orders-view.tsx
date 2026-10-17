@@ -18,6 +18,7 @@ import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR, fmtDate, STATUS_STYLES, statusLabel } from '@/lib/dms-api'
 import type { OrderDTO, OrderItemDTO, OutletDTO, ProductDTO, SchemeDTO, SalesmanPerfDTO } from '@/lib/dms-types'
 import { UnitQtyInputs, splitPcs, fmtQty, packHint } from '@/components/dms/unit-qty'
+import { ProductCombobox } from '@/components/dms/product-combobox'
 import { PrintFrame, CblInvoiceDoc, keepDialogBehind, type InvoiceData } from '@/components/dms/cbl-print'
 import { orderGrandPayable, splitManualByNet, aggregateSchemePromos } from '@/lib/dms-order-calc'
 import { Plus, Eye, XCircle, Loader2, Search, ShoppingCart, Printer, Percent, Gift, ChevronsUpDown, Check, Store } from 'lucide-react'
@@ -729,29 +730,29 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
               <div key={i} className="rounded-lg border p-3 space-y-2 bg-slate-50/50">
                 {/* Task 46: Trade Offer UPPER bill row ka COLUMN hai (invoice PDF ke table jaisa) — neeche sub-row me nahi */}
                 <div className="flex flex-wrap gap-2 items-start">
-                  <Select
-                    value={lines[i]?.productId}
-                    onValueChange={(v) => {
-                      const next = [...lines]
-                      const np = products.find((x) => x.id === v)
-                      next[i] = { ...next[i], productId: v, qtyPcs: Math.max(1, np?.unitsPerCarton ?? 1), tradeOffer: '' }
-                      setLines(next)
-                    }}
-                  >
-                    <SelectTrigger className="flex-1 h-9 min-w-[180px]"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {products.map((p) => {
+                  {/* Task 81: SEARCHABLE product picker — naam/SKU likh kar dhoond ke add karo
+                      (plain dropdown mein products scroll karna mushkil tha) */}
+                  <div className="flex-1 min-w-[180px]">
+                    <ProductCombobox
+                      products={products.map((p) => {
                         const used = lines.some((l, j) => j !== i && l.productId === p.id)
                         const availCtn = p.available / Math.max(1, p.unitsPerCarton)
-                        return (
-                          <SelectItem key={p.id} value={p.id} disabled={used || p.available <= 0}>
-                            {p.name} — {fmtPKR(p.tradePrice)}/crtn ({p.unitsPerCarton} pcs)
-                            {used ? ' • pehle se add' : p.available <= 0 ? ' • out of stock' : ` • avail ${availCtn.toFixed(2)} ctn`}
-                          </SelectItem>
-                        )
+                        return {
+                          id: p.id, name: p.name, sku: p.sku, brand: p.brand,
+                          meta: `${fmtPKR(p.tradePrice)}/crtn (${p.unitsPerCarton} pcs) • ${used ? 'pehle se add' : p.available <= 0 ? 'out of stock' : `avail ${availCtn.toFixed(2)} ctn`}`,
+                          disabled: used || p.available <= 0,
+                          disabledReason: used ? 'pehle se add' : p.available <= 0 ? 'out of stock' : undefined,
+                        }
                       })}
-                    </SelectContent>
-                  </Select>
+                      value={lines[i]?.productId ?? ''}
+                      onSelect={(v) => {
+                        const next = [...lines]
+                        const np = products.find((x) => x.id === v)
+                        next[i] = { ...next[i], productId: v, qtyPcs: Math.max(1, np?.unitsPerCarton ?? 1), tradeOffer: '' }
+                        setLines(next)
+                      }}
+                    />
+                  </div>
                   <UnitQtyInputs
                     pcs={lines[i]?.qtyPcs ?? 0}
                     upc={lineProduct ? Math.max(1, lineProduct.unitsPerCarton) : 1}
