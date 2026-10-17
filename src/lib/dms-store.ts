@@ -18,6 +18,7 @@ export type ViewKey =
   | 'companies'
   | 'purchase-entry'
   | 'outlets'
+  | 'new-shops'
   | 'distributors'
   | 'pjp'
   | 'visit-map'

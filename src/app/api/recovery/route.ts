@@ -195,7 +195,7 @@ export async function POST(req: Request) {
       userId: string
       bookerId?: string | null
       date?: string
-      entries: Array<{ outletId: string; amount: number; method?: string; reference?: string; note?: string }>
+      entries: Array<{ outletId: string; amount: number; method?: string; reference?: string; note?: string; clientRef?: string }>
     }
     if (!userId) return jsonError('userId required')
     if (!Array.isArray(entries) || entries.length === 0) return jsonError('Kam az kam ek shop ki entry zaroori hai')
@@ -225,10 +225,21 @@ export async function POST(req: Request) {
         method,
         reference: (e.reference ?? '').trim() || null,
         note: (e.note ?? '').trim() || null,
+        clientRef: (e.clientRef ?? '').trim() || null, // Task 85: offline sync idempotency
       }
     })
     if (clean.some((e) => !e.outletId || !(e.amount > 0))) return jsonError('Amount 0 se bara hona chahiye har entry mein')
     if (clean.some((e) => e.method !== 'CASH' && !e.reference)) return jsonError('Cheque/Bank ke liye reference number zaroori hai')
+
+    // Task 85: IDEMPOTENT SYNC — clientRef pehle se posted ho to wo entry skip (duplicate wasooli nahi)
+    const allRefs = clean.map((c) => c.clientRef).filter((v): v is string => !!v)
+    const existingRefs = allRefs.length
+      ? new Set((await db.recovery.findMany({ where: { clientRef: { in: allRefs } }, select: { clientRef: true } })).map((r) => r.clientRef))
+      : new Set<string>()
+    const fresh = clean.filter((c) => !c.clientRef || !existingRefs.has(c.clientRef))
+    if (fresh.length === 0) {
+      return Response.json({ posted: [], duplicates: clean.length, message: 'Ye recoveries pehle sync ho chuki hain' })
+    }
 
     const recoveredAt = date ? new Date(date) : new Date()
     const postedBy = me.name
@@ -237,7 +248,7 @@ export async function POST(req: Request) {
       const posted: Array<{ recoveryNo: string; receiptNo: string | null; outletName: string; amount: number; method: string; status: string }> = []
       const isBooker = me.role === 'SALESMAN' // booker ki entry PENDING jati hai — admin approve karega
 
-      for (const e of clean) {
+      for (const e of fresh) {
         const outlet = await tx.outlet.findUnique({
           where: { id: e.outletId },
           select: { id: true, name: true, code: true, salesmanId: true, distributorId: true },
@@ -286,6 +297,7 @@ export async function POST(req: Request) {
             recoveredAt,
             postedByName: postedBy,
             status: isBooker ? 'PENDING' : 'APPROVED',
+            clientRef: e.clientRef,
           },
         })
 

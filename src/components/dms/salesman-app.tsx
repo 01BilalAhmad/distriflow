@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
 import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR, fmtDate, STATUS_STYLES, statusLabel } from '@/lib/dms-api'
 import type { PJPPlanDTO, PjpTodayDTO, ProductDTO, OrderDTO, RecoveryData, RecoveryRowDTO, RecoveryShopDTO, SalesmanPerfDTO, LedgerEntryDTO } from '@/lib/dms-types'
@@ -14,9 +15,9 @@ import { UnitQtyInputs, splitPcs, fmtQty, packHint } from '@/components/dms/unit
 import { orderGrandPayable } from '@/lib/dms-order-calc'
 import { DAY_LIST, DAY_LABELS, VisitDayChips } from '@/components/dms/outlets-view'
 import { karachiDayCode, isSameKarachiDay } from '@/lib/dms-day'
-import { Route, Store, ShoppingCart, ClipboardList, User, MapPin, LogIn, LogOut, Plus, Trash2, Loader2, CheckCircle2, Navigation, Wallet, Percent, XCircle, HandCoins, CalendarDays, Clock3, Eye, Banknote, Lock, RefreshCw, Play, Square, CloudUpload, WifiOff, ReceiptText, Target, BookText } from 'lucide-react'
+import { Route, Store, ShoppingCart, ClipboardList, User, MapPin, LogIn, LogOut, Plus, Trash2, Loader2, CheckCircle2, Navigation, Wallet, Percent, XCircle, HandCoins, CalendarDays, Clock3, Eye, Banknote, Lock, RefreshCw, Play, Square, CloudUpload, CloudDownload, WifiOff, ReceiptText, Target, BookText } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
-import { addToQueue, clearSnapshot, getQueue, isNetworkError, saveSnapshot, syncQueue, useRouteState, todayStr, type PendingSync, type RouteSnapshot } from '@/lib/route-cache'
+import { addToQueue, clearSnapshot, getQueue, getLastSync, isNetworkError, markSync, saveSnapshot, syncQueue, useRouteState, todayStr, type PendingSync, type RouteSnapshot } from '@/lib/route-cache'
 
 type Tab = 'day' | 'shops' | 'orders' | 'me'
 
@@ -44,19 +45,19 @@ export function SalesmanApp() {
     } catch { /* ignore */ } finally { setSyncing(false) }
   }, [user, syncing])
 
+  // Task 85: AUTO-SYNC BAND — sync ab sirf MANUAL hai (Me tab: Sync Up / Sync Down).
+  // Online/offline status sirf badge ke liye track hota hai, koi background sync nahi chalta.
   useEffect(() => {
-    const on = () => { setOnline(true); doSync(true) }
+    const on = () => setOnline(true)
     const off = () => setOnline(false)
     window.addEventListener('online', on)
     window.addEventListener('offline', off)
     setOnline(navigator.onLine)
-    const iv = setInterval(() => { if (navigator.onLine) doSync(true) }, 25000)
     return () => {
       window.removeEventListener('online', on)
       window.removeEventListener('offline', off)
-      clearInterval(iv)
     }
-  }, [doSync])
+  }, [])
 
   return (
     <div className="min-h-screen bg-slate-50 pb-20">
@@ -151,21 +152,8 @@ function MyDayTab({ online, syncing, onSync, onGoShops }: { online: boolean; syn
     }
     setStarting(true)
     try {
-      const [rcv, prod] = await Promise.all([
-        api<RecoveryData>(`/api/recovery?userId=${user.id}&bookerId=${user.id}`),
-        api<{ products: ProductDTO[] }>(`/api/products?userId=${user.id}`),
-      ])
-      const snap: RouteSnapshot = {
-        userId: user.id,
-        date: todayStr(),
-        startedAt: new Date().toISOString(),
-        allRoutesAllowed: rcv.bookers.find((b) => b.id === user.id)?.allRoutesOpen ?? false,
-        shops: rcv.shops,
-        products: prod.products,
-        history: rcv.history.slice(0, 30),
-        pending: rcv.pending,
-      }
-      saveSnapshot(snap)
+      const snap = await downloadSnapshot(user.id)
+      markSync(user.id, 'down')
       toast({ title: `Route Start ✓ — ${snap.shops.length} shops download`, description: `${snap.products.length} products + balances device par — ab offline bhi kaam hoga` })
     } catch (e) {
       toast({ title: 'Route start failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' })
@@ -505,6 +493,29 @@ function RouteEndReportDialog({ report, onClose }: { report: RouteEndReport; onC
 // Task 82: din hamesha Karachi se (browser foreign timezone par bhi sahi route)
 const TODAY_CODE = () => karachiDayCode()
 
+/**
+ * Task 85: SYNC DOWN — shops + products + balances device par download (offline working ka data).
+ * Route Start aur Me tab ka "Sync Down" dono isi helper se — shared logic.
+ */
+async function downloadSnapshot(userId: string): Promise<RouteSnapshot> {
+  const [rcv, prod] = await Promise.all([
+    api<RecoveryData>(`/api/recovery?userId=${userId}&bookerId=${userId}`),
+    api<{ products: ProductDTO[] }>(`/api/products?userId=${userId}`),
+  ])
+  const snap: RouteSnapshot = {
+    userId,
+    date: todayStr(),
+    startedAt: new Date().toISOString(),
+    allRoutesAllowed: rcv.bookers.find((b) => b.id === userId)?.allRoutesOpen ?? false,
+    shops: rcv.shops,
+    products: prod.products,
+    history: rcv.history.slice(0, 30),
+    pending: rcv.pending,
+  }
+  saveSnapshot(snap)
+  return snap
+}
+
 function ShopsTab({ online, onGoDay }: { online: boolean; onGoDay: () => void }) {
   const user = useDMS((s) => s.user)
   const { snapshot, today, queue } = useRouteState(user?.id)
@@ -520,6 +531,8 @@ function ShopsTab({ online, onGoDay }: { online: boolean; onGoDay: () => void })
   const [flags, setFlags] = useState<PjpTodayDTO | null>(null)
   const [unplannedOpen, setUnplannedOpen] = useState(false)
   const [orderUnplanned, setOrderUnplanned] = useState(false)
+  // Task 85: nayi shop tag karna (GPS ke sath) — offline queue ya direct upload
+  const [newShopOpen, setNewShopOpen] = useState(false)
 
   useEffect(() => {
     if (!user) return
@@ -588,6 +601,29 @@ function ShopsTab({ online, onGoDay }: { online: boolean; onGoDay: () => void })
       {flags && !flags.unplannedEnabled && !flags.fridayOff && (
         <p className="text-[10px] text-slate-400 text-center">Unplanned orders admin ne band kar diye hain — sirf route shops par order hoga</p>
       )}
+
+      {/* Task 85: NAYI SHOP TAG — GPS ke sath nayi dukan add karo (offline bhi chalti hai) */}
+      <button type="button" onClick={() => setNewShopOpen(true)} className="w-full flex items-center gap-3 rounded-xl border-2 border-dashed border-emerald-400 bg-emerald-50 p-3.5 text-left hover:bg-emerald-100 transition-colors">
+        <span className="h-10 w-10 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0"><Store className="h-5 w-5" /></span>
+        <span className="min-w-0">
+          <span className="block text-sm font-bold text-emerald-800 leading-tight">Nayi Shop Tag Karein</span>
+          <span className="block text-[11px] text-emerald-600 leading-snug mt-0.5">Nayi dukan — name/address/owner/phone/CNIC/NTN ke sath, location lazmi. Admin approve karega tab route mein aayegi</span>
+        </span>
+      </button>
+      {/* Local queue — tag ki hui shops jo abhi Sync Up ka intezar kar rahi hain */}
+      {(() => {
+        const ns = queue.filter((q) => q.kind === 'NEW_SHOP')
+        if (ns.length === 0) return null
+        return (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+            <p className="text-[11px] font-bold text-amber-800">TAGGED NEW SHOPS — SYNC KA INTEZAR ({ns.length})</p>
+            {ns.map((q) => (
+              <p key={q.id} className="text-[11px] text-amber-700 truncate">• {q.label}{q.lastError ? ` — fail: ${q.lastError}` : ''}</p>
+            ))}
+            <p className="text-[10px] text-amber-600 mt-1">Me tab se <b>Sync Up</b> dabayein to ye server par chali jayengi</p>
+          </div>
+        )
+      })()}
 
       {!flags?.fridayOff && (<>
       {/* Aaj ka route summary + All Routes switch */}
@@ -774,6 +810,11 @@ function ShopsTab({ online, onGoDay }: { online: boolean; onGoDay: () => void })
       {/* Task 84: shop ledger — booker apni shop ka poora khata dekhe */}
       {ledgerShop && user && (
         <ShopLedgerDialog shop={ledgerShop} userId={user.id} onClose={() => setLedgerShop(null)} />
+      )}
+
+      {/* Task 85: nayi shop tag dialog — GPS lazmi, offline queue */}
+      {newShopOpen && user && (
+        <NewShopDialog userId={user.id} onClose={() => setNewShopOpen(false)} />
       )}
 
       {/* Shop-wise order punch (popup ke Order option se, ya Unplanned picker se) */}
@@ -1092,6 +1133,111 @@ function ShopLedgerDialog({ shop, userId, onClose }: {
         {/* Footer hint */}
         <div className="shrink-0 border-t p-3">
           <p className="text-[10px] text-slate-400 text-center flex items-center justify-center gap-1"><BookText className="h-3 w-3" /> Udhaar (laal) badhta hai, wasooli/wapsi (sabz) kam karti hai — Bal running balance hai</p>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/* ================= NEW SHOP TAG (Task 85 — offline-first, GPS lazmi) ================= */
+function NewShopDialog({ userId, onClose }: { userId: string; onClose: () => void }) {
+  const [form, setForm] = useState({ name: '', ownerName: '', ownerPhone: '', address: '', city: 'Lahore', channel: 'KIRYANA', cnic: '', ntn: '' })
+  const [saving, setSaving] = useState(false)
+  // GPS shop tag ke liye LAZMI — dialog khulte hi auto capture (order sheet jaisa hi pattern)
+  const [gps, setGps] = useState<{ lat: number; lng: number; accuracy?: number } | null>(null)
+  const [gpsStatus, setGpsStatus] = useState<'capturing' | 'captured' | 'failed'>('capturing')
+
+  const fetchGps = useCallback(() => {
+    setGpsStatus('capturing')
+    captureGps().then((g) => { if (g) { setGps(g); setGpsStatus('captured') } else setGpsStatus('failed') })
+  }, [])
+  useEffect(() => { fetchGps() }, [fetchGps])
+
+  async function submit() {
+    if (!form.name.trim() || !form.ownerName.trim() || !form.ownerPhone.trim() || !form.address.trim()) {
+      toast({ title: 'Missing fields', description: 'Shop name, owner name, phone aur address lazmi hain', variant: 'destructive' })
+      return
+    }
+    if (!gps) {
+      toast({ title: 'GPS capture lazmi hai', description: 'Location nahi mili — Retry dabayein, phir shop tag karein', variant: 'destructive' })
+      return
+    }
+    setSaving(true)
+    const clientRef = `shop_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const payload = JSON.stringify({
+      userId, clientRef,
+      name: form.name.trim(), ownerName: form.ownerName.trim(), ownerPhone: form.ownerPhone.trim(),
+      address: form.address.trim(), city: form.city.trim(), channel: form.channel,
+      cnic: form.cnic.trim(), ntn: form.ntn.trim(),
+      lat: gps.lat, lng: gps.lng,
+    })
+    const label = `${form.name.trim()} — ${form.ownerName.trim()}`
+    // OFFLINE — queue mein (Sync Up par server jayegi)
+    if (!navigator.onLine) {
+      addToQueue(userId, { kind: 'NEW_SHOP', label, url: '/api/outlets/tag', method: 'POST', body: payload })
+      setSaving(false)
+      toast({ title: 'Offline — shop tag queue mein save ✓', description: 'Me tab se Sync Up karein to server par jayegi' })
+      onClose()
+      return
+    }
+    try {
+      const r = await api<{ outlet: { code: string; name: string; status: string } }>('/api/outlets/tag', { method: 'POST', body: payload })
+      toast({ title: `Shop Tagged ✓ — ${r.outlet.code}`, description: 'Admin approval ke baad ye shop route aur outlets mein nazar aayegi' })
+      onClose()
+    } catch (e) {
+      if (isNetworkError(e)) {
+        addToQueue(userId, { kind: 'NEW_SHOP', label, url: '/api/outlets/tag', method: 'POST', body: payload })
+        toast({ title: 'Network fail — shop tag queue mein save ✓', description: 'Me tab se Sync Up karein to server par jayegi' })
+        onClose()
+      } else {
+        toast({ title: 'Failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' })
+      }
+    } finally { setSaving(false) }
+  }
+
+  const valid = form.name.trim() && form.ownerName.trim() && form.ownerPhone.trim() && form.address.trim()
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
+      <DialogContent className="max-w-md max-h-[90vh] p-0 gap-0 overflow-hidden flex flex-col" aria-describedby={undefined}>
+        <DialogTitle className="sr-only">Nayi Shop Tag</DialogTitle>
+        <div className="shrink-0 border-b bg-slate-50 p-3.5 pr-12">
+          <p className="font-bold text-slate-900 text-sm flex items-center gap-1.5"><Store className="h-4 w-4 text-emerald-600 shrink-0" /> Nayi Shop Tag Karein</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">Shop ke owner ke sath khare ho kar GPS tag karein — admin approval ke baad shop active hogi</p>
+          {gpsStatus === 'capturing' && (
+            <span className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[9px] font-bold text-amber-700"><Loader2 className="h-3 w-3 animate-spin" /> LOCATION CAPTURE HO RAHI HAI...</span>
+          )}
+          {gpsStatus === 'captured' && (
+            <span className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700"><MapPin className="h-3 w-3" /> LOCATION CAPTURED {gps?.accuracy ? `(±${Math.round(gps.accuracy)}m)` : ''} ✓</span>
+          )}
+          {gpsStatus === 'failed' && (
+            <button type="button" onClick={fetchGps} className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-red-50 border border-red-200 px-1.5 py-0.5 text-[9px] font-bold text-red-600 hover:bg-red-100 transition-colors"><MapPin className="h-3 w-3" /> LOCATION NAHI MILI — RETRY</button>
+          )}
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto p-3 grid gap-2.5">
+          <div className="grid gap-1"><Label className="text-[11px]">Shop Name *</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Al-Rehman Kiryana Store" /></div>
+          <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid gap-1"><Label className="text-[11px]">Owner Name *</Label><Input value={form.ownerName} onChange={(e) => setForm({ ...form, ownerName: e.target.value })} placeholder="Malik sahab" /></div>
+            <div className="grid gap-1"><Label className="text-[11px]">Owner Phone *</Label><Input value={form.ownerPhone} onChange={(e) => setForm({ ...form, ownerPhone: e.target.value })} inputMode="tel" placeholder="03xx xxxxxxx" /></div>
+          </div>
+          <div className="grid gap-1"><Label className="text-[11px]">Address *</Label><Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Mohalla, street, landmark" /></div>
+          <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid gap-1"><Label className="text-[11px]">City</Label><Input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} /></div>
+            <div className="grid gap-1"><Label className="text-[11px]">Channel Type</Label>
+              <select value={form.channel} onChange={(e) => setForm({ ...form, channel: e.target.value })} className="h-9 rounded-md border bg-white px-2 text-xs font-medium">
+                {['KIRYANA', 'SUPERMARKET', 'WHOLESALE', 'GENERAL'].map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid gap-1"><Label className="text-[11px]">CNIC (owner)</Label><Input value={form.cnic} onChange={(e) => setForm({ ...form, cnic: e.target.value })} placeholder="35202-XXXXXXX-X" className="font-mono" /></div>
+            <div className="grid gap-1"><Label className="text-[11px]">NTN</Label><Input value={form.ntn} onChange={(e) => setForm({ ...form, ntn: e.target.value })} placeholder="1234567-8" className="font-mono" /></div>
+          </div>
+        </div>
+        <div className="shrink-0 border-t p-3">
+          <Button onClick={submit} disabled={saving || !valid || gpsStatus !== 'captured'} className="w-full bg-emerald-600 hover:bg-emerald-700 h-11">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Store className="h-4 w-4 mr-2" />} Shop Tag Karein — GPS ke sath
+          </Button>
+          {gpsStatus !== 'captured' && <p className="text-[10px] text-slate-400 text-center mt-1.5">GPS capture hona lazmi hai — location ke bagair shop tag nahi hogi</p>}
         </div>
       </DialogContent>
     </Dialog>
@@ -1565,6 +1711,8 @@ function MyOrdersTab() {
               <p className="font-bold text-sm">{fmtPKR(orderGrandPayable(o))}</p>
               <div className="flex items-center gap-1 justify-end">
                 {o.unplanned && <Badge variant="outline" className="border-violet-300 text-violet-600 bg-violet-50 text-[8px] px-1 py-0">Unplanned</Badge>}
+                {/* Task 85: booker-tagged shop ka order — approve tak admin ko nazar nahi aayega */}
+                {o.outletStatus === 'PENDING' && <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50 text-[8px] px-1 py-0">PENDING SHOP</Badge>}
                 <Badge variant="outline" className={`${STATUS_STYLES[o.status]} text-[9px]`}>{statusLabel(o.status)}</Badge>
               </div>
             </div>
@@ -1577,7 +1725,95 @@ function MyOrdersTab() {
           <p className="text-xs font-bold text-amber-800">⏳ {queuedRecoveries.length} offline recovery entries bhi queue mein hain — internet aane par sync hongi</p>
         </div>
       )}
+      {queue.some((q) => q.kind === 'NEW_SHOP') && (
+        <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-3">
+          <p className="text-xs font-bold text-emerald-800">🏪 {queue.filter((q) => q.kind === 'NEW_SHOP').length} nayi tag ki hui shops queue mein hain — Me tab se Sync Up karein to admin ke paas approval ke liye jayengi</p>
+        </div>
+      )}
     </div>
+  )
+}
+
+/* ================= MANUAL SYNC SECTION (Task 85 — Sync Up / Sync Down) ================= */
+function SyncSection() {
+  const user = useDMS((s) => s.user)
+  const { queue, refresh } = useRouteState(user?.id)
+  const [syncing, setSyncing] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+  const [version, setVersion] = useState(0)
+
+  useEffect(() => { setVersion((v) => v + 1) }, [queue.length])
+  const last = user ? getLastSync(user.id) : { up: null, down: null }
+  const queuedOrders = queue.filter((q) => q.kind === 'ORDER').length
+  const queuedRecoveries = queue.filter((q) => q.kind === 'RECOVERY').length
+  const queuedShops = queue.filter((q) => q.kind === 'NEW_SHOP').length
+  const totalPending = queuedOrders + queuedRecoveries + queuedShops
+
+  /** SYNC UP — offline data (orders/recoveries/nayi shops) server par upload */
+  async function syncUp() {
+    if (!user || syncing) return
+    if (!navigator.onLine) { toast({ title: 'Internet nahi hai', description: 'Sync up ke liye internet zaroori hai', variant: 'destructive' }); return }
+    if (totalPending === 0) { toast({ title: 'Kuch upload karne ko nahi', description: 'Sab data pehle sync ho chuka hai' }); return }
+    setSyncing(true)
+    try {
+      const r = await syncQueue(user.id)
+      markSync(user.id, 'up')
+      setVersion((v) => v + 1)
+      refresh()
+      toast({
+        title: `Sync Up ✓ — ${r.synced} entries upload`,
+        description: r.failed > 0 ? `${r.failed} entry fail — dobara Sync Up dabayein` : 'Orders, recoveries aur nayi shops server par pohanch gayi',
+      })
+    } catch {
+      toast({ title: 'Sync up failed', description: 'Dobara try karein', variant: 'destructive' })
+    } finally { setSyncing(false) }
+  }
+
+  /** SYNC DOWN — shops + products + balances fresh download (route data refresh) */
+  async function syncDown() {
+    if (!user || downloading) return
+    if (!navigator.onLine) { toast({ title: 'Internet nahi hai', description: 'Sync down ke liye internet zaroori hai', variant: 'destructive' }); return }
+    setDownloading(true)
+    try {
+      const snap = await downloadSnapshot(user.id)
+      markSync(user.id, 'down')
+      setVersion((v) => v + 1)
+      toast({ title: `Sync Down ✓ — ${snap.shops.length} shops + ${snap.products.length} products`, description: 'Taaza data device par download ho gaya — offline working ke liye tayyar' })
+    } catch (e) {
+      toast({ title: 'Sync down failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' })
+    } finally { setDownloading(false) }
+  }
+
+  const fmtT = (iso: string | null) => (iso ? new Date(iso).toLocaleString('en-PK', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'kabhi nahi')
+
+  return (
+    <Card className="border-slate-200 shadow-sm">
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-semibold text-slate-500 flex items-center gap-1"><CloudUpload className="h-3.5 w-3.5" /> SYNC — MANUAL</p>
+          <Badge variant="outline" className={`text-[9px] ${totalPending > 0 ? 'border-amber-300 text-amber-700 bg-amber-50' : 'border-emerald-300 text-emerald-700 bg-emerald-50'}`}>
+            {totalPending > 0 ? `${totalPending} pending upload` : 'sab synced'}
+          </Badge>
+        </div>
+        {totalPending > 0 && (
+          <div className="grid grid-cols-3 gap-1.5 text-center">
+            <div className="rounded-lg bg-slate-50 p-2"><p className="text-[10px] text-slate-500">Orders</p><p className="text-sm font-bold text-slate-800">{queuedOrders}</p></div>
+            <div className="rounded-lg bg-slate-50 p-2"><p className="text-[10px] text-slate-500">Recoveries</p><p className="text-sm font-bold text-slate-800">{queuedRecoveries}</p></div>
+            <div className="rounded-lg bg-slate-50 p-2"><p className="text-[10px] text-slate-500">New Shops</p><p className="text-sm font-bold text-slate-800">{queuedShops}</p></div>
+          </div>
+        )}
+        <Button onClick={syncUp} disabled={syncing || totalPending === 0} className="w-full h-11 bg-amber-500 hover:bg-amber-600 text-white font-bold">
+          {syncing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CloudUpload className="h-4 w-4 mr-2" />} Sync Up — Data Upload Karein
+        </Button>
+        <Button onClick={syncDown} disabled={downloading} variant="outline" className="w-full h-11 border-emerald-300 text-emerald-700 hover:bg-emerald-50 font-bold">
+          {downloading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CloudDownload className="h-4 w-4 mr-2" />} Sync Down — Data Download Karein
+        </Button>
+        <p className="text-[10px] text-slate-400 text-center leading-relaxed" key={version}>
+          Last upload: {fmtT(last.up)} • Last download: {fmtT(last.down)}<br />
+          Kuch bhi khud-ba-khud sync NAHI hota — aap khud buttons daba kar sync karte hain
+        </p>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -1653,6 +1889,9 @@ function MeTab() {
         </Card>
       )}
 
+      {/* Task 85: MANUAL SYNC — Sync Up / Sync Down (auto sync bilkul nahi hota) */}
+      <SyncSection />
+
       <Card className="border-slate-200 shadow-sm">
         <CardContent className="p-4 space-y-2">
           <p className="text-xs font-semibold text-slate-500 flex items-center gap-1"><Wallet className="h-3.5 w-3.5" /> TIPS</p>
@@ -1661,9 +1900,11 @@ function MeTab() {
             • Route ab <b>AUTO</b> hai — shop pe booker + din assign hote hi wo shop usi din nazar aayegi (manual plan ki zaroorat nahi)<br />
             • <b>Order place karte waqt GPS lazmi</b> hai — location ke bagair order create nahi hoga<br />
             • Route ki bahar shop? <b>Shops tab mein "Unplanned Shop"</b> button se order karein (admin ON rakhe to)<br />
-            • <b>Offline bhi kaam hota hai</b> — order/recovery queue mein save hota hai, internet aane par khud sync<br />
+            • Nayi shop mili? <b>Shops tab mein "Nayi Shop Tag Karein"</b> — GPS ke sath tag karein, admin approve karega<br />
+            • <b>Sync ab MANUAL hai</b> — neeche Sync Up (upload) / Sync Down (download) khud dabayein, khud-ba-khud kuch sync nahi hota<br />
+            • <b>Offline bhi kaam hota hai</b> — order/recovery/nayi shop device par save hoti hai, Sync Up par server jayegi<br />
             • <b>Route End</b> par din ka report khulega — total bills, total sale aur total recovery ka khulasa<br />
-            • Shop pr tap karein — Recovery ya Order ka popup khulega; pehle udhaar recovery, phir order<br />
+            • Shop pr tap karein — Recovery, Order ya Ledger ka popup khulega; pehle udhaar recovery, phir order<br />
             • Recovery admin approve karega tab shop ledger update hogi
           </p>
         </CardContent>

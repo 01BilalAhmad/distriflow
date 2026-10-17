@@ -24,7 +24,7 @@ export interface RouteSnapshot {
   pending: RecoveryRowDTO[]
 }
 
-export type QueueKind = 'ORDER' | 'RECOVERY' | 'VISIT'
+export type QueueKind = 'ORDER' | 'RECOVERY' | 'VISIT' | 'NEW_SHOP'
 
 export interface PendingSync {
   id: string
@@ -140,6 +140,16 @@ export async function syncQueue(userId: string): Promise<{ synced: number; faile
     }
   }
   return { synced, failed }
+}
+
+/* ---------- last manual sync timestamps (Task 85 — sync manual hai, auto nahi) ---------- */
+const lastSyncKey = (uid: string) => `dms_last_sync_${uid}`
+export function getLastSync(userId: string): { up: string | null; down: string | null } {
+  return read<{ up: string | null; down: string | null }>(lastSyncKey(userId)) ?? { up: null, down: null }
+}
+export function markSync(userId: string, dir: 'up' | 'down') {
+  const cur = getLastSync(userId)
+  write(lastSyncKey(userId), { ...cur, [dir]: new Date().toISOString() })
 }
 
 /* ---------- react hook — sab components self-subscribing ---------- */

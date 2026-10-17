@@ -27,12 +27,14 @@ export async function GET(req: Request) {
     const scope =
       user.role === 'SALESMAN'
         ? { ...where, orderDate: { gte: karachiDayBounds().start, lt: karachiDayBounds().end } }
-        : where
+        // Task 85: PENDING (booker-tagged) shop ke orders admin ko main lists mein NAHI dikhte —
+        // approve hone par auto-appear (New Shops page se approve karo)
+        : { ...where, outlet: { status: 'APPROVED' } }
 
     const orders = await db.order.findMany({
       where: status && status !== 'ALL' ? { ...scope, status } : scope,
       include: {
-        outlet: { select: { name: true, code: true } },
+        outlet: { select: { name: true, code: true, status: true } },
         salesman: { select: { name: true } },
         distributor: { select: { businessName: true } },
         items: { include: { product: { select: { unitsPerCarton: true } } } },
@@ -47,6 +49,7 @@ export async function GET(req: Request) {
         orderNo: o.orderNo,
         outletName: o.outlet.name,
         outletCode: o.outlet.code,
+        outletStatus: o.outlet.status, // Task 85: PENDING SHOP badge (booker apni tag ki shop ke bills)
         channel: o.channel,
         salesmanName: o.salesman?.name ?? null,
         distributorName: o.distributor.businessName,
@@ -92,8 +95,20 @@ export async function POST(req: Request) {
       lat?: number
       lng?: number
       unplanned?: boolean
+      // Task 85: offline sync idempotency — mobile/booker app ka temp id
+      clientRef?: string
     }
     if (!outletId || !items || items.length === 0) return jsonError('Outlet aur kam az kam 1 item required hai')
+
+    // Task 85: IDEMPOTENT SYNC — same clientRef dobara aaye to wahi order wapas (duplicate bill nahi banta).
+    // Offline app crash/retry ke baad double-upload safe.
+    const clientRef = (body.clientRef ?? '').trim()
+    if (clientRef) {
+      const existing = await db.order.findUnique({ where: { clientRef } })
+      if (existing) {
+        return Response.json({ order: { id: existing.id, orderNo: existing.orderNo, total: existing.total, duplicate: true, unplanned: existing.unplanned } })
+      }
+    }
 
     const outlet = await db.outlet.findUnique({ where: { id: outletId } })
     if (!outlet) return jsonError('Outlet not found', 404)
@@ -102,6 +117,9 @@ export async function POST(req: Request) {
     const tenantId = outlet.distributorId
 
     // ---- Task 82: BOOKER ORDER GATES (GPS lazmi + unplanned/Jumma rules) ----
+    // Task 85: PENDING shop (booker ne khud tag ki) par route/Jumma gates NAHI — wo route mein hoti
+    // hi nahi; GPS phir bhi lazmi. Order approve hone tak admin lists mein chhupa rahega.
+    const isPendingShop = outlet.status === 'PENDING'
     let isUnplanned = false
     let orderLat: number | null = null
     let orderLng: number | null = null
@@ -114,19 +132,23 @@ export async function POST(req: Request) {
       orderLat = latN
       orderLng = lngN
 
-      const pjp = await getPjpSettings(tenantId)
-      const dayCode = karachiDayCode()
-      const bookerId = salesmanId ?? outlet.salesmanId ?? ''
-      const inRoute = bookerId ? outletInTodayRoute(outlet, bookerId, dayCode) : false
-      if (!inRoute) {
-        // Out-of-route shop — sirf tab jab admin ne Unplanned ON rakha ho
-        if (!pjp.unplannedEnabled) {
-          return jsonError('Unplanned orders admin ne OFF kar diye hain — ye shop aaj ki route mein nahi hai', 403)
+      if (isPendingShop) {
+        // Booker ki apni tagged shop — bill ban sakta hai, admin approval ke baad show hoga
+      } else {
+        const pjp = await getPjpSettings(tenantId)
+        const dayCode = karachiDayCode()
+        const bookerId = salesmanId ?? outlet.salesmanId ?? ''
+        const inRoute = bookerId ? outletInTodayRoute(outlet, bookerId, dayCode) : false
+        if (!inRoute) {
+          // Out-of-route shop — sirf tab jab admin ne Unplanned ON rakha ho
+          if (!pjp.unplannedEnabled) {
+            return jsonError('Unplanned orders admin ne OFF kar diye hain — ye shop aaj ki route mein nahi hai', 403)
+          }
+          isUnplanned = true
+        } else if (dayCode === 'FRI' && pjp.fridayOff) {
+          // Jumma OFF — planned route bilkul band, sirf unplanned allowed
+          return jsonError('Aaj Jumma OFF hai — planned shops par order nahi ho sakta, sirf unplanned shops se order bana sakte hain', 403)
         }
-        isUnplanned = true
-      } else if (dayCode === 'FRI' && pjp.fridayOff) {
-        // Jumma OFF — planned route bilkul band, sirf unplanned allowed
-        return jsonError('Aaj Jumma OFF hai — planned shops par order nahi ho sakta, sirf unplanned shops se order bana sakte hain', 403)
       }
     }
 
@@ -231,6 +253,7 @@ export async function POST(req: Request) {
         orderLat,
         orderLng,
         unplanned: isUnplanned,
+        clientRef: clientRef || null,
         notes: notes ?? null,
         items: { create: itemsData },
       },

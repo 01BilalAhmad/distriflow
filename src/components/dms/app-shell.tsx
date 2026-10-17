@@ -71,6 +71,8 @@ const NAV: { key: string; label: string; icon: typeof LayoutDashboard; roles: st
   // Field Operations — routes / dukaanein / team
   { key: 'pjp', label: 'PJP / Routes', icon: Route, roles: ['DISTRIBUTOR', 'SALESMAN'], group: 'Field Operations', desc: 'Routes & visit schedule' },
   { key: 'outlets', label: 'Outlets', icon: Store, roles: ['DISTRIBUTOR', 'SALESMAN'], group: 'Field Operations', desc: 'Shops & booker assignment' },
+  // Task 85 — booker ne jo nayi shops tag ki (offline app/web), admin yahan approve karta hai
+  { key: 'new-shops', label: 'New Shops', icon: Store, roles: ['DISTRIBUTOR'], group: 'Field Operations', desc: 'Booker-tagged shops — approval & edit' },
   { key: 'field-force', label: 'Field Force', icon: Users, roles: ['DISTRIBUTOR'], group: 'Field Operations', desc: 'Order bookers team' },
   { key: 'visit-map', label: 'Visit Map', icon: MapIcon, roles: ['DISTRIBUTOR'], group: 'Field Operations', desc: 'Live location tracking' },
   // Business Network — company aur distribution tree

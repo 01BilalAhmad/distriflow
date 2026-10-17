@@ -19,6 +19,8 @@ export const VIEW_PATH: Record<ViewKey, string> = {
   companies: '/companies',
   'purchase-entry': '/purchase-entry',
   outlets: '/outlets',
+  // Task 85 — booker-tagged new shops (admin approval)
+  'new-shops': '/new-shops',
   distributors: '/distributors',
   pjp: '/pjp',
   'visit-map': '/visit-map',

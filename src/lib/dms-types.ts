@@ -87,6 +87,7 @@ export interface OrderDTO {
   orderNo: string
   outletName: string
   outletCode: string
+  outletStatus?: string | null // Task 85: PENDING = booker-tagged shop (approve tak admin lists mein chhupa)
   channel: string
   salesmanName?: string | null
   distributorName: string

@@ -263,6 +263,10 @@ model Outlet {
   settlements   SummarySettlement[]
   ledgerEntries OutletLedger[]
   recoveries    Recovery[]
+  // Task 85: OFFLINE-FIRST booker tagging — nayi shop booker app se aati hai PENDING, admin approve kare tab ACTIVE
+  status        String   @default("APPROVED") // APPROVED (normal/seed/admin-added) | PENDING (booker-tagged, approval ka intezar)
+  clientRef     String?  @unique // offline app ka temp id — idempotent sync (dobara upload par duplicate nahi)
+  taggedByName  String?  // kis booker ne tag ki (mobile/web app se)
   createdAt     DateTime     @default(now())
 }
 
@@ -400,6 +404,7 @@ model Order {
   orderLat        Float?     // GPS latitude (order booking waqt ka — booker app se)
   orderLng        Float?     // GPS longitude
   unplanned       Boolean    @default(false) // out-of-route order (admin toggle se gated)
+  clientRef       String?    @unique // Task 85: offline sync idempotency — mobile app ka temp id
   notes          String?
   orderDate      DateTime     @default(now())
   summaryId      String?
@@ -624,6 +629,7 @@ model Recovery {
   approvedByName String?
   approvedAt    DateTime?
   reviewNote    String?      // reject reason / approval note
+  clientRef     String?      @unique // Task 85: offline sync idempotency
   createdAt     DateTime @default(now())
 }
 
