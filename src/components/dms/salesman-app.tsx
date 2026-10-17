@@ -813,7 +813,7 @@ function UnplannedShopDialog({ shops, todayCode, onClose, onPick }: {
       <DialogContent className="max-w-sm max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-1.5 text-base"><Navigation className="h-4 w-4 text-violet-600" /> Unplanned Shop</DialogTitle>
-          <DialogDescription>Route ki bahar shop select karein — order ke sath GPS bhi capture hogi</DialogDescription>
+          <DialogDescription>Route ki bahar shop select karein — shop open hote hi location auto capture hogi (lazmi)</DialogDescription>
         </DialogHeader>
         <Input placeholder="Shop ka naam likh kar search karein..." value={search} onChange={(e) => setSearch(e.target.value)} />
         <div className="flex-1 min-h-0 overflow-y-auto space-y-2 -mx-1 px-1">
@@ -946,15 +946,16 @@ function RecoveryCollectDialog({ shop, userId, bookerId, bookerName, onClose, on
 
 type DiscType = 'NONE' | 'PERCENT' | 'FLAT'
 
-/** Task 82: GPS capture — order ke waqt lazmi (fail => null => order create nahi hoga) */
-async function captureGps(): Promise<{ lat: number; lng: number } | null> {
+/** Task 82: GPS capture — lazmi (fail => null => order create nahi hoga). Task 83: accuracy bhi return hoti hai. */
+async function captureGps(): Promise<{ lat: number; lng: number; accuracy?: number } | null> {
   if (typeof navigator === 'undefined' || !navigator.geolocation) return null
   try {
     const pos = await new Promise<GeolocationPosition>((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, { timeout: 8000, maximumAge: 60000 }))
     const lat = pos.coords.latitude
     const lng = pos.coords.longitude
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
-    return { lat, lng }
+    const acc = pos.coords.accuracy
+    return { lat, lng, accuracy: Number.isFinite(acc) ? acc : undefined }
   } catch {
     return null
   }
@@ -1033,6 +1034,18 @@ function OrderBookSheet({ shop, userId, products: snapshotProducts, unplanned, o
   const [search, setSearch] = useState('')
   const [discType, setDiscType] = useState<DiscType>('NONE')
   const [discValue, setDiscValue] = useState('')
+  // Task 83: GPS shop OPEN hote hi AUTO capture hota hai (place ke waqt naya capture nahi — wahi coords evidence)
+  const [gps, setGps] = useState<{ lat: number; lng: number; accuracy?: number } | null>(null)
+  const [gpsStatus, setGpsStatus] = useState<'capturing' | 'captured' | 'failed'>('capturing')
+
+  const fetchGps = useCallback(() => {
+    setGpsStatus('capturing')
+    captureGps().then((g) => {
+      if (g) { setGps(g); setGpsStatus('captured') } else setGpsStatus('failed')
+    })
+  }, [])
+  // Shop open hote hi foran capture shuru — booker products pick karte karte location mil jati hai
+  useEffect(() => { fetchGps() }, [fetchGps])
 
   useEffect(() => {
     if (snapshotProducts && snapshotProducts.length > 0) { setProducts(snapshotProducts); return }
@@ -1112,18 +1125,16 @@ function OrderBookSheet({ shop, userId, products: snapshotProducts, unplanned, o
       toast({ title: 'Stock limit crossed', description: `${names}${overCart.length > 2 ? ` +${overCart.length - 2} aur` : ''} — available stock se zyada book nahi ho sakta`, variant: 'destructive' })
       return
     }
-    setPlacing(true)
-    // Task 82: GPS LAZMI — capture fail to order create hi nahi hoga (planned ya unplanned, har order par)
-    const gps = await captureGps()
+    // Task 83: GPS shop open hote hi auto-capture ho chuka — captured na ho to order place hi nahi hoga
     if (!gps) {
       toast({
         title: 'GPS capture lazmi hai',
-        description: 'Location ke bagair order create nahi ho sakta — phone mein location ON kar ke dobara Place Order dabayein',
+        description: 'Location abhi capture nahi hui — phone mein location ON kar ke "Location nahi mili — Retry" dabayein',
         variant: 'destructive',
       })
-      setPlacing(false)
       return
     }
+    setPlacing(true)
     const items = cart.map((c) => {
       const p = products.find((x) => x.id === c.productId)
       const upc = Math.max(1, p?.unitsPerCarton ?? 1)
@@ -1180,6 +1191,22 @@ function OrderBookSheet({ shop, userId, products: snapshotProducts, unplanned, o
                 <p className="text-[11px] text-slate-400 mt-0.5">{shop.code} • {shop.channel} • {shop.city}</p>
                 {unplanned && (
                   <Badge className="mt-1.5 bg-violet-600 text-white text-[9px] px-1.5">UNPLANNED — out of route</Badge>
+                )}
+                {/* Task 83: GPS status — shop open hote hi auto capture, captured na ho to place disabled */}
+                {gpsStatus === 'capturing' && (
+                  <span className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">
+                    <Loader2 className="h-3 w-3 animate-spin" /> LOCATION CAPTURE HO RAHI HAI...
+                  </span>
+                )}
+                {gpsStatus === 'captured' && (
+                  <span className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">
+                    <MapPin className="h-3 w-3" /> LOCATION CAPTURED {gps?.accuracy ? `(±${Math.round(gps.accuracy)}m)` : ''} ✓
+                  </span>
+                )}
+                {gpsStatus === 'failed' && (
+                  <button type="button" onClick={fetchGps} className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-red-50 border border-red-200 px-1.5 py-0.5 text-[9px] font-bold text-red-600 hover:bg-red-100 transition-colors">
+                    <MapPin className="h-3 w-3" /> LOCATION NAHI MILI — RETRY
+                  </button>
                 )}
               </div>
               <div className="text-right shrink-0">
@@ -1268,6 +1295,9 @@ function OrderBookSheet({ shop, userId, products: snapshotProducts, unplanned, o
           onQtyChange={setItemPcs}
           placing={placing}
           onPlace={placeOrder}
+          gpsStatus={gpsStatus}
+          gpsAccuracy={gps?.accuracy}
+          onRetryGps={fetchGps}
           onClose={() => setCartOpen(false)}
         />
       )}
@@ -1276,7 +1306,7 @@ function OrderBookSheet({ shop, userId, products: snapshotProducts, unplanned, o
 }
 
 /* ================= CART (order review + place) ================= */
-function CartDialog({ cart, products, shopName, cartValue, discType, setDiscType, discValue, setDiscValue, manualDiscount, deleteDiscount, changeQty, onQtyChange, placing, onPlace, onClose }: {
+function CartDialog({ cart, products, shopName, cartValue, discType, setDiscType, discValue, setDiscValue, manualDiscount, deleteDiscount, changeQty, onQtyChange, placing, gpsStatus, gpsAccuracy, onRetryGps, onPlace, onClose }: {
   cart: { productId: string; qtyPcs: number }[]
   products: ProductDTO[]
   shopName: string
@@ -1290,6 +1320,10 @@ function CartDialog({ cart, products, shopName, cartValue, discType, setDiscType
   changeQty: (pid: string, dCtn: number) => void
   onQtyChange: (pid: string, totalPcs: number) => void
   placing: boolean
+  /** Task 83: shop-open GPS auto capture ka status */
+  gpsStatus: 'capturing' | 'captured' | 'failed'
+  gpsAccuracy?: number
+  onRetryGps: () => void
   onPlace: () => void
   onClose: () => void
 }) {
@@ -1370,8 +1404,19 @@ function CartDialog({ cart, products, shopName, cartValue, discType, setDiscType
             <span className="text-sm text-slate-500">Est. Total (before schemes)</span>
             <span className="text-lg font-bold">{fmtPKR(Math.round(cartValue * 100) / 100)}</span>
           </div>
-          <p className="text-[10px] text-slate-400 text-center -mt-1 flex items-center justify-center gap-1"><MapPin className="h-3 w-3" /> Place karte waqt GPS capture hogi — GPS ke bagair order nahi hoga</p>
-          <Button onClick={onPlace} disabled={placing || cart.length === 0} className="w-full bg-emerald-600 hover:bg-emerald-700 h-11">
+          {/* Task 83: live GPS status — captured na ho to Place Order disabled */}
+          {gpsStatus === 'capturing' && (
+            <p className="text-[10px] text-amber-600 text-center -mt-1 flex items-center justify-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Location capture ho rahi hai — thora intezar karein</p>
+          )}
+          {gpsStatus === 'captured' && (
+            <p className="text-[10px] text-emerald-600 text-center -mt-1 flex items-center justify-center gap-1"><MapPin className="h-3 w-3" /> Location captured {gpsAccuracy ? `(±${Math.round(gpsAccuracy)}m)` : ''} ✓ — order place ho sakta hai</p>
+          )}
+          {gpsStatus === 'failed' && (
+            <button type="button" onClick={onRetryGps} className="mx-auto text-[10px] font-bold text-red-600 text-center -mt-1 flex items-center justify-center gap-1 hover:underline">
+              <MapPin className="h-3 w-3" /> Location nahi mili — tap kar ke dobara try karein
+            </button>
+          )}
+          <Button onClick={onPlace} disabled={placing || cart.length === 0 || gpsStatus !== 'captured'} className="w-full bg-emerald-600 hover:bg-emerald-700 h-11">
             {placing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CheckCircle2 className="h-4 w-4 mr-2" />} Place Order
           </Button>
         </div>
