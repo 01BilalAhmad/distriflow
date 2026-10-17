@@ -9,10 +9,11 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR, fmtDate, STATUS_STYLES, statusLabel } from '@/lib/dms-api'
-import type { PJPPlanDTO, ProductDTO, OrderDTO, RecoveryData, RecoveryRowDTO, RecoveryShopDTO, SalesmanPerfDTO } from '@/lib/dms-types'
+import type { PJPPlanDTO, PjpTodayDTO, ProductDTO, OrderDTO, RecoveryData, RecoveryRowDTO, RecoveryShopDTO, SalesmanPerfDTO } from '@/lib/dms-types'
 import { UnitQtyInputs, splitPcs, fmtQty, packHint } from '@/components/dms/unit-qty'
 import { orderGrandPayable } from '@/lib/dms-order-calc'
 import { DAY_LIST, DAY_LABELS, VisitDayChips } from '@/components/dms/outlets-view'
+import { karachiDayCode, isSameKarachiDay } from '@/lib/dms-day'
 import { Route, Store, ShoppingCart, ClipboardList, User, MapPin, LogIn, LogOut, Plus, Trash2, Loader2, CheckCircle2, Navigation, Wallet, Percent, XCircle, HandCoins, CalendarDays, Clock3, Eye, Banknote, Lock, RefreshCw, Play, Square, CloudUpload, WifiOff, ReceiptText, Target } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 import { addToQueue, clearSnapshot, getQueue, isNetworkError, saveSnapshot, syncQueue, useRouteState, todayStr, type PendingSync, type RouteSnapshot } from '@/lib/route-cache'
@@ -92,7 +93,7 @@ export function SalesmanApp() {
       </header>
 
       <main className="p-3 max-w-lg mx-auto">
-        {tab === 'day' && <MyDayTab online={online} syncing={syncing} onSync={() => doSync(false)} />}
+        {tab === 'day' && <MyDayTab online={online} syncing={syncing} onSync={() => doSync(false)} onGoShops={() => setTab('shops')} />}
         {tab === 'shops' && <ShopsTab online={online} onGoDay={() => setTab('day')} />}
         {tab === 'orders' && <MyOrdersTab />}
         {tab === 'me' && <MeTab />}
@@ -118,25 +119,26 @@ export function SalesmanApp() {
   )
 }
 
-/* ================= MY DAY (PJP + ROUTE START) ================= */
-function MyDayTab({ online, syncing, onSync }: { online: boolean; syncing: boolean; onSync: () => void }) {
+/* ================= MY DAY (AAJ KI ROUTE — AUTO PJP) ================= */
+function MyDayTab({ online, syncing, onSync, onGoShops }: { online: boolean; syncing: boolean; onSync: () => void; onGoShops: () => void }) {
   const user = useDMS((s) => s.user)
-  const [plans, setPlans] = useState<PJPPlanDTO[]>([])
+  const [today, setToday] = useState<PjpTodayDTO | null>(null)
   const [loading, setLoading] = useState(true)
   const [starting, setStarting] = useState(false)
   const [endArm, setEndArm] = useState(false)
   const [ending, setEnding] = useState(false)
   const [endReport, setEndReport] = useState<RouteEndReport | null>(null)
-  const { snapshot, today, queue } = useRouteState(user?.id)
-  const stale = !!snapshot && !today
+  const { snapshot, today: routeToday, queue } = useRouteState(user?.id)
+  const stale = !!snapshot && !routeToday
 
   async function load() {
     if (!user) return
     setLoading(true)
     try {
-      const r = await api<{ plans: PJPPlanDTO[] }>(`/api/pjp?userId=${user.id}`)
-      setPlans(r.plans)
-    } catch { setPlans([]) } finally { setLoading(false) }
+      // Task 82: AUTO route — Outlet.salesmanId + visitDays se aaj ki shops khud banti hain
+      const r = await api<PjpTodayDTO>(`/api/pjp/today?userId=${user.id}`)
+      setToday(r)
+    } catch { setToday(null) } finally { setLoading(false) }
   }
   useEffect(() => { load()   }, [user])
 
@@ -219,8 +221,8 @@ function MyDayTab({ online, syncing, onSync }: { online: boolean; syncing: boole
     }
   }
 
-  const todayPlan = plans.find((p) => new Date(p.date).toDateString() === new Date().toDateString()) ?? plans[0]
-  const done = todayPlan?.visits.filter((v) => v.status === 'COMPLETED').length ?? 0
+  const visits = today?.visits ?? []
+  const done = visits.filter((v) => v.status === 'COMPLETED').length
   const pendingSync = queue.length
 
   if (loading) return <div className="space-y-3">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-20 rounded-xl" />)}</div>
@@ -281,23 +283,39 @@ function MyDayTab({ online, syncing, onSync }: { online: boolean; syncing: boole
         </CardContent>
       </Card>
 
+      {/* ===== JUMMA OFF BANNER — route nahi, sirf unplanned ===== */}
+      {today?.fridayOff && (
+        <Card className="border-0 shadow-lg text-white bg-gradient-to-br from-rose-600 to-red-700 shadow-rose-600/20">
+          <CardContent className="p-4 text-center space-y-2">
+            <p className="text-xs text-rose-100 font-bold tracking-wide flex items-center justify-center gap-1"><CalendarDays className="h-3.5 w-3.5" /> {today.dayCode} — OFF DAY</p>
+            <p className="text-lg font-bold leading-tight">Aaj Jumma chhutti hai</p>
+            <p className="text-[11px] text-rose-100/90 leading-relaxed">Aaj koi planned shop nazar nahi aayegi (roz wali shops bhi nahi). Order sirf <b>Unplanned Shop</b> se bana sakte hain — GPS ke sath.</p>
+            <Button onClick={onGoShops} className="w-full h-11 bg-white text-rose-700 hover:bg-rose-50 font-bold">
+              <Navigation className="h-4 w-4 mr-2" /> Unplanned Shop se Order Karein
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {!today?.fridayOff && (
+      <>
       {/* ===== PJP VISITS ===== */}
       <Card className="bg-emerald-600 border-0 text-white shadow-lg shadow-emerald-600/20">
         <CardContent className="p-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs text-emerald-100">Aaj ka Route Plan (PJP)</p>
-              <p className="text-xl font-bold">{done}/{todayPlan?.visits.length ?? 0} Visits Complete</p>
+              <p className="text-xs text-emerald-100">Aaj ki Route (Auto PJP — {DAY_LABELS[today?.dayCode ?? ''] ?? ''})</p>
+              <p className="text-xl font-bold">{done}/{visits.length} Visits Complete</p>
             </div>
             <Navigation className="h-9 w-9 text-white/70" />
           </div>
           <div className="mt-3 h-2 rounded-full bg-white/20 overflow-hidden">
-            <div className="h-full bg-white rounded-full transition-all" style={{ width: `${todayPlan?.visits.length ? (done / todayPlan.visits.length) * 100 : 0}%` }} />
+            <div className="h-full bg-white rounded-full transition-all" style={{ width: `${visits.length ? (done / visits.length) * 100 : 0}%` }} />
           </div>
         </CardContent>
       </Card>
 
-      {todayPlan?.visits.map((v) => (
+      {visits.map((v) => (
         <Card key={v.id} className="border-slate-200 shadow-sm">
           <CardContent className="p-4">
             <div className="flex items-start gap-3">
@@ -333,7 +351,10 @@ function MyDayTab({ online, syncing, onSync }: { online: boolean; syncing: boole
           </CardContent>
         </Card>
       ))}
-      {!todayPlan && <Card><CardContent className="py-10 text-center text-sm text-slate-400">PJP plan load nahi hua {online ? '' : '(offline)'} — route shops ke liye "Shops" tab dekhein</CardContent></Card>}
+      {today && visits.length === 0 && <Card><CardContent className="py-10 text-center text-sm text-slate-400">Aaj ki route mein koi shop nahi — Shops page par shop ko booker + din assign karein, wo agle din khud route mein aayegi</CardContent></Card>}
+      {!today && <Card><CardContent className="py-10 text-center text-sm text-slate-400">Route load nahi hua {online ? '' : '(offline)'} — dobara koshish karein</CardContent></Card>}
+      </>
+      )}
 
       {/* ROUTE END REPORT — din ka khulasa popup */}
       {endReport && <RouteEndReportDialog report={endReport} onClose={() => setEndReport(null)} />}
@@ -364,7 +385,7 @@ interface RouteEndReport {
 const round2 = (n: number) => Math.round(n * 100) / 100
 
 async function buildRouteEndReport(userId: string, snapshot: RouteSnapshot, queue: PendingSync[]): Promise<RouteEndReport> {
-  const isToday = (iso: string) => new Date(iso).toDateString() === new Date().toDateString()
+  const isToday = (iso: string) => isSameKarachiDay(iso)
   const qOrders = queue.filter((q) => q.kind === 'ORDER')
   const qRecs = queue.filter((q) => q.kind === 'RECOVERY')
 
@@ -481,7 +502,8 @@ function RouteEndReportDialog({ report, onClose }: { report: RouteEndReport; onC
 }
 
 /* ================= SHOPS (day-wise route + recovery) ================= */
-const TODAY_CODE = () => ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][new Date().getDay()]
+// Task 82: din hamesha Karachi se (browser foreign timezone par bhi sahi route)
+const TODAY_CODE = () => karachiDayCode()
 
 function ShopsTab({ online, onGoDay }: { online: boolean; onGoDay: () => void }) {
   const user = useDMS((s) => s.user)
@@ -492,6 +514,15 @@ function ShopsTab({ online, onGoDay }: { online: boolean; onGoDay: () => void })
   const [actionShop, setActionShop] = useState<RecoveryShopDTO | null>(null)
   const [orderShop, setOrderShop] = useState<RecoveryShopDTO | null>(null)
   const [showAllHistory, setShowAllHistory] = useState(false)
+  // Task 82: PJP flags — Jumma OFF + Unplanned allowed (admin settings se)
+  const [flags, setFlags] = useState<PjpTodayDTO | null>(null)
+  const [unplannedOpen, setUnplannedOpen] = useState(false)
+  const [orderUnplanned, setOrderUnplanned] = useState(false)
+
+  useEffect(() => {
+    if (!user) return
+    api<PjpTodayDTO>(`/api/pjp/today?userId=${user.id}`).then(setFlags).catch(() => setFlags(null))
+  }, [user])
 
   // ===== ROUTE START GATE =====
   // Route start ke bina shops ka data bilkul nahi dikhta — booker all-time working nahi dekhta,
@@ -523,7 +554,7 @@ function ShopsTab({ online, onGoDay }: { online: boolean; onGoDay: () => void })
   const todayUdhaar = todayShops.reduce((s, x) => s + (x.balance > 0 ? x.balance : 0), 0)
   const routeUdhaar = shops.reduce((s, x) => s + (x.balance > 0 ? x.balance : 0), 0)
   // ALL-TIME working hidden — sirf AAJ ki recoveries (route start ke waqt ka snapshot + offline queue)
-  const myRecoveries = snapshot.history.filter((r) => new Date(r.date).toDateString() === new Date().toDateString())
+  const myRecoveries = snapshot.history.filter((r) => isSameKarachiDay(r.date))
   const pendingMine = snapshot.pending
   // Shop-wise pending approval count — card par amber badge (booker ko pata ho kis shop ki entry admin ke paas hai)
   const pendingByCode = new Map<string, number>()
@@ -531,6 +562,32 @@ function ShopsTab({ online, onGoDay }: { online: boolean; onGoDay: () => void })
 
   return (
     <div className="space-y-3 pb-2">
+      {/* ===== JUMMA OFF BANNER — koi route nahi, sirf unplanned ===== */}
+      {flags?.fridayOff && (
+        <Card className="border-0 shadow-lg text-white bg-gradient-to-br from-rose-600 to-red-700 shadow-rose-600/20">
+          <CardContent className="p-4 text-center space-y-2">
+            <p className="text-xs text-rose-100 font-bold tracking-wide flex items-center justify-center gap-1"><CalendarDays className="h-3.5 w-3.5" /> {flags.dayCode} — OFF DAY</p>
+            <p className="text-lg font-bold leading-tight">Aaj Jumma chhutti hai — route band hai</p>
+            <p className="text-[11px] text-rose-100/90 leading-relaxed">Aaj koi planned shop nazar nahi aayegi (roz wali bhi nahi). Neeche <b>Unplanned Shop</b> se out-of-route shop ka order bana sakte hain — GPS ke sath.</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Task 82: UNPLANNED SHOP — route se bahar shop ka order (KPO manual bill ka jhanjhat khatam) */}
+      {flags?.unplannedEnabled && (
+        <button type="button" onClick={() => setUnplannedOpen(true)} className="w-full flex items-center gap-3 rounded-xl border-2 border-dashed border-violet-400 bg-violet-50 p-3.5 text-left hover:bg-violet-100 transition-colors">
+          <span className="h-10 w-10 rounded-full bg-violet-600 text-white flex items-center justify-center shrink-0"><Plus className="h-5 w-5" /></span>
+          <span className="min-w-0">
+            <span className="block text-sm font-bold text-violet-800 leading-tight">Unplanned Shop — Order Karein</span>
+            <span className="block text-[11px] text-violet-500 leading-snug mt-0.5">Aaj ki route ki bahar shop ka bill yahan se banayein {flags?.fridayOff ? '(aaj sirf yehi option hai)' : ''} — GPS lazmi</span>
+          </span>
+        </button>
+      )}
+      {flags && !flags.unplannedEnabled && !flags.fridayOff && (
+        <p className="text-[10px] text-slate-400 text-center">Unplanned orders admin ne band kar diye hain — sirf route shops par order hoga</p>
+      )}
+
+      {!flags?.fridayOff && (<>
       {/* Aaj ka route summary + All Routes switch */}
       <Card className="bg-emerald-600 border-0 text-white shadow-lg shadow-emerald-600/20">
         <CardContent className="p-4">
@@ -577,6 +634,7 @@ function ShopsTab({ online, onGoDay }: { online: boolean; onGoDay: () => void })
           )}
         </CardContent>
       </Card>
+      </>)}
 
       {/* Offline queue — order/recovery/visit jo sync ka intezar kar rahe hain */}
       {queue.length > 0 && (
@@ -596,6 +654,7 @@ function ShopsTab({ online, onGoDay }: { online: boolean; onGoDay: () => void })
         </div>
       )}
 
+      {!flags?.fridayOff && (<>
       {/* Day chips */}
       <div className="flex gap-1.5 overflow-x-auto pb-0.5 -mx-1 px-1">
         {DAY_LIST.map((d) => (
@@ -607,7 +666,9 @@ function ShopsTab({ online, onGoDay }: { online: boolean; onGoDay: () => void })
           </button>
         ))}
       </div>
+      </>)}
 
+      {!flags?.fridayOff && (<>
       {/* Shops list */}
       <p className="text-xs font-semibold text-slate-500">
         {allRoutes ? `SAB ROUTE SHOPS (${visibleShops.length})` : `${DAY_LABELS[day]?.toUpperCase() ?? day} KI SHOPS (${visibleShops.length})`}
@@ -646,6 +707,7 @@ function ShopsTab({ online, onGoDay }: { online: boolean; onGoDay: () => void })
           </CardContent>
         </Card>
       ))}
+      </>)}
 
       {/* Aaj ki recoveries — status ke sath (all-time history hidden) */}
       <div className="pt-1">
@@ -706,18 +768,74 @@ function ShopsTab({ online, onGoDay }: { online: boolean; onGoDay: () => void })
         />
       )}
 
-      {/* Shop-wise order punch (popup ke Order option se) */}
+      {/* Shop-wise order punch (popup ke Order option se, ya Unplanned picker se) */}
       {orderShop && user && (
         <OrderBookSheet
           shop={orderShop}
           userId={user.id}
           products={snapshot.products}
-          onClose={() => setOrderShop(null)}
-          onPlaced={() => { setOrderShop(null) }}
-          onRecoveryRequest={() => { const s = orderShop; setOrderShop(null); if (s) setCollectShop(s) }}
+          unplanned={orderUnplanned}
+          onClose={() => { setOrderShop(null); setOrderUnplanned(false) }}
+          onPlaced={() => { setOrderShop(null); setOrderUnplanned(false) }}
+          onRecoveryRequest={() => { const s = orderShop; setOrderShop(null); setOrderUnplanned(false); if (s) setCollectShop(s) }}
+        />
+      )}
+
+      {/* Task 82: Unplanned Shop picker — route se bahar shops (aaj ki route se exclude) */}
+      {unplannedOpen && snapshot && (
+        <UnplannedShopDialog
+          shops={snapshot.shops}
+          todayCode={todayCode}
+          onClose={() => setUnplannedOpen(false)}
+          onPick={(s) => { setUnplannedOpen(false); setOrderUnplanned(true); setOrderShop(s) }}
         />
       )}
     </div>
+  )
+}
+
+/* ================= UNPLANNED SHOP PICKER (Task 82 — out-of-route order) ================= */
+function UnplannedShopDialog({ shops, todayCode, onClose, onPick }: {
+  shops: RecoveryShopDTO[]
+  todayCode: string
+  onClose: () => void
+  onPick: (s: RecoveryShopDTO) => void
+}) {
+  const [search, setSearch] = useState('')
+  // Out-of-route = aaj ke din pe assign nahi (din wali + roz wali dono exclude)
+  const outOfRoute = shops.filter((s) => {
+    const days = (s.visitDays || '').split(',').map((x) => x.trim()).filter(Boolean)
+    return days.length > 0 && !days.includes(todayCode)
+  })
+  const filtered = outOfRoute.filter((s) => `${s.name} ${s.code} ${s.channel} ${s.city}`.toLowerCase().includes(search.toLowerCase()))
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
+      <DialogContent className="max-w-sm max-h-[85vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-1.5 text-base"><Navigation className="h-4 w-4 text-violet-600" /> Unplanned Shop</DialogTitle>
+          <DialogDescription>Route ki bahar shop select karein — order ke sath GPS bhi capture hogi</DialogDescription>
+        </DialogHeader>
+        <Input placeholder="Shop ka naam likh kar search karein..." value={search} onChange={(e) => setSearch(e.target.value)} />
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-2 -mx-1 px-1">
+          {filtered.map((s) => (
+            <button key={s.outletId} type="button" onClick={() => onPick(s)}
+              className="w-full rounded-lg border border-slate-200 bg-white p-3 text-left hover:border-violet-400 hover:shadow-sm transition-colors">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-800 truncate">{s.name}</p>
+                  <p className="text-[11px] text-slate-400">{s.code} • {s.channel} • {s.city}</p>
+                </div>
+                <p className={`text-xs font-bold whitespace-nowrap ${s.balance > 0.005 ? 'text-red-600' : 'text-emerald-600'}`}>{fmtPKR(Math.max(0, s.balance))}</p>
+              </div>
+              <div className="mt-1.5"><VisitDayChips visitDays={s.visitDays} compact /></div>
+            </button>
+          ))}
+          {filtered.length === 0 && (
+            <p className="py-8 text-center text-xs text-slate-400">Koi out-of-route shop nahi mili{search ? ' — dusra naam try karein' : ''}</p>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -828,6 +946,20 @@ function RecoveryCollectDialog({ shop, userId, bookerId, bookerName, onClose, on
 
 type DiscType = 'NONE' | 'PERCENT' | 'FLAT'
 
+/** Task 82: GPS capture — order ke waqt lazmi (fail => null => order create nahi hoga) */
+async function captureGps(): Promise<{ lat: number; lng: number } | null> {
+  if (typeof navigator === 'undefined' || !navigator.geolocation) return null
+  try {
+    const pos = await new Promise<GeolocationPosition>((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, { timeout: 8000, maximumAge: 60000 }))
+    const lat = pos.coords.latitude
+    const lng = pos.coords.longitude
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+    return { lat, lng }
+  } catch {
+    return null
+  }
+}
+
 /* ================= SHOP ACTION POPUP (Recovery / Order — 2 options) ================= */
 function ShopActionDialog({ shop, onRecovery, onOrder, onClose }: {
   shop: RecoveryShopDTO
@@ -882,12 +1014,14 @@ function ShopActionDialog({ shop, onRecovery, onOrder, onClose }: {
   )
 }
 
-/* ================= ORDER PUNCH (shop-wise — shop popup se open hota hai) ================= */
-function OrderBookSheet({ shop, userId, products: snapshotProducts, onClose, onPlaced, onRecoveryRequest }: {
+/* ================= ORDER PUNCH (shop-wise — shop popup se / unplanned picker se) ================= */
+function OrderBookSheet({ shop, userId, products: snapshotProducts, unplanned, onClose, onPlaced, onRecoveryRequest }: {
   shop: RecoveryShopDTO
   userId: string
   /** Route snapshot ke products (offline working) — na mile to fallback fetch */
   products?: ProductDTO[]
+  /** Task 82: out-of-route order — Unplanned Shop picker se bana */
+  unplanned?: boolean
   onClose: () => void
   onPlaced: () => void
   onRecoveryRequest: () => void
@@ -979,6 +1113,17 @@ function OrderBookSheet({ shop, userId, products: snapshotProducts, onClose, onP
       return
     }
     setPlacing(true)
+    // Task 82: GPS LAZMI — capture fail to order create hi nahi hoga (planned ya unplanned, har order par)
+    const gps = await captureGps()
+    if (!gps) {
+      toast({
+        title: 'GPS capture lazmi hai',
+        description: 'Location ke bagair order create nahi ho sakta — phone mein location ON kar ke dobara Place Order dabayein',
+        variant: 'destructive',
+      })
+      setPlacing(false)
+      return
+    }
     const items = cart.map((c) => {
       const p = products.find((x) => x.id === c.productId)
       const upc = Math.max(1, p?.unitsPerCarton ?? 1)
@@ -989,6 +1134,11 @@ function OrderBookSheet({ shop, userId, products: snapshotProducts, onClose, onP
     const payload = JSON.stringify({
       outletId: shop.outletId, salesmanId: userId, items,
       discount: discType !== 'NONE' && discInputValid ? { type: discType, value: discNum } : undefined,
+      // Task 82: GPS evidence + unplanned flag — server isi se gates lagata hai
+      fromBooker: true,
+      unplanned: !!unplanned,
+      lat: gps.lat,
+      lng: gps.lng,
     })
     const itemsPcs = cart.reduce((s, c) => s + c.qtyPcs, 0)
     // OFFLINE — order queue mein (internet aane par khud sync, schemes server par apply hongi)
@@ -1028,6 +1178,9 @@ function OrderBookSheet({ shop, userId, products: snapshotProducts, onClose, onP
               <div className="min-w-0">
                 <p className="font-bold text-slate-900 text-sm flex items-center gap-1.5"><Store className="h-4 w-4 text-violet-600 shrink-0" /> {shop.name}</p>
                 <p className="text-[11px] text-slate-400 mt-0.5">{shop.code} • {shop.channel} • {shop.city}</p>
+                {unplanned && (
+                  <Badge className="mt-1.5 bg-violet-600 text-white text-[9px] px-1.5">UNPLANNED — out of route</Badge>
+                )}
               </div>
               <div className="text-right shrink-0">
                 <p className={`text-sm font-bold ${hasUdhaar ? 'text-red-600' : 'text-emerald-600'}`}>{fmtPKR(Math.max(0, shop.balance))}</p>
@@ -1217,6 +1370,7 @@ function CartDialog({ cart, products, shopName, cartValue, discType, setDiscType
             <span className="text-sm text-slate-500">Est. Total (before schemes)</span>
             <span className="text-lg font-bold">{fmtPKR(Math.round(cartValue * 100) / 100)}</span>
           </div>
+          <p className="text-[10px] text-slate-400 text-center -mt-1 flex items-center justify-center gap-1"><MapPin className="h-3 w-3" /> Place karte waqt GPS capture hogi — GPS ke bagair order nahi hoga</p>
           <Button onClick={onPlace} disabled={placing || cart.length === 0} className="w-full bg-emerald-600 hover:bg-emerald-700 h-11">
             {placing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CheckCircle2 className="h-4 w-4 mr-2" />} Place Order
           </Button>
@@ -1240,8 +1394,8 @@ function MyOrdersTab() {
 
   if (loading) return <div className="space-y-3">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-20 rounded-xl" />)}</div>
 
-  // ALL-TIME hidden — sirf AAJ ki booked orders + offline queue wali entries
-  const todayOrders = orders.filter((o) => new Date(o.orderDate).toDateString() === new Date().toDateString())
+  // ALL-TIME hidden — sirf AAJ ki booked orders + offline queue wali entries (Karachi din)
+  const todayOrders = orders.filter((o) => isSameKarachiDay(o.orderDate))
   const queuedOrders = queue.filter((q) => q.kind === 'ORDER')
   const queuedRecoveries = queue.filter((q) => q.kind === 'RECOVERY')
 
@@ -1281,7 +1435,10 @@ function MyOrdersTab() {
             <div className="text-right shrink-0">
               {/* Task 77: bill ka final payable (Net − TO + GST + Adv Tax) — goods net nahi */}
               <p className="font-bold text-sm">{fmtPKR(orderGrandPayable(o))}</p>
-              <Badge variant="outline" className={`${STATUS_STYLES[o.status]} text-[9px]`}>{statusLabel(o.status)}</Badge>
+              <div className="flex items-center gap-1 justify-end">
+                {o.unplanned && <Badge variant="outline" className="border-violet-300 text-violet-600 bg-violet-50 text-[8px] px-1 py-0">Unplanned</Badge>}
+                <Badge variant="outline" className={`${STATUS_STYLES[o.status]} text-[9px]`}>{statusLabel(o.status)}</Badge>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -1373,7 +1530,9 @@ function MeTab() {
           <p className="text-xs font-semibold text-slate-500 flex items-center gap-1"><Wallet className="h-3.5 w-3.5" /> TIPS</p>
           <p className="text-xs text-slate-500 leading-relaxed">
             • Har din field se pehle <b>My Day se Route Start</b> karein — us din ki shops download hongi<br />
-            • Route start ke bina shops nazar nahi aati — sirf aaj ka data dikhta hai, all-time history nahi<br />
+            • Route ab <b>AUTO</b> hai — shop pe booker + din assign hote hi wo shop usi din nazar aayegi (manual plan ki zaroorat nahi)<br />
+            • <b>Order place karte waqt GPS lazmi</b> hai — location ke bagair order create nahi hoga<br />
+            • Route ki bahar shop? <b>Shops tab mein "Unplanned Shop"</b> button se order karein (admin ON rakhe to)<br />
             • <b>Offline bhi kaam hota hai</b> — order/recovery queue mein save hota hai, internet aane par khud sync<br />
             • <b>Route End</b> par din ka report khulega — total bills, total sale aur total recovery ka khulasa<br />
             • Shop pr tap karein — Recovery ya Order ka popup khulega; pehle udhaar recovery, phir order<br />

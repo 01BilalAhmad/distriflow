@@ -4,22 +4,24 @@ import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useDMS } from '@/lib/dms-store'
-import { api, fmtDate, fmtPKR, STATUS_STYLES, statusLabel } from '@/lib/dms-api'
-import type { PJPPlanDTO, OutletDTO, SalesmanPerfDTO } from '@/lib/dms-types'
-import { Plus, MapPin, Clock, CheckCircle2, LogIn, LogOut, Navigation, Users, Target, Loader2 } from 'lucide-react'
+import { api, fmtDate, STATUS_STYLES, statusLabel } from '@/lib/dms-api'
+import type { PJPPlanDTO } from '@/lib/dms-types'
+import { MapPin, Clock, LogIn, LogOut, Navigation } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
+/**
+ * Task 82 — PJP page ab sirf HISTORY/tracking hai.
+ * Manual "New Journey Plan" dialog HATA diya — route ab AUTO hai:
+ * Shops page pe shop ko booker + din assign karo, booker app kholte hi
+ * /api/pjp/today us din ka plan khud bana deta hai (roz wali shops har roz).
+ */
 export function PJPView() {
   const user = useDMS((s) => s.user)
   const [plans, setPlans] = useState<PJPPlanDTO[]>([])
   const [loading, setLoading] = useState(true)
-  const [createOpen, setCreateOpen] = useState(false)
 
   async function load() {
     if (!user) return
@@ -67,17 +69,24 @@ export function PJPView() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-slate-900">PJP — Permanent Journey Plans</h2>
-          <p className="text-sm text-slate-500">Daily route planning with geo check-in/out aur live tracking</p>
+          <p className="text-sm text-slate-500">Route ab AUTO hai — visit tracking + history yahan nazar aati hai</p>
         </div>
-        {user?.role !== 'SALESMAN' && (
-          <Button onClick={() => setCreateOpen(true)} className="bg-emerald-600 hover:bg-emerald-700">
-            <Plus className="h-4 w-4 mr-1.5" /> New Journey Plan
-          </Button>
-        )}
       </div>
 
+      {/* Task 82: naya mechanism ka info strip */}
+      <Card className="border-violet-200 bg-violet-50">
+        <CardContent className="py-3.5 px-4 flex items-start gap-2.5">
+          <Navigation className="h-4 w-4 text-violet-600 mt-0.5 shrink-0" />
+          <p className="text-xs text-violet-900 leading-relaxed">
+            <b>Route banane ki zaroorat khatam:</b> Shops page par shop ko <b>orderbooker + din</b> assign karein —
+            booker apni app kholti hi usi din ki shops khud dekh lega (jis shop pe din assign nahi, wo har roz nazar aayegi).
+            Admin ke <b>Settings</b> mein Jumma OFF + Unplanned orders ke switches hain.
+          </p>
+        </CardContent>
+      </Card>
+
       {plans.length === 0 && (
-        <Card><CardContent className="py-16 text-center text-sm text-slate-400">Koi journey plan nahi — naya plan banayein</CardContent></Card>
+        <Card><CardContent className="py-16 text-center text-sm text-slate-400">Koi plan nahi — booker app kholte hi aaj ka plan khud ban jata hai</CardContent></Card>
       )}
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -144,105 +153,6 @@ export function PJPView() {
           )
         })}
       </div>
-
-      <CreatePJPDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={load} />
     </div>
-  )
-}
-
-function CreatePJPDialog({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (v: boolean) => void; onCreated: () => void }) {
-  const user = useDMS((s) => s.user)
-  const [salesmen, setSalesmen] = useState<SalesmanPerfDTO[]>([])
-  const [outlets, setOutlets] = useState<OutletDTO[]>([])
-  const [salesmanId, setSalesmanId] = useState('')
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    if (!open || !user) return
-    setSalesmanId(''); setSelected(new Set())
-    api<{ salesmen: SalesmanPerfDTO[] }>(`/api/field-force?userId=${user.id}`).then((r) => {
-      setSalesmen(r.salesmen)
-      if (r.salesmen[0]) {
-        setSalesmanId(r.salesmen[0].id)
-        loadOutlets(r.salesmen[0].id)
-      }
-    }).catch(() => {})
-  }, [open, user])
-
-  function loadOutlets(smId: string) {
-    api<{ outlets: OutletDTO[] }>(`/api/outlets?userId=${user!.id}`).then((r) => {
-      const mine = r.outlets.filter((o) => o.salesmanName && salesmen.find((s) => s.id === smId)?.name === o.salesmanName)
-      setOutlets(mine.length > 0 ? mine : r.outlets)
-    }).catch(() => {})
-  }
-
-  function toggle(id: string) {
-    const next = new Set(selected)
-    if (next.has(id)) next.delete(id)
-    else next.add(id)
-    setSelected(next)
-  }
-
-  async function save() {
-    if (!salesmanId || selected.size === 0) {
-      toast({ title: 'Missing info', description: 'Salesman aur kam az kam 1 outlet select karein', variant: 'destructive' })
-      return
-    }
-    setSaving(true)
-    try {
-      // Task 25-b: tenant guard ke liye userId bhi jata hai (API ownership validate karta hai)
-      const user = JSON.parse(localStorage.getItem('dms_session') ?? 'null')
-      await api('/api/pjp', { method: 'POST', body: JSON.stringify({ userId: user?.id, salesmanId, date: new Date().toISOString(), outletIds: Array.from(selected) }) })
-      toast({ title: 'Journey Plan Created ✓', description: `${selected.size} outlets ka route plan ban gaya` })
-      onOpenChange(false)
-      onCreated()
-    } catch (e) {
-      toast({ title: 'Failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' })
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md max-h-[85vh] flex flex-col">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><Navigation className="h-5 w-5 text-emerald-600" /> New Journey Plan (PJP)</DialogTitle>
-          <DialogDescription>Aaj ke visits ke liye route plan banayein</DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-3 overflow-hidden flex-1">
-          <div className="grid gap-1.5">
-            <label className="text-sm font-medium flex items-center gap-1"><Users className="h-3.5 w-3.5" /> Salesman</label>
-            <Select value={salesmanId} onValueChange={(v) => { setSalesmanId(v); setSelected(new Set()); loadOutlets(v) }}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>{salesmen.map((s) => <SelectItem key={s.id} value={s.id}>{s.name} ({s.outletsAssigned} outlets)</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-          <div className="grid gap-1.5 min-h-0 flex-1">
-            <label className="text-sm font-medium flex items-center gap-1"><Target className="h-3.5 w-3.5" /> Outlets ({selected.size} selected)</label>
-            <ScrollArea className="h-56 rounded-lg border p-2">
-              <div className="space-y-1.5">
-                {outlets.map((o) => (
-                  <label key={o.id} className="flex items-center gap-2.5 rounded-md hover:bg-emerald-50/50 p-2 cursor-pointer">
-                    <Checkbox checked={selected.has(o.id)} onCheckedChange={() => toggle(o.id)} />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-slate-800 truncate">{o.name}</p>
-                      <p className="text-xs text-slate-400">{o.channel} • {o.address}</p>
-                    </div>
-                  </label>
-                ))}
-                {outlets.length === 0 && <p className="text-xs text-slate-400 p-4 text-center">Is salesman ke outlets nahi mile</p>}
-              </div>
-            </ScrollArea>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button onClick={save} disabled={saving} className="w-full bg-emerald-600 hover:bg-emerald-700">
-            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <CheckCircle2 className="h-4 w-4 mr-1.5" />} Create Plan
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   )
 }

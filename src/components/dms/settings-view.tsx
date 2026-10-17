@@ -9,14 +9,14 @@ import { Switch } from '@/components/ui/switch'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useDMS, saveSession } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
-import { Loader2, Save, Store, Receipt, Phone, Percent, MapPin } from 'lucide-react'
+import { Loader2, Save, Store, Receipt, Phone, Percent, MapPin, Route, CalendarOff, Store as StoreIcon2 } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
 /**
  * Task 78 — SETTINGS PAGE (user: "setting page bnao Jahan ya sb chezain manage ki ja skin
  * or wahan pr Distributor Number name distribution name ko update kia jay sky").
  *
- * 2 sections:
+ * 3 sections:
  *  1. Distributor Profile — Distribution (business) name + Distributor name + Cell number +
  *     Address + City. Ye wahi fields hain jo BILL PRINT ke header par is order mein chapte
  *     hain: Name → Address → Cell No (user: "pehly Name us k nichy Address or fr Cell No").
@@ -24,6 +24,8 @@ import { toast } from '@/hooks/use-toast'
  *     address → AppSetting KV (distributorAddress — zero migration).
  *  2. Bill & Tax — Filer/Non-Filer advance tax rates + GST on/off + GST rate
  *     (yehi rates order booking + purchase invoice use karte hain).
+ *  3. Journey Plan (PJP) — Task 82: Jumma OFF day + Unplanned orders (booker app ke
+ *     auto-route controls — AppSetting KV: pjpFridayOff / pjpUnplannedEnabled).
  */
 
 interface ProfileForm {
@@ -41,14 +43,21 @@ interface TaxForm {
   gstRate: string
 }
 
+interface PjpForm {
+  fridayOff: boolean
+  unplannedEnabled: boolean
+}
+
 export function SettingsView() {
   const user = useDMS((s) => s.user)
   const setUser = useDMS((s) => s.setUser)
   const [loading, setLoading] = useState(true)
   const [savingProfile, setSavingProfile] = useState(false)
   const [savingTax, setSavingTax] = useState(false)
+  const [savingPjp, setSavingPjp] = useState(false)
   const [profile, setProfile] = useState<ProfileForm>({ businessName: '', distributorName: '', phone: '', address: '', city: '' })
   const [tax, setTax] = useState<TaxForm>({ filerTaxRate: '0.5', nonFilerTaxRate: '2.5', gstEnabled: true, gstRate: '18' })
+  const [pjp, setPjp] = useState<PjpForm>({ fridayOff: true, unplannedEnabled: true })
 
   async function load() {
     if (!user) return
@@ -56,6 +65,7 @@ export function SettingsView() {
     try {
       const res = await api<{
         settings: { filerTaxRate: number; nonFilerTaxRate: number; gstEnabled: boolean; gstRate: number }
+        pjp: { fridayOff: boolean; unplannedEnabled: boolean }
         profile: { distributorName: string; phone: string; businessName: string; city: string; address: string }
       }>(`/api/settings?userId=${user.id}`)
       setProfile({
@@ -70,6 +80,10 @@ export function SettingsView() {
         nonFilerTaxRate: String(res.settings.nonFilerTaxRate),
         gstEnabled: res.settings.gstEnabled,
         gstRate: String(res.settings.gstRate),
+      })
+      setPjp({
+        fridayOff: res.pjp?.fridayOff ?? true,
+        unplannedEnabled: res.pjp?.unplannedEnabled ?? true,
       })
     } catch (e) {
       toast({ title: 'Error', description: e instanceof Error ? e.message : 'Settings load failed', variant: 'destructive' })
@@ -159,6 +173,30 @@ export function SettingsView() {
       toast({ title: 'Error', description: e instanceof Error ? e.message : 'Save failed', variant: 'destructive' })
     } finally {
       setSavingTax(false)
+    }
+  }
+
+  async function savePjp() {
+    if (!user) return
+    setSavingPjp(true)
+    try {
+      const res = await api<{ pjp: PjpForm }>('/api/settings', {
+        method: 'PUT',
+        body: JSON.stringify({
+          userId: user.id,
+          pjpFridayOff: pjp.fridayOff,
+          pjpUnplannedEnabled: pjp.unplannedEnabled,
+        }),
+      })
+      setPjp({ fridayOff: res.pjp.fridayOff, unplannedEnabled: res.pjp.unplannedEnabled })
+      toast({
+        title: 'PJP Settings Save ✓',
+        description: `Jumma ${res.pjp.fridayOff ? 'OFF (chhutti)' : 'ON (working day)'} • Unplanned orders ${res.pjp.unplannedEnabled ? 'ON' : 'OFF'}`,
+      })
+    } catch (e) {
+      toast({ title: 'Error', description: e instanceof Error ? e.message : 'Save failed', variant: 'destructive' })
+    } finally {
+      setSavingPjp(false)
     }
   }
 
@@ -256,6 +294,45 @@ export function SettingsView() {
             <Button onClick={saveTax} disabled={savingTax} className="w-full bg-slate-800 hover:bg-slate-900 text-white">
               {savingTax ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Save className="h-4 w-4 mr-1.5" />}
               Tax Settings Save Karein
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* ===== Journey Plan (PJP) — Task 82 route controls ===== */}
+        <Card className="border-slate-200 shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base text-slate-900">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-100"><Route className="h-4 w-4 text-violet-600" /></span>
+              Journey Plan (PJP) — Route Controls
+            </CardTitle>
+            <CardDescription>
+              Booker ki route <b>AUTO</b> hai — shop pe booker + din assign karein (Shops page), wo shop usi din booker ko nazar aayegi. Neeche ke 2 switch poore system par lagte hain (UI + backend dono).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3.5">
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 p-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><CalendarOff className="h-4 w-4 text-rose-600 shrink-0" />Jumma OFF Day</p>
+                <p className="text-xs text-slate-500 leading-relaxed mt-0.5">
+                  <b>ON</b> = Jumma chhutti — route nahi, booker sirf Unplanned shops par order bana sakta hai (roz wali shops bhi nahi dikhengi).<br />
+                  <b>OFF</b> = Jumma bhi working day — FRI wali shops + roz wali shops normal dikhengi.
+                </p>
+              </div>
+              <Switch checked={pjp.fridayOff} onCheckedChange={(on) => setPjp((s) => ({ ...s, fridayOff: on }))} />
+            </div>
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-violet-200 bg-violet-50 p-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><StoreIcon2 className="h-4 w-4 text-violet-600 shrink-0" />Unplanned Orders</p>
+                <p className="text-xs text-slate-500 leading-relaxed mt-0.5">
+                  <b>ON</b> = booker route ki bahar shop ka order bana sakta hai ("Unplanned Shop" button) — KPO ko manual bill nahi banana parega.<br />
+                  <b>OFF</b> = sirf route shops par order hoga — unplanned button bhi gayab aur backend bhi reject karega.
+                </p>
+              </div>
+              <Switch checked={pjp.unplannedEnabled} onCheckedChange={(on) => setPjp((s) => ({ ...s, unplannedEnabled: on }))} />
+            </div>
+            <Button onClick={savePjp} disabled={savingPjp} className="w-full bg-violet-600 hover:bg-violet-700 text-white">
+              {savingPjp ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Save className="h-4 w-4 mr-1.5" />}
+              PJP Settings Save Karein
             </Button>
           </CardContent>
         </Card>

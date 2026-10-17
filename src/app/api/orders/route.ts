@@ -3,6 +3,7 @@ import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
 import { computeOrderLines, recalcManualDiscount, applyManualMerge, orderGrandPayable, type CalcIncomingItem } from '@/lib/dms-order-calc'
 import { advanceTaxFor, getTaxRates } from '@/lib/dms-settings'
 import { getAvailableToPromise, groupQtyByProduct, oversellMessage } from '@/lib/dms-inventory'
+import { getPjpSettings, karachiDayCode, karachiDayBounds, outletInTodayRoute } from '@/lib/dms-pjp'
 
 export async function GET(req: Request) {
   try {
@@ -21,8 +22,15 @@ export async function GET(req: Request) {
         ? { salesmanId: userId }
         : { distributorId: user.profile?.id }
 
+    // Task 82: booker ko sirf AAJ ka data — purane bills server se hi filter (client filter ke ilawa)
+    // Distributor/admin ko poori history milti hai
+    const scope =
+      user.role === 'SALESMAN'
+        ? { ...where, orderDate: { gte: karachiDayBounds().start, lt: karachiDayBounds().end } }
+        : where
+
     const orders = await db.order.findMany({
-      where: status && status !== 'ALL' ? { ...where, status } : where,
+      where: status && status !== 'ALL' ? { ...scope, status } : scope,
       include: {
         outlet: { select: { name: true, code: true } },
         salesman: { select: { name: true } },
@@ -56,6 +64,10 @@ export async function GET(req: Request) {
         advanceTaxRate: o.advanceTaxRate,
         advanceTax: o.advanceTax,
         orderDate: new Date(o.orderDate).toISOString(),
+        // Task 82: out-of-route badge (booker app Orders tab)
+        unplanned: o.unplanned,
+        orderLat: o.orderLat,
+        orderLng: o.orderLng,
         itemCount: o.items.length,
         // Salesflo-style "Quantity in Cases" = Σ(qty pcs / units-per-carton) — mixed packs included
         totalCases: Math.round(o.items.reduce((s, it) => s + (it.qty / Math.max(1, it.product.unitsPerCarton)), 0) * 10000) / 10000,
@@ -74,6 +86,12 @@ export async function POST(req: Request) {
     const { outletId, salesmanId, items, notes } = body as {
       outletId: string; salesmanId?: string; items: CalcIncomingItem[]; notes?: string
       discount?: { type: 'PERCENT' | 'FLAT'; value: number } | null
+      // Task 82: booker app flags — GPS lazmi + unplanned gate (sirf fromBooker=true par lagta hai,
+      // distributor web form is se mutasar nahi hota)
+      fromBooker?: boolean
+      lat?: number
+      lng?: number
+      unplanned?: boolean
     }
     if (!outletId || !items || items.length === 0) return jsonError('Outlet aur kam az kam 1 item required hai')
 
@@ -82,6 +100,35 @@ export async function POST(req: Request) {
 
     // Task 23: tenant = jis distributor ki shop hai — products/schemes/tax SIRF usi tenant ke
     const tenantId = outlet.distributorId
+
+    // ---- Task 82: BOOKER ORDER GATES (GPS lazmi + unplanned/Jumma rules) ----
+    let isUnplanned = false
+    let orderLat: number | null = null
+    let orderLng: number | null = null
+    if (body.fromBooker === true) {
+      const latN = Number(body.lat)
+      const lngN = Number(body.lng)
+      if (!Number.isFinite(latN) || !Number.isFinite(lngN) || Math.abs(latN) > 90 || Math.abs(lngN) > 180) {
+        return jsonError('GPS capture lazmi hai — location ke bagair order create nahi ho sakta. Location ON kar ke dobara koshish karein')
+      }
+      orderLat = latN
+      orderLng = lngN
+
+      const pjp = await getPjpSettings(tenantId)
+      const dayCode = karachiDayCode()
+      const bookerId = salesmanId ?? outlet.salesmanId ?? ''
+      const inRoute = bookerId ? outletInTodayRoute(outlet, bookerId, dayCode) : false
+      if (!inRoute) {
+        // Out-of-route shop — sirf tab jab admin ne Unplanned ON rakha ho
+        if (!pjp.unplannedEnabled) {
+          return jsonError('Unplanned orders admin ne OFF kar diye hain — ye shop aaj ki route mein nahi hai', 403)
+        }
+        isUnplanned = true
+      } else if (dayCode === 'FRI' && pjp.fridayOff) {
+        // Jumma OFF — planned route bilkul band, sirf unplanned allowed
+        return jsonError('Aaj Jumma OFF hai — planned shops par order nahi ho sakta, sirf unplanned shops se order bana sakte hain', 403)
+      }
+    }
 
     const productIds = items.map((i) => i.productId)
     const products = await db.product.findMany({ where: { id: { in: productIds }, distributorId: tenantId } })
@@ -181,6 +228,9 @@ export async function POST(req: Request) {
         filerStatus: outlet.filerStatus,
         advanceTaxRate: tax.rate,
         advanceTax: tax.amount,
+        orderLat,
+        orderLng,
+        unplanned: isUnplanned,
         notes: notes ?? null,
         items: { create: itemsData },
       },
@@ -196,6 +246,7 @@ export async function POST(req: Request) {
         tradeOfferTotal, gstTotal,
         advanceTax: order.advanceTax, advanceTaxRate: order.advanceTaxRate,
         filerStatus: order.filerStatus,
+        unplanned: order.unplanned,
         payable,
       },
     })

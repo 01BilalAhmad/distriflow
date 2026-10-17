@@ -396,6 +396,10 @@ model Order {
   // Grand Payable = total − tradeOfferTotal + gstTotal + advanceTax
   tradeOfferTotal Float      @default(0) // Σ line trade offer (per-SKU Rs snapshot)
   gstTotal        Float      @default(0) // Σ line GST (product gstRate × line net)
+  // Task 82: PJP auto-route — booker order GPS evidence (lazmi) + out-of-route flag
+  orderLat        Float?     // GPS latitude (order booking waqt ka — booker app se)
+  orderLng        Float?     // GPS longitude
+  unplanned       Boolean    @default(false) // out-of-route order (admin toggle se gated)
   notes          String?
   orderDate      DateTime     @default(now())
   summaryId      String?

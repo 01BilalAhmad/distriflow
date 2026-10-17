@@ -1,6 +1,12 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
 
+/**
+ * Task 82 se pehle yahan manual PJP create (POST) bhi tha — ab route AUTO hai:
+ * /api/pjp/today booker ke liye plan khud banata hai (Outlet.salesmanId + visitDays se).
+ * Ye endpoint sirf HISTORY dikhata hai (distributor PJP page). Manual create hata diya.
+ */
+
 function startOfDay(d = new Date()): Date {
   const x = new Date(d)
   x.setHours(0, 0, 0, 0)
@@ -80,48 +86,3 @@ export async function GET(req: Request) {
   }
 }
 
-export async function POST(req: Request) {
-  try {
-    const body = await req.json()
-    const { userId, salesmanId, date, outletIds } = body as {
-      userId?: string
-      salesmanId: string
-      date: string
-      outletIds: string[]
-    }
-    if (!userId || !salesmanId || !date || !outletIds || outletIds.length === 0) {
-      return jsonError('userId, salesman, date aur outlets required hain')
-    }
-
-    // Task 25-b tenant guard: sirf distributor plan bana sakta hai — aur sirf APNE
-    // booker ke liye, APNI hi shops ke sath (cross-tenant PJP hole band)
-    const caller = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-    if (!caller) return jsonError('User not found', 404)
-    const mb = megaBlocked(caller.role)
-    if (mb) return mb
-    if (caller.role !== 'DISTRIBUTOR') return jsonError('Sirf distributor journey plan bana sakta hai', 403)
-    const profile = await db.distributorProfile.findUnique({ where: { id: caller.profile!.id } })
-    if (!profile) return jsonError('Distributor profile nahi mili', 404)
-
-    const salesman = await db.user.findUnique({ where: { id: salesmanId } })
-    if (!salesman || salesman.role !== 'SALESMAN') return jsonError('Order booker valid nahi hai')
-    if (salesman.parentId !== profile.userId) return jsonError('Yeh order booker aap ke scope mein nahi hai', 403)
-
-    const outlets = await db.outlet.findMany({ where: { id: { in: outletIds } }, select: { id: true, distributorId: true } })
-    if (outlets.length !== outletIds.length) return jsonError('Kuch shops valid nahi hain')
-    const foreign = outlets.filter((o) => o.distributorId !== profile.id)
-    if (foreign.length > 0) return jsonError('Kuch shops aap ke scope mein nahi hain', 403)
-
-    const plan = await db.pJPPlan.create({
-      data: { salesmanId, date: new Date(date), status: 'PLANNED' },
-    })
-    let seq = 1
-    for (const oid of outletIds) {
-      await db.visit.create({ data: { planId: plan.id, outletId: oid, sequence: seq++ } })
-    }
-    return Response.json({ plan: { id: plan.id } })
-  } catch (e) {
-    console.error(e)
-    return jsonError('PJP create failed', 500)
-  }
-}

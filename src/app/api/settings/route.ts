@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { jsonError, tenantProfileId, distributorTenant } from '@/lib/dms-scope'
 import { getTaxRates, getGstSettings, getDistributorAddress, setDistributorAddress, TAX_KEYS, GST_KEYS } from '@/lib/dms-settings'
+import { getPjpSettings, upsertPjpFlag, PJP_KEYS } from '@/lib/dms-pjp'
 
 /** Per-tenant settings (Task 23) — GET ?userId= => us distributor ke apne tax/GST rates.
  * Task 78: ab profile (distribution name, distributor name, cell, city) bhi — bill print isi se. */
@@ -9,13 +10,14 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url)
     const userId = searchParams.get('userId')
     const tenantId = userId ? await tenantProfileId(userId) : null
-    const [rates, gst, user, address] = await Promise.all([
+    const [rates, gst, user, address, pjp] = await Promise.all([
       getTaxRates(tenantId),
       getGstSettings(tenantId),
       userId
         ? db.user.findUnique({ where: { id: userId }, include: { profile: true } })
         : null,
       getDistributorAddress(tenantId),
+      getPjpSettings(tenantId),
     ])
     return Response.json({
       settings: {
@@ -23,6 +25,11 @@ export async function GET(req: Request) {
         nonFilerTaxRate: rates.nonFiler,
         gstEnabled: gst.enabled,
         gstRate: gst.rate,
+      },
+      // Task 82: PJP auto-route toggles — Jumma OFF day + Unplanned orders
+      pjp: {
+        fridayOff: pjp.fridayOff,
+        unplannedEnabled: pjp.unplannedEnabled,
       },
       // Task 78: distributor profile — Settings page isi se form fill karta hai
       // Task 78b: address bhi (AppSetting KV) — bill header Name → Address → Cell No
@@ -46,7 +53,7 @@ export async function GET(req: Request) {
 export async function PUT(req: Request) {
   try {
     const body = await req.json()
-    const { userId, filerTaxRate, nonFilerTaxRate, gstEnabled, gstRate, distributorName, phone, businessName, city, address } = body as {
+    const { userId, filerTaxRate, nonFilerTaxRate, gstEnabled, gstRate, distributorName, phone, businessName, city, address, pjpFridayOff, pjpUnplannedEnabled } = body as {
       userId: string
       filerTaxRate?: number
       nonFilerTaxRate?: number
@@ -57,6 +64,9 @@ export async function PUT(req: Request) {
       businessName?: string
       city?: string
       address?: string
+      // Task 82: PJP toggles — Jumma OFF day + Unplanned orders
+      pjpFridayOff?: boolean | number | string
+      pjpUnplannedEnabled?: boolean | number | string
     }
     if (!userId) return jsonError('userId required')
 
@@ -125,11 +135,18 @@ export async function PUT(req: Request) {
       await upsertRate(TAX_KEYS.nonFiler, nonFilerTaxRate)
       await upsertFlag(gstEnabled)
       await upsertRate(GST_KEYS.rate, gstRate)
+      // Task 82: PJP toggles (true/1/'1'/'true' => ON)
+      const toFlag = (raw: boolean | number | string | undefined): boolean | undefined =>
+        raw === undefined || raw === null || raw === '' ? undefined : raw === true || raw === 1 || raw === '1' || raw === 'true'
+      const fridayFlag = toFlag(pjpFridayOff)
+      const unplannedFlag = toFlag(pjpUnplannedEnabled)
+      if (fridayFlag !== undefined) await upsertPjpFlag(tenantId, PJP_KEYS.fridayOff, fridayFlag)
+      if (unplannedFlag !== undefined) await upsertPjpFlag(tenantId, PJP_KEYS.unplanned, unplannedFlag)
     } catch (err) {
       return jsonError(err instanceof Error ? err.message : 'Invalid setting')
     }
 
-    const [rates, gst, freshAddr] = await Promise.all([getTaxRates(tenantId), getGstSettings(tenantId), getDistributorAddress(tenantId)])
+    const [rates, gst, freshAddr, freshPjp] = await Promise.all([getTaxRates(tenantId), getGstSettings(tenantId), getDistributorAddress(tenantId), getPjpSettings(tenantId)])
     const fresh = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
     return Response.json({
       settings: {
@@ -137,6 +154,10 @@ export async function PUT(req: Request) {
         nonFilerTaxRate: rates.nonFiler,
         gstEnabled: gst.enabled,
         gstRate: gst.rate,
+      },
+      pjp: {
+        fridayOff: freshPjp.fridayOff,
+        unplannedEnabled: freshPjp.unplannedEnabled,
       },
       profile: {
         distributorName: fresh?.name ?? '',

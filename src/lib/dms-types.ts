@@ -112,6 +112,10 @@ export interface OrderDTO {
   totalCases?: number
   /** Σ scheme free pcs (display) */
   totalFreePcs?: number
+  /** Task 82: out-of-route order (unplanned button se bana) + GPS evidence */
+  unplanned?: boolean
+  orderLat?: number | null
+  orderLng?: number | null
   items?: OrderItemDTO[]
 }
 
@@ -374,6 +378,15 @@ export interface PJPPlanDTO {
     lat: number | null
     lng: number | null
   }[]
+}
+
+/** Task 82: /api/pjp/today — auto route (manual plan khatam) */
+export interface PjpTodayDTO {
+  dayCode: string
+  fridayOff: boolean
+  unplannedEnabled: boolean
+  planId: string | null
+  visits: PJPPlanDTO['visits']
 }
 
 export interface SalesmanPerfDTO {
