@@ -3,10 +3,11 @@
 // Task 66 — Target vs Achievement tab (booker + brand, month-wise)
 
 import { useState } from 'react'
+import { Target } from 'lucide-react'
 import { useDMS } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
 import {
-  KpiRow, DataTable, SectionCard, ExportButtons, useReport,
+  KpiRow, DataTable, SectionCard, ExportButtons, useReportGate, ReportEmptyGate, GateRefreshButton,
   type Col,
 } from './reports-kit'
 
@@ -26,9 +27,14 @@ export function TargetsTab() {
   const now = new Date()
   const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
 
-  const { data, loading, refresh } = useReport<Resp>(async () => {
-    return api<Resp>(`/api/reports/targets?userId=${user!.id}&month=${month}`)
-  }, [user?.id, month])
+  // Task 74 — filter-first: data sirf "Report Load Karein" par load hota hai
+  const gate = useReportGate<Resp>({
+    fetcher: async () => {
+      return api<Resp>(`/api/reports/targets?userId=${user!.id}&month=${month}`)
+    },
+    filtersKey: month,
+  })
+  const { data, loading } = gate
 
   const bar = (pct: number) => (
     <div className="flex items-center justify-end gap-1.5">
@@ -55,10 +61,23 @@ export function TargetsTab() {
           type="month" value={month} onChange={(e) => setMonth(e.target.value)}
           className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700"
         />
-        <button onClick={refresh} disabled={loading} className="ml-auto flex h-9 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
-          Refresh
-        </button>
+        <GateRefreshButton armed={gate.armed} stale={gate.stale} loading={loading} onClick={gate.load} />
       </div>
+      {!gate.armed ? (
+        <ReportEmptyGate
+          icon={Target}
+          title="Target vs Achievement Report"
+          desc="Booker aur brand wise monthly target vs achieved sales — achievement %, gap aur on-track bookers ke sath."
+          steps={[
+            'Month chunein',
+            "'Report Load Karein' dabayen — sirf us month ke targets aur sales load hongi",
+            'Targets set karne ke liye Sales Targets page istemal karein',
+          ]}
+          onLoad={gate.load}
+          loading={loading}
+        />
+      ) : (
+      <>
       {data && (
         <KpiRow
           items={[
@@ -101,6 +120,8 @@ export function TargetsTab() {
             rows={data!.brandRows}
           />
         </SectionCard>
+      )}
+      </>
       )}
     </div>
   )

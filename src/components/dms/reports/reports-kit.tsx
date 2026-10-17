@@ -8,14 +8,20 @@
 //   • DataTable  — generic table + totals row (right-aligned money cols)
 //   • ExportButtons — Task 69: Excel (.xlsx) + PDF + CSV + Print — ek hi jagah 4 exports
 //   • downloadCSV / downloadExcel / downloadPDF / printReport — export + print
+// Task 74 — FILTER-FIRST: useReportGate + ReportEmptyGate — report page
+//   khulte hi koi data load NAHI hota; user pehle date/booker/company select
+//   karta hai aur "Report Load Karein" dabata hai — tabhi specific data fetch
+//   hota hai. Filters badalne par button "Report Update Karein" (amber) ban
+//   jata hai — auto-refetch nahi, system par load kam, user ke control zyada.
 // Sab reports ek jaisi dikhein — styling yahan centralized hai.
 // ============================================================
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import { Download, Printer, RefreshCw, FileSpreadsheet, FileDown } from 'lucide-react'
+import { Download, Printer, RefreshCw, FileSpreadsheet, FileDown, Play } from 'lucide-react'
+import { api } from '@/lib/dms-api'
 
 export interface DateRange { from: string; to: string } // yyyy-mm-dd
 
@@ -81,8 +87,11 @@ export function FilterBar(props: {
   extra?: React.ReactNode
   onRefresh: () => void
   loading?: boolean
+  armed?: boolean // Task 74: false = report abhi load nahi hui → "Report Load Karein"
+  stale?: boolean // Task 74: filters badal gaye load ke baad → "Report Update Karein" (amber)
 }) {
-  const { range, setRange, preset, setPreset, booker, setBooker, company, setCompany, bookers, companies, extra, onRefresh, loading } = props
+  const { range, setRange, preset, setPreset, booker, setBooker, company, setCompany, bookers, companies, extra, onRefresh, loading, armed, stale } = props
+  const isArmed = armed ?? true
   const sel = 'h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/30'
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-xl border border-emerald-100 bg-white/80 p-2.5 shadow-sm">
@@ -129,13 +138,142 @@ export function FilterBar(props: {
         </select>
       )}
       {extra}
-      <button
-        onClick={onRefresh}
-        disabled={loading}
-        className="ml-auto flex h-9 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:opacity-50"
-      >
-        <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
-      </button>
+      <GateRefreshButton armed={isArmed} stale={!!stale} loading={!!loading} onClick={onRefresh} />
+    </div>
+  )
+}
+
+// ---------------- Task 74 — FILTER-FIRST GATE ----------------
+
+/** Task 74 — Load/Update/Refresh button — armed/stale ke hisab se label aur rang badalta hai */
+export function GateRefreshButton(props: { armed: boolean; stale: boolean; loading: boolean; onClick: () => void; className?: string }) {
+  return (
+    <button
+      onClick={props.onClick}
+      disabled={props.loading}
+      title={props.armed
+        ? (props.stale ? 'Filters badal gaye — report dobara load karein' : 'Report refresh karein')
+        : 'Filters ke mutabiq report load karein'}
+      className={`ml-auto flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-white shadow-sm transition-colors disabled:opacity-50 ${
+        props.stale ? 'bg-amber-500 hover:bg-amber-600' : 'bg-emerald-600 hover:bg-emerald-700'
+      } ${props.className ?? ''}`}
+    >
+      {props.armed
+        ? <><RefreshCw className={`h-3.5 w-3.5 ${props.loading ? 'animate-spin' : ''}`} /> {props.stale ? 'Report Update Karein' : 'Refresh'}</>
+        : <><Play className="h-3.5 w-3.5" /> Report Load Karein</>}
+    </button>
+  )
+}
+
+/** Task 74 — filter dropdowns ke options (bookers + companies) — halka endpoint,
+ *  report page mount par ek dafa load hota hai (heavy report query ke bagair) */
+export interface FilterOptions { bookers: Option[]; companies: Option[] }
+
+export function useFilterOptions(userId: string | undefined): FilterOptions {
+  const [fopts, setFopts] = useState<FilterOptions>({ bookers: [], companies: [] })
+  useEffect(() => {
+    if (!userId) return
+    let alive = true
+    Promise.resolve().then(() => {
+      if (!alive) return
+      return api<FilterOptions>(`/api/reports/filter-options?userId=${userId}`)
+        .then((d) => { if (alive) setFopts({ bookers: d.bookers ?? [], companies: d.companies ?? [] }) })
+        .catch(() => { if (alive) setFopts({ bookers: [], companies: [] }) })
+    })
+    return () => { alive = false }
+  }, [userId])
+  return fopts
+}
+
+/** Task 74 — FILTER-FIRST report hook.
+ *  Mount par kuch fetch NAHI hota — `load()` ("Report Load Karein") dabane
+ *  par pehli dafa arm hota hai aur fetch chalta hai. Iske baad filters
+ *  badalne par `stale` true ho jata hai (button amber "Report Update Karein")
+ *  lekin AUTO-refetch nahi hota — user dobara load dabata hai. Is se system
+ *  par bojhe kam: sirf zaroori data, sirf jab user mange. */
+export function useReportGate<T>(opts: { fetcher: () => Promise<T>; filtersKey: string }) {
+  const [armed, setArmed] = useState(false)
+  const [data, setData] = useState<T | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [loadedKey, setLoadedKey] = useState<string | null>(null)
+  const [tick, setTick] = useState(0)
+
+  // latest fetcher/filtersKey — effect sirf armed/tick par chalta hai (manual load)
+  const fetcherRef = useRef(opts.fetcher)
+  const keyRef = useRef(opts.filtersKey)
+  useEffect(() => {
+    fetcherRef.current = opts.fetcher
+    keyRef.current = opts.filtersKey
+  })
+
+  // "Report Load Karein" — pehli dafa arm karo, baad mein reload
+  const load = () => {
+    setArmed(true)
+    setTick((t) => t + 1)
+  }
+
+  useEffect(() => {
+    if (!armed) return
+    let alive = true
+    // setState ko async chain mein rakha hai (react-hooks/set-state-in-effect rule)
+    Promise.resolve().then(() => {
+      if (!alive) return
+      setLoading(true)
+      return fetcherRef.current()
+        .then((d) => { if (alive) { setData(d); setLoadedKey(keyRef.current) } })
+        .catch(() => { if (alive) setData(null) })
+        .finally(() => { if (alive) setLoading(false) })
+    })
+    return () => { alive = false }
+  }, [armed, tick])
+
+  return {
+    data,
+    loading,
+    armed,
+    // load ke baad filters badal gaye? → "Report Update Karein" dikhao
+    stale: armed && loadedKey !== null && loadedKey !== opts.filtersKey,
+    load,
+  }
+}
+
+/** Task 74 — unarmed report ka empty state: filters set karne ka guide + Load button */
+export function ReportEmptyGate(props: {
+  icon: React.ComponentType<{ className?: string }>
+  title: string
+  desc: string
+  steps: string[]
+  onLoad: () => void
+  loading: boolean
+}) {
+  const Icon = props.icon
+  return (
+    <div className="flex min-h-[52vh] items-center justify-center">
+      <div className="w-full max-w-lg rounded-2xl border-2 border-dashed border-emerald-200 bg-white/70 p-8 text-center shadow-sm">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50">
+          <Icon className="h-7 w-7 text-emerald-600" />
+        </div>
+        <h3 className="mt-4 text-lg font-bold text-slate-900">{props.title}</h3>
+        <p className="mt-1.5 text-sm leading-relaxed text-slate-500">{props.desc}</p>
+        <ol className="mx-auto mt-4 max-w-sm space-y-1.5 text-left">
+          {props.steps.map((s, i) => (
+            <li key={i} className="flex items-start gap-2 text-xs text-slate-600">
+              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-bold text-white">{i + 1}</span>
+              <span className="leading-5">{s}</span>
+            </li>
+          ))}
+        </ol>
+        <button
+          onClick={props.onLoad}
+          disabled={props.loading}
+          className="mx-auto mt-6 flex h-11 items-center gap-2 rounded-xl bg-emerald-600 px-6 text-sm font-bold text-white shadow-md transition-all hover:scale-[1.02] hover:bg-emerald-700 disabled:opacity-50 disabled:hover:scale-100"
+        >
+          {props.loading
+            ? <><RefreshCw className="h-4 w-4 animate-spin" /> Report load ho rahi hai…</>
+            : <><Play className="h-4 w-4" /> Report Load Karein</>}
+        </button>
+        <p className="mt-3 text-[11px] text-slate-400">Pehle filters set karein — sirf mutaliqa data load hoga (tezz + halka)</p>
+      </div>
     </div>
   )
 }
@@ -513,24 +651,5 @@ export function SectionCard({ title, children, right }: { title: string; childre
   )
 }
 
-/** Report fetch hook — deps change par auto reload + manual refresh */
-export function useReport<T>(fetcher: () => Promise<T>, deps: unknown[]): { data: T | null; loading: boolean; refresh: () => void } {
-  const [data, setData] = useState<T | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [tick, setTick] = useState(0)
-  const refresh = () => setTick((t) => t + 1)
-  useEffect(() => {
-    let alive = true
-    // setState ko async chain mein rakha hai (react-hooks/set-state-in-effect rule)
-    Promise.resolve().then(() => {
-      if (!alive) return
-      setLoading(true)
-      return fetcher()
-        .then((d) => { if (alive) setData(d) })
-        .catch(() => { if (alive) setData(null) })
-        .finally(() => { if (alive) setLoading(false) })
-    })
-    return () => { alive = false }
-  }, [...deps, tick])
-  return { data, loading, refresh }
-}
+// useReport (Task 66 auto-fetch hook) ko Task 74 mein useReportGate ne replace
+// kiya — reports ab filter-first hain: pehle filters, phir "Report Load Karein".

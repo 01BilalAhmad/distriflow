@@ -3,11 +3,12 @@
 // Task 66 — Stock Report tab (value + low stock + slow-moving + expiring)
 
 import { useState } from 'react'
+import { Boxes } from 'lucide-react'
 import { useDMS } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
 import {
-  KpiRow, DataTable, SectionCard, ExportButtons, useReport, type ReportExportOpts,
-  fmtDay, type Col,
+  KpiRow, DataTable, SectionCard, ExportButtons, useReportGate, ReportEmptyGate, GateRefreshButton,
+  type ReportExportOpts, fmtDay, type Col,
 } from './reports-kit'
 
 interface StockRow extends Record<string, unknown> {
@@ -39,9 +40,14 @@ export function StockTab() {
   const [slowDays, setSlowDays] = useState(30)
   const [expDays, setExpDays] = useState(60)
 
-  const { data, loading, refresh } = useReport<Resp>(async () => {
-    return api<Resp>(`/api/reports/stock?userId=${user!.id}&lowCtns=${lowCtns}&slowDays=${slowDays}&expDays=${expDays}`)
-  }, [user?.id, lowCtns, slowDays, expDays])
+  // Task 74 — filter-first: data sirf "Report Load Karein" par load hota hai
+  const gate = useReportGate<Resp>({
+    fetcher: async () => {
+      return api<Resp>(`/api/reports/stock?userId=${user!.id}&lowCtns=${lowCtns}&slowDays=${slowDays}&expDays=${expDays}`)
+    },
+    filtersKey: `${lowCtns}|${slowDays}|${expDays}`,
+  })
+  const { data, loading } = gate
 
   const sel = 'h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700'
   // Task 69: har section ka apna export opts — Excel + PDF + CSV + Print
@@ -77,10 +83,23 @@ export function StockTab() {
         <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
           Expiry ≤ <input type="number" min={1} value={expDays} onChange={(e) => setExpDays(Math.max(1, Number(e.target.value)))} className={`${sel} w-16`} /> din
         </label>
-        <button onClick={refresh} disabled={loading} className="ml-auto flex h-9 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
-          Refresh
-        </button>
+        <GateRefreshButton armed={gate.armed} stale={gate.stale} loading={loading} onClick={gate.load} />
       </div>
+      {!gate.armed ? (
+        <ReportEmptyGate
+          icon={Boxes}
+          title="Stock Report (Value + Alerts)"
+          desc="Product-wise stock value (cost/trade), low stock, slow-moving, expiring soon aur out-of-stock SKUs — sab thresholds aap set karte hain."
+          steps={[
+            'Thresholds set karein — low cartons, slow din, expiry din',
+            "'Report Load Karein' dabayen — sirf selected thresholds par stock load hoga",
+            'Har section ka alag Excel/PDF/Print mojood hai',
+          ]}
+          onLoad={gate.load}
+          loading={loading}
+        />
+      ) : (
+      <>
       {data && (
         <KpiRow
           items={[
@@ -122,6 +141,8 @@ export function StockTab() {
         <SectionCard title="❌ Out of Stock">
           <DataTable cols={COLS} rows={data!.outOfStock} maxH="max-h-[30vh]" />
         </SectionCard>
+      )}
+      </>
       )}
     </div>
   )

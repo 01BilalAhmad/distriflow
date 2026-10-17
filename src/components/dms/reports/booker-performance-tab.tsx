@@ -2,11 +2,12 @@
 
 // Task 66 — Order Booker Performance tab (productivity + recovery)
 
+import { Users } from 'lucide-react'
 import { useDMS } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
 import {
   FilterBar, useRangeFilter, KpiRow, DataTable, SectionCard, ExportButtons,
-  useReport, fmtDay, rangeLabel, type Col,
+  useReportGate, ReportEmptyGate, fmtDay, rangeLabel, type Col,
 } from './reports-kit'
 
 interface PerfRow extends Record<string, unknown> {
@@ -24,9 +25,14 @@ export function BookerPerformanceTab() {
   const { user } = useDMS()
   const { range, setRange, preset, setPreset } = useRangeFilter()
 
-  const { data, loading, refresh } = useReport<Resp>(async () => {
-    return api<Resp>(`/api/reports/booker-performance?userId=${user!.id}&from=${range.from}&to=${range.to}`)
-  }, [user?.id, range.from, range.to])
+  // Task 74 — filter-first: data sirf "Report Load Karein" par load hota hai
+  const gate = useReportGate<Resp>({
+    fetcher: async () => {
+      return api<Resp>(`/api/reports/booker-performance?userId=${user!.id}&from=${range.from}&to=${range.to}`)
+    },
+    filtersKey: `${range.from}|${range.to}`,
+  })
+  const { data, loading } = gate
 
   const cols: Col<PerfRow>[] = [
     { key: 'bookerName', label: 'Order Booker', render: (r) => <span><span className="font-semibold text-slate-800">{r.bookerName}</span>{!r.isActive && <span className="ml-1.5 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-500">INACTIVE</span>}</span> },
@@ -47,8 +53,22 @@ export function BookerPerformanceTab() {
     <div className="space-y-3">
       <FilterBar
         range={range} setRange={setRange} preset={preset} setPreset={setPreset}
-        onRefresh={refresh} loading={loading}
+        onRefresh={gate.load} loading={loading} armed={gate.armed} stale={gate.stale}
       />
+      {!gate.armed ? (
+        <ReportEmptyGate
+          icon={Users}
+          title="Order Booker Performance Report"
+          desc="Har booker ki productivity — orders, shops served, coverage %, net sales, discount, free units aur wasooli ek jagah."
+          steps={[
+            'Date range select karein — preset ya custom',
+            "'Report Load Karein' dabayen — sirf selected period ki performance load hogi",
+          ]}
+          onLoad={gate.load}
+          loading={loading}
+        />
+      ) : (
+      <>
       {data && (
         <KpiRow
           items={[
@@ -83,6 +103,8 @@ export function BookerPerformanceTab() {
       <p className="text-[11px] text-slate-400">
         Lines/Drop = har bill mein average kitne products (productivity signal) • Coverage = served ÷ assigned shops • Wasooli = APPROVED recovery vouchers (period).
       </p>
+      </>
+      )}
     </div>
   )
 }

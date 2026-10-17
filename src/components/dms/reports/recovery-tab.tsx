@@ -3,11 +3,12 @@
 // Task 66 — Recovery (wasooli) tab — outstanding + collection history dono
 
 import { useState } from 'react'
+import { HandCoins } from 'lucide-react'
 import { useDMS } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
 import {
   FilterBar, useRangeFilter, KpiRow, DataTable, SectionCard, ExportButtons,
-  useReport, fmtDay, rangeLabel, type Col, type Option,
+  useReportGate, useFilterOptions, ReportEmptyGate, fmtDay, rangeLabel, type Col,
 } from './reports-kit'
 
 interface OutRow extends Record<string, unknown> {
@@ -22,7 +23,6 @@ interface Resp extends Record<string, unknown> {
   summary: { outstandingShops: number; outstandingTotal: number; overdueShops: number; overdueTotal: number; collectedInPeriod: number; historyEntries: number }
   outstanding: OutRow[]; history: HistRow[]
   bookerSummary: { booker: string; collected: number; entries: number; shops: number }[]
-  meta: { bookers: Option[]; companies: Option[] }
 }
 
 export function RecoveryTab() {
@@ -30,13 +30,19 @@ export function RecoveryTab() {
   const { range, setRange, preset, setPreset } = useRangeFilter()
   const [booker, setBooker] = useState('')
   const [company, setCompany] = useState('')
+  const fopts = useFilterOptions(user?.id)
 
-  const { data, loading, refresh } = useReport<Resp>(async () => {
-    const p = new URLSearchParams({ userId: user!.id, from: range.from, to: range.to })
-    if (booker) p.set('bookerId', booker)
-    if (company) p.set('companyId', company)
-    return api<Resp>(`/api/reports/recovery?${p}`)
-  }, [user?.id, range.from, range.to, booker, company])
+  // Task 74 — filter-first: data sirf "Report Load Karein" par load hota hai
+  const gate = useReportGate<Resp>({
+    fetcher: async () => {
+      const p = new URLSearchParams({ userId: user!.id, from: range.from, to: range.to })
+      if (booker) p.set('bookerId', booker)
+      if (company) p.set('companyId', company)
+      return api<Resp>(`/api/reports/recovery?${p}`)
+    },
+    filtersKey: `${range.from}|${range.to}|${booker}|${company}`,
+  })
+  const { data, loading } = gate
 
   const ocols: Col<OutRow>[] = [
     { key: 'shop', label: 'Shop', render: (r) => <span><span className="font-semibold text-slate-800">{r.shop}</span>{r.overdue && <span className="ml-1.5 rounded-full bg-red-50 px-1.5 py-0.5 text-[9px] font-bold text-red-600">OVERDUE</span>}</span> },
@@ -67,10 +73,25 @@ export function RecoveryTab() {
     <div className="space-y-3">
       <FilterBar
         range={range} setRange={setRange} preset={preset} setPreset={setPreset}
-        booker={booker} setBooker={setBooker} bookers={data?.meta.bookers}
-        company={company} setCompany={setCompany} companies={data?.meta.companies}
-        onRefresh={refresh} loading={loading}
+        booker={booker} setBooker={setBooker} bookers={fopts.bookers}
+        company={company} setCompany={setCompany} companies={fopts.companies}
+        onRefresh={gate.load} loading={loading} armed={gate.armed} stale={gate.stale}
       />
+      {!gate.armed ? (
+        <ReportEmptyGate
+          icon={HandCoins}
+          title="Recovery Report (Wasooli)"
+          desc="Shop-wise outstanding udhaar, overdue shops aur period ki collection history — booker-wise wasooli summary ke sath."
+          steps={[
+            'Date range select karein',
+            'Order booker / company filter chunein (optional)',
+            "'Report Load Karein' dabayen — sirf selected data load hoga",
+          ]}
+          onLoad={gate.load}
+          loading={loading}
+        />
+      ) : (
+      <>
       {data && (
         <KpiRow
           items={[
@@ -127,6 +148,8 @@ export function RecoveryTab() {
           rows={(data?.bookerSummary ?? []) as unknown as Record<string, unknown>[]}
         />
       </SectionCard>
+      </>
+      )}
     </div>
   )
 }

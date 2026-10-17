@@ -2,11 +2,12 @@
 
 // Task 66 — Top Shops (ABC analysis) tab — Pareto 80/20
 
+import { Store } from 'lucide-react'
 import { useDMS } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
 import {
   FilterBar, useRangeFilter, KpiRow, DataTable, SectionCard, ExportButtons,
-  useReport, fmtDay, rangeLabel, type Col,
+  useReportGate, ReportEmptyGate, fmtDay, rangeLabel, type Col,
 } from './reports-kit'
 
 interface ShopRow extends Record<string, unknown> {
@@ -29,9 +30,14 @@ export function TopShopsTab() {
   const { user } = useDMS()
   const { range, setRange, preset, setPreset } = useRangeFilter()
 
-  const { data, loading, refresh } = useReport<Resp>(async () => {
-    return api<Resp>(`/api/reports/top-shops?userId=${user!.id}&from=${range.from}&to=${range.to}`)
-  }, [user?.id, range.from, range.to])
+  // Task 74 — filter-first: data sirf "Report Load Karein" par load hota hai
+  const gate = useReportGate<Resp>({
+    fetcher: async () => {
+      return api<Resp>(`/api/reports/top-shops?userId=${user!.id}&from=${range.from}&to=${range.to}`)
+    },
+    filtersKey: `${range.from}|${range.to}`,
+  })
+  const { data, loading } = gate
 
   const cols: Col<ShopRow>[] = [
     { key: 'shop', label: 'Shop', render: (r) => (
@@ -58,8 +64,22 @@ export function TopShopsTab() {
     <div className="space-y-3">
       <FilterBar
         range={range} setRange={setRange} preset={preset} setPreset={setPreset}
-        onRefresh={refresh} loading={loading}
+        onRefresh={gate.load} loading={loading} armed={gate.armed} stale={gate.stale}
       />
+      {!gate.armed ? (
+        <ReportEmptyGate
+          icon={Store}
+          title="Top Shops Report (ABC Analysis)"
+          desc="A/B/C class shops — Pareto 80/20: kaunsi shops aapki 80% sales de rahi hain, share % aur cumulative ranking ke sath."
+          steps={[
+            'Date range select karein — preset ya custom',
+            "'Report Load Karein' dabayen — sirf selected period ki ranking load hogi",
+          ]}
+          onLoad={gate.load}
+          loading={loading}
+        />
+      ) : (
+      <>
       {data && (
         <KpiRow
           items={[
@@ -94,6 +114,8 @@ export function TopShopsTab() {
       <p className="text-[11px] text-slate-400">
         Pareto principle: A-class shops aapki 80% sales deti hain — inki service/stock priority sab se upar rakhein. C-class shops par growth potential ya drop decision lene ka mauqa hai.
       </p>
+      </>
+      )}
     </div>
   )
 }

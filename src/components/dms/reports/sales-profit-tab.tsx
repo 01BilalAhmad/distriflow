@@ -3,11 +3,12 @@
 // Task 66 — Sales & Profit tab (product / booker / company breakdown)
 
 import { useMemo, useState } from 'react'
+import { TrendingUp } from 'lucide-react'
 import { useDMS } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
 import {
   FilterBar, useRangeFilter, KpiRow, DataTable, SectionCard, ExportButtons,
-  useReport, fmtMoney, rangeLabel, type Col, type Option,
+  useReportGate, useFilterOptions, ReportEmptyGate, fmtMoney, rangeLabel, type Col,
 } from './reports-kit'
 
 interface ProdRow extends Record<string, unknown> {
@@ -29,7 +30,6 @@ interface CompanyRow extends Record<string, unknown> {
 interface Resp extends Record<string, unknown> {
   summary: { grossSales: number; discountTotal: number; tradeOfferTotal: number; netSales: number; returnsValue: number; netAfterReturns: number; cogs: number; profitSelf: number; claimPotential: number; profitWithClaim: number; orders: number; products: number }
   productWise: ProdRow[]; bookerWise: BookerRow[]; companyWise: CompanyRow[]
-  meta: { bookers: Option[]; companies: Option[] }
 }
 
 const VIEW = ['product', 'booker', 'company'] as const
@@ -40,13 +40,19 @@ export function SalesProfitTab() {
   const [booker, setBooker] = useState('')
   const [company, setCompany] = useState('')
   const [view, setView] = useState<(typeof VIEW)[number]>('product')
+  const fopts = useFilterOptions(user?.id)
 
-  const { data, loading, refresh } = useReport<Resp>(async () => {
-    const p = new URLSearchParams({ userId: user!.id, from: range.from, to: range.to })
-    if (booker) p.set('bookerId', booker)
-    if (company) p.set('companyId', company)
-    return api<Resp>(`/api/reports/sales-profit?${p}`)
-  }, [user?.id, range.from, range.to, booker, company])
+  // Task 74 — filter-first: data sirf "Report Load Karein" par load hota hai
+  const gate = useReportGate<Resp>({
+    fetcher: async () => {
+      const p = new URLSearchParams({ userId: user!.id, from: range.from, to: range.to })
+      if (booker) p.set('bookerId', booker)
+      if (company) p.set('companyId', company)
+      return api<Resp>(`/api/reports/sales-profit?${p}`)
+    },
+    filtersKey: `${range.from}|${range.to}|${booker}|${company}`,
+  })
+  const { data, loading } = gate
 
   const s = data?.summary
   const cols: Record<string, Col<ProdRow>[] | Col<BookerRow>[] | Col<CompanyRow>[]> = useMemo(() => ({
@@ -116,10 +122,25 @@ export function SalesProfitTab() {
     <div className="space-y-3">
       <FilterBar
         range={range} setRange={setRange} preset={preset} setPreset={setPreset}
-        booker={booker} setBooker={setBooker} bookers={data?.meta.bookers}
-        company={company} setCompany={setCompany} companies={data?.meta.companies}
-        onRefresh={refresh} loading={loading}
+        booker={booker} setBooker={setBooker} bookers={fopts.bookers}
+        company={company} setCompany={setCompany} companies={fopts.companies}
+        onRefresh={gate.load} loading={loading} armed={gate.armed} stale={gate.stale}
       />
+      {!gate.armed ? (
+        <ReportEmptyGate
+          icon={TrendingUp}
+          title="Sales & Profit Report"
+          desc="Product, booker aur company wise breakdown — gross/net sales, scheme discount, COGS, profit (self) aur claim potential ke sath."
+          steps={[
+            'Date range select karein — preset ya custom',
+            'Order booker / company filter chunein (optional)',
+            "'Report Load Karein' dabayen — sirf selected data load hoga",
+          ]}
+          onLoad={gate.load}
+          loading={loading}
+        />
+      ) : (
+      <>
       {s && (
         <KpiRow
           items={[
@@ -154,6 +175,8 @@ export function SalesProfitTab() {
         Profit (If Claimed) = Profit (Self) + scheme/discount + trade offer — agar company claim de.
         COGS = (qty + free − returns) × weighted-avg purchase cost/pc.
       </p>
+      </>
+      )}
     </div>
   )
 }

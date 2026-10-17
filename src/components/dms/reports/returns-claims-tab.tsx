@@ -2,11 +2,12 @@
 
 // Task 66 — Returns & Claims tab (loss control)
 
+import { Undo2 } from 'lucide-react'
 import { useDMS } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
 import {
   FilterBar, useRangeFilter, KpiRow, DataTable, SectionCard, ExportButtons,
-  useReport, rangeLabel, type Col,
+  useReportGate, ReportEmptyGate, rangeLabel, type Col,
 } from './reports-kit'
 
 interface ShopRow extends Record<string, unknown> {
@@ -27,9 +28,14 @@ export function ReturnsClaimsTab() {
   const { user } = useDMS()
   const { range, setRange, preset, setPreset } = useRangeFilter()
 
-  const { data, loading, refresh } = useReport<Resp>(async () => {
-    return api<Resp>(`/api/reports/returns-claims?userId=${user!.id}&from=${range.from}&to=${range.to}`)
-  }, [user?.id, range.from, range.to])
+  // Task 74 — filter-first: data sirf "Report Load Karein" par load hota hai
+  const gate = useReportGate<Resp>({
+    fetcher: async () => {
+      return api<Resp>(`/api/reports/returns-claims?userId=${user!.id}&from=${range.from}&to=${range.to}`)
+    },
+    filtersKey: `${range.from}|${range.to}`,
+  })
+  const { data, loading } = gate
 
   const shopCols: Col<ShopRow>[] = [
     { key: 'shop', label: 'Shop', render: (r) => <span><span className="font-semibold text-slate-800">{r.shop}</span><span className="ml-1.5 text-[10px] text-slate-400">{r.code}</span></span> },
@@ -59,8 +65,22 @@ export function ReturnsClaimsTab() {
     <div className="space-y-3">
       <FilterBar
         range={range} setRange={setRange} preset={preset} setPreset={setPreset}
-        onRefresh={refresh} loading={loading}
+        onRefresh={gate.load} loading={loading} armed={gate.armed} stale={gate.stale}
       />
+      {!gate.armed ? (
+        <ReportEmptyGate
+          icon={Undo2}
+          title="Returns & Claims Report (Loss Control)"
+          desc="Shop-wise aur product-wise returns, return rate %, damaged/expired/unsold breakdown aur company claims ki status."
+          steps={[
+            'Date range select karein — preset ya custom',
+            "'Report Load Karein' dabayen — sirf selected period ke returns load honge",
+          ]}
+          onLoad={gate.load}
+          loading={loading}
+        />
+      ) : (
+      <>
       {data && (
         <KpiRow
           items={[
@@ -108,6 +128,8 @@ export function ReturnsClaimsTab() {
             maxH="max-h-[30vh]"
           />
         </SectionCard>
+      )}
+      </>
       )}
     </div>
   )

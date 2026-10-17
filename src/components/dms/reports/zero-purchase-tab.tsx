@@ -5,13 +5,13 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { ShoppingCart } from 'lucide-react'
 import { useDMS } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
 import { Button } from '@/components/ui/button'
-import { ShoppingCart } from 'lucide-react'
 import {
   FilterBar, KpiRow, DataTable, SectionCard, ExportButtons,
-  useReport, fmtMoney, fmtDay, type Col, type Option,
+  useReportGate, useFilterOptions, ReportEmptyGate, fmtMoney, fmtDay, type Col,
 } from './reports-kit'
 
 interface ZeroRow extends Record<string, unknown> {
@@ -23,7 +23,7 @@ interface BookerSum extends Record<string, unknown> { booker: string; total: num
 interface Resp extends Record<string, unknown> {
   month: string; monthLabel: string
   summary: { totalShops: number; activeShops: number; zeroShops: number; zeroPct: number; monthSalesValue: number; newShops: number }
-  zeroRows: ZeroRow[]; bookerSummary: BookerSum[]; meta: { bookers: Option[] }
+  zeroRows: ZeroRow[]; bookerSummary: BookerSum[]
 }
 
 export function ZeroPurchaseTab() {
@@ -33,6 +33,7 @@ export function ZeroPurchaseTab() {
   const now = new Date()
   const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
   const [booker, setBooker] = useState('')
+  const fopts = useFilterOptions(user?.id)
 
   // Task 67: zero shop par foran action — /orders par New Order dialog isi shop ke sath khulega
   function bookForShop(outletId: string) {
@@ -40,11 +41,16 @@ export function ZeroPurchaseTab() {
     router.push('/orders')
   }
 
-  const { data, loading, refresh } = useReport<Resp>(async () => {
-    const p = new URLSearchParams({ userId: user!.id, month })
-    if (booker) p.set('bookerId', booker)
-    return api<Resp>(`/api/reports/zero-purchase?${p}`)
-  }, [user?.id, month, booker])
+  // Task 74 — filter-first: data sirf "Report Load Karein" par load hota hai
+  const gate = useReportGate<Resp>({
+    fetcher: async () => {
+      const p = new URLSearchParams({ userId: user!.id, month })
+      if (booker) p.set('bookerId', booker)
+      return api<Resp>(`/api/reports/zero-purchase?${p}`)
+    },
+    filtersKey: `${month}|${booker}`,
+  })
+  const { data, loading } = gate
 
   const cols: Col<ZeroRow>[] = [
     { key: 'shop', label: 'Shop', render: (r) => <span><span className="font-semibold text-slate-800">{r.shop}</span><span className="ml-1.5 text-[10px] text-slate-400">{r.code}</span></span> },
@@ -83,8 +89,8 @@ export function ZeroPurchaseTab() {
   return (
     <div className="space-y-3">
       <FilterBar
-        booker={booker} setBooker={setBooker} bookers={data?.meta.bookers}
-        onRefresh={refresh} loading={loading}
+        booker={booker} setBooker={setBooker} bookers={fopts.bookers}
+        onRefresh={gate.load} loading={loading} armed={gate.armed} stale={gate.stale}
         extra={
           <input
             type="month" value={month} onChange={(e) => setMonth(e.target.value)}
@@ -92,6 +98,21 @@ export function ZeroPurchaseTab() {
           />
         }
       />
+      {!gate.armed ? (
+        <ReportEmptyGate
+          icon={ShoppingCart}
+          title="Zero Purchase Report (Month-wise)"
+          desc="Kaun si shops ne is month koi bill nahi banaya — har shop ko mahine mein kam az kam 1 bill rule, booker-wise coverage ke sath."
+          steps={[
+            'Month chunein (aur order booker, optional)',
+            "'Report Load Karein' dabayen — sirf us month ka data load hoga",
+            'Kisi zero shop ka foran Order Book bhi kar sakte hain',
+          ]}
+          onLoad={gate.load}
+          loading={loading}
+        />
+      ) : (
+      <>
       {data && (
         <KpiRow
           items={[
@@ -125,6 +146,8 @@ export function ZeroPurchaseTab() {
       <SectionCard title="Booker-wise Coverage Summary">
         <DataTable cols={bcols} rows={data?.bookerSummary ?? []} />
       </SectionCard>
+      </>
+      )}
     </div>
   )
 }

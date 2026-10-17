@@ -3,11 +3,12 @@
 // Task 66 — Tax Report tab (Sales Tax GST + WHT 236H Filer/Non-Filer + FBR annex print)
 
 import { useState } from 'react'
+import { Receipt } from 'lucide-react'
 import { useDMS } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
 import {
   FilterBar, useRangeFilter, KpiRow, DataTable, SectionCard, ExportButtons,
-  useReport, fmtDay, rangeLabel, type Col, type Option,
+  useReportGate, useFilterOptions, ReportEmptyGate, fmtDay, rangeLabel, type Col,
 } from './reports-kit'
 
 interface ShopRow extends Record<string, unknown> {
@@ -26,19 +27,24 @@ interface Resp extends Record<string, unknown> {
   }
   input: { invoices: number; netPurchase: number; gst: number; wht: number; rows: { invoiceNo: string; date: string; company: string; netPurchase: number; gst: number; wht: number; total: number }[] }
   netStatement: { outputGst: number; inputGst: number; netGstPayable: number; outputWht: number; inputWht: number; netWht: number }
-  meta: { bookers: Option[] }
 }
 
 export function TaxTab() {
   const { user } = useDMS()
   const { range, setRange, preset, setPreset } = useRangeFilter()
   const [booker, setBooker] = useState('')
+  const fopts = useFilterOptions(user?.id)
 
-  const { data, loading, refresh } = useReport<Resp>(async () => {
-    const p = new URLSearchParams({ userId: user!.id, from: range.from, to: range.to })
-    if (booker) p.set('bookerId', booker)
-    return api<Resp>(`/api/reports/tax?${p}`)
-  }, [user?.id, range.from, range.to, booker])
+  // Task 74 — filter-first: data sirf "Report Load Karein" par load hota hai
+  const gate = useReportGate<Resp>({
+    fetcher: async () => {
+      const p = new URLSearchParams({ userId: user!.id, from: range.from, to: range.to })
+      if (booker) p.set('bookerId', booker)
+      return api<Resp>(`/api/reports/tax?${p}`)
+    },
+    filtersKey: `${range.from}|${range.to}|${booker}`,
+  })
+  const { data, loading } = gate
 
   const cols: Col<ShopRow>[] = [
     { key: 'shop', label: 'Shop', render: (r) => <span><span className="font-semibold text-slate-800">{r.shop}</span><span className="ml-1.5 text-[10px] text-slate-400">{r.code}</span></span> },
@@ -84,9 +90,24 @@ export function TaxTab() {
     <div className="space-y-3">
       <FilterBar
         range={range} setRange={setRange} preset={preset} setPreset={setPreset}
-        booker={booker} setBooker={setBooker} bookers={data?.meta.bookers}
-        onRefresh={refresh} loading={loading}
+        booker={booker} setBooker={setBooker} bookers={fopts.bookers}
+        onRefresh={gate.load} loading={loading} armed={gate.armed} stale={gate.stale}
       />
+      {!gate.armed ? (
+        <ReportEmptyGate
+          icon={Receipt}
+          title="Tax Report (GST + WHT 236H)"
+          desc="Output GST, Advance Tax 236H (filer 0.5% / non-filer 2.5%), input tax aur net payable statement — FBR style annex ke sath."
+          steps={[
+            'Date range select karein (aur order booker, optional)',
+            "'Report Load Karein' dabayen — sirf selected period ka tax data load hoga",
+            'FBR Annex alag se Excel/PDF/Print ho sakta hai',
+          ]}
+          onLoad={gate.load}
+          loading={loading}
+        />
+      ) : (
+      <>
       {o && (
         <KpiRow
           items={[
@@ -150,6 +171,8 @@ export function TaxTab() {
             maxH="max-h-[40vh]"
           />
         </SectionCard>
+      )}
+      </>
       )}
     </div>
   )

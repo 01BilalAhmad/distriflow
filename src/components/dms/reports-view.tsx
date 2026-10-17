@@ -72,9 +72,9 @@ export function ReportsView({ tab: tabProp }: { tab?: string }) {
         <h2 className="text-xl font-bold text-slate-900">Reports &amp; Analytics</h2>
         <p className="text-sm text-slate-500">
           {active && active.key !== 'overview' ? (
-            <>Business ka poora hisaab — <b className="text-emerald-700">{active.label}</b> report • Excel, PDF, CSV export aur print sab reports mein mojood</>
+            <>Business ka poora hisaab — <b className="text-emerald-700">{active.label}</b> report • Pehle filters set karein, phir &quot;Report Load Karein&quot; — sirf selected data load hoga (Excel, PDF, CSV, print sab mojood)</>
           ) : (
-            'Business ka poora hisaab — 11 detailed reports, filters ke sath'
+            'Business ka poora hisaab — 11 detailed reports • Har report filter-first hai: filters set karein, phir load karein'
           )}
         </p>
       </div>
