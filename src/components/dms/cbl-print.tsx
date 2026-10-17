@@ -2,7 +2,7 @@
 
 /**
  * CBL-style print documents — same-to-same design as the uploaded samples:
- *  1. CblLoadFormDoc  — Load Form: product load sheet + customers sheet + signatures (3 pages)
+ *  1. CblLoadFormDoc  — Load Form: product load sheet + customers sheet (signatures end par) (2 pages)
  *  2. CblInvoiceDoc   — CASH MEMO / INVOICE: distributor header, Urdu disclaimer,
  *                       GST-style item table, Promotions Applied, totals box, 3 signature boxes
  * PrintFrame = on-screen A4 preview overlay with Print + Export PDF (browser print-to-PDF).
@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Printer, Download, FileDown, Loader2, X } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 import { fmtQty } from '@/components/dms/unit-qty'
-import { aggregateSchemePromos } from '@/lib/dms-order-calc'
+import { aggregateSchemePromos, orderGrandPayable } from '@/lib/dms-order-calc'
 import type { SummaryDetailDTO, SummaryOrderDTO, SchemeStackRow } from '@/lib/dms-types'
 
 // ---------- formatting helpers ----------
@@ -218,7 +218,7 @@ export function PrintFrame({ title, onClose, pdfName, landscape, children }: {
 }
 
 // ============================================================
-// 1) LOAD FORM — 3 pages (products load + customers sheet + signatures)
+// 1) LOAD FORM — 2 pages (products load + customers sheet, signatures sheet ke end par)
 // ============================================================
 export function CblLoadFormDoc({ detail, onInvoiceClick }: { detail: SummaryDetailDTO; onInvoiceClick?: (o: SummaryOrderDTO) => void }) {
   const settled = detail.status === 'SETTLED'
@@ -254,7 +254,9 @@ export function CblLoadFormDoc({ detail, onInvoiceClick }: { detail: SummaryDeta
     },
     { ctn: 0, box: 0, loose: 0 },
   )
-  const totAmount = detail.orders.reduce((s, o) => s + o.total, 0)
+  // Task 79: Amount ab FINAL PAYABLE (total − TO + GST + AdvTax) — wahi jo bill par chapta hai.
+  // Pehle goods net (o.total) tha — load form/invoice/print par amount match nahi karta tha.
+  const totAmount = detail.orders.reduce((s, o) => s + orderGrandPayable(o), 0)
   const custUnits = detail.orders.map((o) => ({
     issued: o.items.reduce((s, it) => s + it.qty, 0), // PIECES
     free: o.items.reduce((s, it) => s + it.freeQty, 0),
@@ -407,7 +409,8 @@ export function CblLoadFormDoc({ detail, onInvoiceClick }: { detail: SummaryDeta
                 <Num v={custUnits[i].issued + custUnits[i].free} />
                 {dash}
                 <Num v={custUnits[i].issued} />
-                <Num v={o.total} />
+                {/* Task 79: Amount = Total Payable (Net − TO + GST + AdvTax) — bill ke Grand Total se EXACT match */}
+                <Num v={orderGrandPayable(o)} />
               </tr>
             ))}
             <tr style={{ fontWeight: 'bold', backgroundColor: '#f7f7f7' }}>
@@ -421,11 +424,12 @@ export function CblLoadFormDoc({ detail, onInvoiceClick }: { detail: SummaryDeta
             </tr>
           </tbody>
         </table>
-      </div>
 
-      {/* ---------------- PAGE 3: signatures ---------------- */}
-      <div className="cbl-page bg-white px-7 py-6">
-        <div className="mt-40 flex justify-between px-8">
+        {/* Task 79: signatures AB customer sheet ke END par (pehle PAGE 3 par akale the —
+            user: "3rd page py footer alg sy ata hy — customer sheet k end pr ana chahiye").
+            cbl-break-avoid = block kabhi 2 pages par split nahi hoga — table lambi ho to
+            poora ka poora block table ke sath next page par jata hai (end par hi rehta hai). */}
+        <div className="cbl-break-avoid mt-12 flex justify-between px-8">
           <div className="w-56 text-center">
             <div style={{ borderBottom: '1px dotted #000' }} className="mb-1.5">&nbsp;</div>
             <p className="text-[12px]">(Deliveryman Signature)</p>

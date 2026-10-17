@@ -14,6 +14,7 @@ import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR, fmtDate, fmtNum, STATUS_STYLES, statusLabel } from '@/lib/dms-api'
 import { fmtQty } from '@/components/dms/unit-qty'
 import type { SummaryDTO, SummaryDetailDTO, SummaryOrderDTO, SummaryOrderReturnDTO } from '@/lib/dms-types'
+import { orderGrandPayable } from '@/lib/dms-order-calc'
 import { PrintFrame, CblLoadFormDoc, CblInvoiceDoc, CblInvoicesDoc, CblSettlementDoc, keepDialogBehind, type InvoiceData } from '@/components/dms/cbl-print'
 import { FileStack, Printer, Wallet, Loader2, FileText, Package, PackageOpen, Download, ReceiptText, Undo2 } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
@@ -275,7 +276,8 @@ function SummaryDetailDialog({ detail, onClose, onSettled, onGoSettle, onPrintAl
     const pcs = detail.products.reduce((s, p) => s + p.qty, 0)
     const free = detail.products.reduce((s, p) => s + p.freeQty, 0)
     const value = detail.products.reduce((s, p) => s + p.amount, 0)
-    const amount = detail.orders.reduce((s, o) => s + o.total, 0)
+    // Task 79: amount ab FINAL PAYABLE (Net − TO + GST + AdvTax) — load form/print jaisa hi
+    const amount = detail.orders.reduce((s, o) => s + orderGrandPayable(o), 0)
     const cash = detail.settlements.reduce((s, x) => s + x.cashAmount, 0)
     const credit = detail.settlements.reduce((s, x) => s + x.creditAmount, 0)
     const returns = detail.settlements.reduce((s, x) => s + (x.returnAmount ?? 0), 0)
@@ -380,7 +382,13 @@ function SummaryDetailDialog({ detail, onClose, onSettled, onGoSettle, onPrintAl
                           <p className="text-[11px] text-slate-400">{o.outletCode} • {o.channel}</p>
                         </TableCell>
                         <TableCell className="hidden sm:table-cell text-xs text-slate-500 max-w-[140px] truncate">{o.address ?? '—'}</TableCell>
-                        <TableCell className="text-right font-semibold">{fmtPKR(o.total)}</TableCell>
+                        <TableCell className="text-right">
+                          {/* Task 79: FINAL PAYABLE (Net − TO + GST + AdvTax) + chhota Net reference */}
+                          <p className="text-right font-semibold text-slate-900 tabular-nums whitespace-nowrap">{fmtPKR(orderGrandPayable(o))}</p>
+                          {(o.gstTotal ?? 0) > 0 || (o.tradeOfferTotal ?? 0) > 0 || (o.advanceTax ?? 0) > 0 ? (
+                            <p className="text-right text-[10px] text-slate-400 tabular-nums whitespace-nowrap">Net {fmtPKR(o.total)}</p>
+                          ) : null}
+                        </TableCell>
                         <TableCell className="text-right text-xs text-blue-600 hidden sm:table-cell">{(o.advanceTax ?? 0) > 0 ? fmtPKR(o.advanceTax ?? 0) : '—'}</TableCell>
                       </TableRow>
                     ))}

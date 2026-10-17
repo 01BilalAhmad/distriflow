@@ -23,6 +23,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR, fmtDate } from '@/lib/dms-api'
 import type { OrderDTO, SalesmanPerfDTO } from '@/lib/dms-types'
+import { orderGrandPayable } from '@/lib/dms-order-calc'
 import { UnitQtyInputs, fmtQty, packHint } from '@/components/dms/unit-qty'
 import { ClipboardList, Loader2, Search, Truck, CalendarDays, Plus, X, Trash2, PackagePlus, SlidersHorizontal, TriangleAlert } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
@@ -208,10 +209,11 @@ export function UnprocessedBillsView() {
   }, [booker, day])
 
   const selectedOrders = filtered.filter((o) => selected.has(o.id))
-  const selectedTotal = selectedOrders.reduce((s, o) => s + o.total, 0)
+  // Task 79: totals ab FINAL PAYABLE (Net − TO + GST + AdvTax) — wahi jo bill par charge hota hai
+  const selectedTotal = selectedOrders.reduce((s, o) => s + orderGrandPayable(o), 0)
   const allChecked = filtered.length > 0 && selectedOrders.length === filtered.length
   const totalCases = filtered.reduce((s, o) => s + (o.totalCases ?? 0), 0)
-  const totalValue = filtered.reduce((s, o) => s + o.total, 0)
+  const totalValue = filtered.reduce((s, o) => s + orderGrandPayable(o), 0)
 
   function toggle(id: string) {
     const next = new Set(selected)
@@ -324,7 +326,7 @@ export function UnprocessedBillsView() {
     }
     setSaving(true)
     try {
-      const r = await api<{ order: { id: string; orderNo: string; subtotal: number; schemeDiscount: number; manualDiscount: number; total: number; itemCount: number; totalCases: number; totalFreePcs: number } }>(
+      const r = await api<{ order: { id: string; orderNo: string; subtotal: number; schemeDiscount: number; manualDiscount: number; total: number; itemCount: number; totalCases: number; totalFreePcs: number; tradeOfferTotal: number; gstTotal: number; advanceTax: number; payable: number } }>(
         `/api/orders/${expandedId}`,
         { method: 'PATCH', body: JSON.stringify({ action: 'UPDATE_ITEMS', items: lines.map((l) => ({ productId: l.productId, qty: l.qtyPcs, ...(l.isExisting ? { rate: l.rate } : {}) })) }) },
       )
@@ -332,8 +334,9 @@ export function UnprocessedBillsView() {
       setOrders((prev) => prev.map((x) => (x.id === expandedId ? {
         ...x, subtotal: o.subtotal, schemeDiscount: o.schemeDiscount, manualDiscount: o.manualDiscount,
         total: o.total, itemCount: o.itemCount, totalCases: o.totalCases, totalFreePcs: o.totalFreePcs,
+        tradeOfferTotal: o.tradeOfferTotal, gstTotal: o.gstTotal, advanceTax: o.advanceTax, payable: o.payable,
       } : x)))
-      setExpandedOrder((prev) => (prev ? { ...prev, total: o.total, itemCount: o.itemCount, totalCases: o.totalCases, totalFreePcs: o.totalFreePcs } : prev))
+      setExpandedOrder((prev) => (prev ? { ...prev, total: o.total, itemCount: o.itemCount, totalCases: o.totalCases, totalFreePcs: o.totalFreePcs, tradeOfferTotal: o.tradeOfferTotal, gstTotal: o.gstTotal, advanceTax: o.advanceTax, payable: o.payable } : prev))
       setSavedSnapshot(linesKey)
       toast({ title: `${o.orderNo} Stock Updated ✓`, description: `Naya total: ${fmtPKR(o.total)} (${o.totalCases?.toFixed(4)} cases)` })
       // fresh detail reload (naye item ids / scheme values)
@@ -477,7 +480,8 @@ export function UnprocessedBillsView() {
                     <TableHead>Booker / PJP</TableHead>
                     <TableHead>Store Name</TableHead>
                     <TableHead className="text-right">Qty (Cases)</TableHead>
-                    <TableHead className="text-right">Invoice Value</TableHead>
+                    {/* Task 79: header bhi 'Total Payable' — amount ab final payable hai (Net + GST + AdvTax) */}
+                    <TableHead className="text-right">Total Payable</TableHead>
                     <TableHead className="text-center w-28">Change Stock</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -866,7 +870,13 @@ function StockRow({ o, checked, onToggle, expanded, onExpand, detailLoading, dir
         {(o.totalCases ?? 0).toFixed(4)}
         {(o.totalFreePcs ?? 0) > 0 && <span className="ml-1 text-[10px] text-emerald-600">+free</span>}
       </TableCell>
-      <TableCell className="text-right font-semibold tabular-nums">{fmtPKR(o.total)}</TableCell>
+      <TableCell className="text-right">
+        {/* Task 79: FINAL PAYABLE (Net − TO + GST + AdvTax) — bill ke Grand Total se match + chhota Net reference */}
+        <p className="font-semibold text-slate-900 tabular-nums whitespace-nowrap">{fmtPKR(orderGrandPayable(o))}</p>
+        {(o.gstTotal ?? 0) > 0 || (o.tradeOfferTotal ?? 0) > 0 || (o.advanceTax ?? 0) > 0 ? (
+          <p className="text-[10px] text-slate-400 tabular-nums whitespace-nowrap">Net {fmtPKR(o.total)}</p>
+        ) : null}
+      </TableCell>
       <TableCell className="text-center">
         <Button
           size="icon"
