@@ -121,6 +121,45 @@
   }
 }
 
+/* ============ Task 70 — PROFESSIONAL POLISH LAYER ============ */
+/* Global scrollbars: patli, rounded, slate — browser default moti gray scrollbar ki
+   jagah. Firefox ke liye scrollbar-width/color fallback. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+  background-clip: content-box;
+}
+/* Brand selection color — text select karo to emerald highlight */
+::selection {
+  background: rgba(16, 185, 129, 0.18);
+}
+/* Keyboard focus ring — accessible + brand consistent (mouse click par nahi aata) */
+:focus-visible {
+  outline: 2px solid rgba(5, 150, 105, 0.55);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+/* Dark bar ke andar apna focus ring (light ring dark par) */
+.dark-topbar :focus-visible {
+  outline-color: rgba(52, 211, 153, 0.6);
+}
+
 /* ============ PRINT: sirf .print-area / .cbl-print-root print hogi ============ */
 @media print {
   body * {
