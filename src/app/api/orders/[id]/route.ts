@@ -4,6 +4,7 @@ import { fulfillOrder } from '@/lib/dms-fulfill'
 import { computeOrderLines, recalcManualDiscount, applyManualMerge, orderGrandPayable, type CalcIncomingItem } from '@/lib/dms-order-calc'
 import { advanceTaxFor, getTaxRates, getDistributorAddress } from '@/lib/dms-settings'
 import { getAvailableToPromise, groupQtyByProduct, oversellMessage } from '@/lib/dms-inventory'
+import { liveRecalcOrder } from '@/lib/dms-live-recalc'
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -23,6 +24,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     // Task 78b: bill print header par Address (AppSetting KV — settings page se, zero migration)
     const distributorAddress = await getDistributorAddress(order.distributorId)
 
+    // ---- Task 86: LIVE SCHEME RECALC (unprocessed bill detail) ----
+    // CONFIRMED bill kholte hi CURRENT schemes se re-evaluate — backend scheme update
+    // foran nazar aata hai. Processed bills stored frozen values par hi rehti hain.
+    const live = order.status === 'CONFIRMED' ? await liveRecalcOrder(order.id) : null
+    const liveById = new Map((live?.items ?? []).map((it) => [it.id, it]))
+
     return Response.json({
       order: {
         id: order.id,
@@ -38,21 +45,25 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         summaryNo: order.summary?.summaryNo ?? null,
         summaryDeliveryDate: order.summary ? new Date(order.summary.deliveryDate).toISOString() : null,
         status: order.status,
-        subtotal: order.subtotal,
-        schemeDiscount: order.schemeDiscount,
-        manualDiscount: order.manualDiscount,
+        // Task 86: CONFIRMED par LIVE totals (current schemes) — processed frozen stored
+        subtotal: live?.subtotal ?? order.subtotal,
+        schemeDiscount: live?.schemeDiscount ?? order.schemeDiscount,
+        manualDiscount: live?.manualDiscount ?? order.manualDiscount,
         manualDiscType: order.manualDiscType,
         manualDiscValue: order.manualDiscValue,
-        total: order.total,
-        tradeOfferTotal: order.tradeOfferTotal,
-        gstTotal: order.gstTotal,
-        filerStatus: order.filerStatus,
-        advanceTaxRate: order.advanceTaxRate,
-        advanceTax: order.advanceTax,
-        payable: orderGrandPayable(order),
+        total: live?.total ?? order.total,
+        tradeOfferTotal: live?.tradeOfferTotal ?? order.tradeOfferTotal,
+        gstTotal: live?.gstTotal ?? order.gstTotal,
+        filerStatus: live?.filerStatus ?? order.filerStatus,
+        advanceTaxRate: live?.advanceTaxRate ?? order.advanceTaxRate,
+        advanceTax: live?.advanceTax ?? order.advanceTax,
+        payable: live?.payable ?? orderGrandPayable(order),
         notes: order.notes,
         orderDate: new Date(order.orderDate).toISOString(),
-        items: order.items.map((it) => ({
+        items: order.items.map((it) => {
+          // Task 86: CONFIRMED par live item values (naya scheme stack/discount/free qty)
+          const lv = liveById.get(it.id)
+          return {
           id: it.id,
           productId: it.productId,
           productName: it.product.name,
@@ -64,27 +75,28 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           // Task 37: per-product GST flag — Task 45 snapshot rate neeche gstRate me merge hua
           gstEnabled: it.product.gstEnabled,
           qty: it.qty,
-          freeQty: it.freeQty,
+          freeQty: lv?.freeQty ?? it.freeQty,
           rate: it.rate,
-          discount: it.discount,
-          lineTotal: it.lineTotal,
+          discount: lv?.discount ?? it.discount,
+          lineTotal: lv?.lineTotal ?? it.lineTotal,
           // Task 45: booking waqt ke GST + Trade Order snapshots (edit-proof)
           tradeOfferAmt: it.tradeOfferAmt,
           gstRate: it.gstRate ?? it.product.gstRate, // snapshot, legacy line par product ka current rate
-          gstAmt: it.gstAmt,
+          gstAmt: lv?.gstAmt ?? it.gstAmt,
           // Task 52: manual discount ka is line ka hissa (Pass On column mein merge)
-          manualShare: it.manualShare,
-          schemeId: it.schemeId,
-          // Task 41: booking waqt ka scheme snapshot (edit-proof)
-          schemeType: it.schemeType,
-          schemeValue: it.schemeValue,
-          schemeBuyQty: it.schemeBuyQty,
-          schemeFreeQty: it.schemeFreeQty,
+          manualShare: lv?.manualShare ?? it.manualShare,
+          schemeId: lv?.schemeId ?? it.schemeId,
+          // Task 41→86: CONFIRMED par LIVE scheme values — processed par frozen snapshot
+          schemeType: lv?.schemeType ?? it.schemeType,
+          schemeValue: lv?.schemeValue ?? it.schemeValue,
+          schemeBuyQty: lv?.schemeBuyQty ?? it.schemeBuyQty,
+          schemeFreeQty: lv?.schemeFreeQty ?? it.schemeFreeQty,
           // snapshot naam prefer — scheme rename ho to bhi purana bill sahi
-          schemeName: it.schemeName ?? it.scheme?.name ?? null,
+          schemeName: lv?.schemeName ?? it.schemeName ?? it.scheme?.name ?? null,
           // Task 57: poora frozen stack + per-scheme amounts (bill/print/detail breakdown)
-          schemeStack: (it.schemeStack ?? null) as import('@/lib/dms-types').SchemeStackRow[] | null,
-        })),
+          schemeStack: ((lv?.schemeStack ?? it.schemeStack) ?? null) as import('@/lib/dms-types').SchemeStackRow[] | null,
+          }
+        }),
         deliveries: order.deliveries.map((d) => ({
           id: d.id,
           deliveryNo: d.deliveryNo,
@@ -127,36 +139,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       const incomingRaw = (body.items ?? []) as CalcIncomingItem[]
       if (!Array.isArray(incomingRaw)) return jsonError('Items list invalid hai')
 
-      // Task 41: SCHEME SNAPSHOT — existing lines par unke BOOKED scheme values attach
-      // hote hain (DB snapshot se). Scheme aaj 10% ho aur bill 5% par bana ho, to edit
-      // ke baad bhi bill 5% par hi re-compute hoga. Legacy lines (snapshot se pehle ki,
-      // schemeId set magar fields null) unke scheme ke CURRENT values first-touch par
-      // freeze ho jate hain.
-      const snapMap = new Map(order.items.filter((i) => i.schemeId).map((i) => [i.productId, i]))
-      const legacySchemeIds = [...new Set(order.items.filter((i) => i.schemeId && !i.schemeType).map((i) => i.schemeId!))]
-      const legacySchemes = legacySchemeIds.length > 0
-        ? await db.scheme.findMany({ where: { id: { in: legacySchemeIds } } })
-        : []
-      const legacyById = new Map(legacySchemes.map((s) => [s.id, s]))
-      const incoming = incomingRaw.map((i) => {
-        const ex = snapMap.get(i.productId)
-        if (!ex?.schemeId) return i
-        if (ex.schemeType) {
-          // Task 56: stacked line apna poora FROZEN STACK wapis attach karti hai —
-          // edit par isi list se re-apply hota hai (warna stacked discount uDD jata).
-          // Legacy single-scheme lines (stack null) purane single path par rehti hain.
-          const frozenStack = Array.isArray(ex.schemeStack) && ex.schemeStack.length > 0
-            ? (ex.schemeStack as unknown as CalcIncomingItem['schemeStack'])
-            : undefined
-          return {
-            ...i,
-            scheme: { id: ex.schemeId, name: ex.schemeName ?? undefined, type: ex.schemeType, value: ex.schemeValue ?? 0, buyQty: ex.schemeBuyQty ?? 0, freeQty: ex.schemeFreeQty ?? 0 },
-            schemeStack: frozenStack,
-          }
-        }
-        const ls = legacyById.get(ex.schemeId)
-        return ls ? { ...i, scheme: { id: ls.id, name: ls.name, type: ls.type, value: ls.value, buyQty: ls.buyQty, freeQty: ls.freeQty } } : i
-      })
+      // ---- Task 86: LIVE SCHEME RECALC (edit dialog bhi live hai) ----
+      // Pehle (Task 41): existing lines par BOOKED scheme snapshot attach hota tha —
+      // backend scheme update ka unprocessed bill par asar nahi hota tha. Ab user rule:
+      // unprocessed bill par scheme REAL TIME change ho — isliye incoming items par se
+      // koi scheme/schemeStack snapshot STRIP kar di jati hai → computeOrderLines ka
+      // Task 58 full-stack path CURRENT schemes se stack banata hai.
+      // Rate (Task 17), GST-rate (Task 45) aur Trade Offer snapshots neeche wale block
+      // mein ab bhi attach hote hain — sirf SCHEME live hai, rate frozen hai.
+      const incoming = incomingRaw.map(({ scheme: _s, schemeStack: _st, ...rest }) => rest)
 
       // Task 45: TO + GST-rate snapshots bhi wahi scheme principle — purani line apni
       // BOOKED trade offer aur GST rate rakhti hai (product/scheme baad me badle to asar nahi)

@@ -4,6 +4,7 @@ import { computeOrderLines, recalcManualDiscount, applyManualMerge, orderGrandPa
 import { advanceTaxFor, getTaxRates } from '@/lib/dms-settings'
 import { getAvailableToPromise, groupQtyByProduct, oversellMessage } from '@/lib/dms-inventory'
 import { getPjpSettings, karachiDayCode, karachiDayBounds, outletInTodayRoute } from '@/lib/dms-pjp'
+import { loadActiveSchemes, liveRecalcFromParts, type LiveRecalcOrderParts } from '@/lib/dms-live-recalc'
 
 export async function GET(req: Request) {
   try {
@@ -37,14 +38,51 @@ export async function GET(req: Request) {
         outlet: { select: { name: true, code: true, status: true } },
         salesman: { select: { name: true } },
         distributor: { select: { businessName: true } },
-        items: { include: { product: { select: { unitsPerCarton: true } } } },
+        // Task 86: live scheme recalc ke liye product ka pack/GST/category data bhi chahiye
+        // (Product.category string column hai — relation nahi)
+        items: { include: { product: { select: { unitsPerCarton: true, pcsPerBox: true, tradePrice: true, gstEnabled: true, gstRate: true, category: true } } } },
       },
       orderBy: { orderDate: 'desc' },
       take: 100,
     })
 
+    // ---- Task 86: LIVE SCHEME RECALC (unprocessed bills) ----
+    // CONFIRMED bill apne FROZEN snapshot par nahi — CURRENT schemes par dikhegi.
+    // Backend scheme update karo → list refresh par unprocessed bill ka discount/promotion
+    // naya ho jayega. Processed bills untouched (frozen). Schemes per-distributor cache.
+    // Distinct distributors jinki CONFIRMED bills hain → schemes ek dafa load
+    const schemesCache = new Map<string, Awaited<ReturnType<typeof loadActiveSchemes>>>()
+    const distIds = [...new Set(orders.filter((o) => o.status === 'CONFIRMED').map((o) => o.distributorId))]
+    for (const d of distIds) schemesCache.set(d, await loadActiveSchemes(d))
+    const liveMap = new Map<string, ReturnType<typeof liveRecalcFromParts>>()
+    for (const o of orders) {
+      if (o.status !== 'CONFIRMED') continue
+      const schemes = schemesCache.get(o.distributorId)!
+      const parts: LiveRecalcOrderParts = {
+        channel: o.channel,
+        filerStatus: o.filerStatus,
+        manualDiscType: o.manualDiscType,
+        manualDiscValue: o.manualDiscValue,
+        items: o.items.map((it) => ({
+          id: it.id, productId: it.productId, qty: it.qty, rate: it.rate,
+          tradeOfferAmt: it.tradeOfferAmt, gstRate: it.gstRate, product: it.product,
+        })),
+      }
+      const live = liveRecalcFromParts(parts, schemes)
+      if (live) liveMap.set(o.id, live)
+    }
+
     return Response.json({
-      orders: orders.map((o) => ({
+      orders: orders.map((o) => {
+        // Task 86: CONFIRMED bill par LIVE totals (current schemes) — stale/product-deleted par stored
+        const live = liveMap.get(o.id)
+        const subtotal = live?.subtotal ?? o.subtotal
+        const schemeDiscount = live?.schemeDiscount ?? o.schemeDiscount
+        const manualDiscount = live?.manualDiscount ?? o.manualDiscount
+        const total = live?.total ?? o.total
+        const tradeOfferTotal = live?.tradeOfferTotal ?? o.tradeOfferTotal
+        const gstTotal = live?.gstTotal ?? o.gstTotal
+        return {
         id: o.id,
         orderNo: o.orderNo,
         outletName: o.outlet.name,
@@ -54,15 +92,15 @@ export async function GET(req: Request) {
         salesmanName: o.salesman?.name ?? null,
         distributorName: o.distributor.businessName,
         status: o.status,
-        subtotal: o.subtotal,
-        schemeDiscount: o.schemeDiscount,
-        manualDiscount: o.manualDiscount,
+        subtotal,
+        schemeDiscount,
+        manualDiscount,
         manualDiscType: o.manualDiscType,
         manualDiscValue: o.manualDiscValue,
-        total: o.total,
+        total,
         // Task 45: GST + Trade Order totals (grand payable = total − TO + GST + advTax)
-        tradeOfferTotal: o.tradeOfferTotal,
-        gstTotal: o.gstTotal,
+        tradeOfferTotal,
+        gstTotal,
         filerStatus: o.filerStatus,
         advanceTaxRate: o.advanceTaxRate,
         advanceTax: o.advanceTax,
@@ -74,8 +112,12 @@ export async function GET(req: Request) {
         itemCount: o.items.length,
         // Salesflo-style "Quantity in Cases" = Σ(qty pcs / units-per-carton) — mixed packs included
         totalCases: Math.round(o.items.reduce((s, it) => s + (it.qty / Math.max(1, it.product.unitsPerCarton)), 0) * 10000) / 10000,
-        totalFreePcs: o.items.reduce((s, it) => s + it.freeQty, 0),
-      })),
+        // Task 86: live free pcs (nayi scheme ke mutabiq) — stale par stored
+        totalFreePcs: live ? live.totalFreePcs : o.items.reduce((s, it) => s + it.freeQty, 0),
+        // Task 86: live recalc laga? (UI debug/badge ke liye)
+        liveRecalc: !!live,
+        }
+      }),
     })
   } catch (e) {
     console.error(e)

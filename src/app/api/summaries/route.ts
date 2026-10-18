@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
 import { fulfillOrder } from '@/lib/dms-fulfill'
 import { orderGrandPayable } from '@/lib/dms-order-calc'
+import { persistLiveRecalc } from '@/lib/dms-live-recalc'
 
 /** GET /api/summaries?userId=&status= — list delivery summaries (scoped by role) */
 export async function GET(req: Request) {
@@ -262,6 +263,15 @@ export async function POST(req: Request) {
         }
       }
 
+      // ---- Task 86: PROCESS-TIME LIVE REFRESH (Rule 3 ka dil) ----
+      // Process hone se pehle har bill CURRENT schemes par re-calc + persist hoti hai —
+      // isliye processed bill hamesha "us waqt ke latest scheme" par freeze hoti hai.
+      // Unprocess → dobara process par purana snapshot NAHI, naya scheme lagta hai.
+      for (const oid of processedOrderIds) {
+        const o = orders.find((x) => x.id === oid)
+        if (o) await persistLiveRecalc(o)
+      }
+
       for (const o of seqOrders) {
         const ov = overrideByOrder.get(o.id)
         if (!ov) continue // skipped — ye bill CONFIRMED rehti hai (unprocessed)
@@ -304,6 +314,13 @@ export async function POST(req: Request) {
         skippedBills,
         shortRows,
       })
+    }
+
+    // ---- Task 86: PROCESS-TIME LIVE REFRESH ----
+    // Fulfill se pehle har bill CURRENT schemes se re-calc + persist (snapshot refresh)
+    // — process ke baad bill IN values par frozen (backend scheme badle to asar nahi).
+    for (const o of orders) {
+      await persistLiveRecalc(o)
     }
 
     // Fulfill every invoice (FEFO deduction + Delivery challan), then mark PROCESSING
