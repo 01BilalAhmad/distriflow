@@ -1,0 +1,395 @@
+# 📱 DistriFlow — Offline-First Order Booker Mobile App (Task 85)
+
+> **Istemaal ka tareeqa:** Neeche `---PROMPT START---` se le kar `---PROMPT END---` tak ka **poora text copy** karein aur jis AI (Cursor, Claude, ChatGPT, Bolt, Lovable, Replit Agent waghera) se app banwani hai us ko paste kar dein. Prompt English mein hai taake har AI ko 100% clear ho. Sirf **1 cheez** badalni hai: `BASE_URL` ki jagah apni DistriFlow Vercel website ka URL daal dein (prompt ke andar bata diya hai kahan hai).
+
+---PROMPT START---
+
+# BUILD TASK: "DistriFlow Booker" — Fully Offline-First Mobile App for FMCG Order Bookers
+
+You are building a production-grade **offline-first mobile app** for field order bookers (salesmen) of an FMCG distribution company. The backend (REST APIs + admin website) is **already live and complete** — you only build the mobile app that talks to it. The booker works all day in areas with **zero internet**: he punches orders, records cash recoveries, and tags brand-new shops. Everything must work fully offline, be stored **locally on the phone**, and be uploaded **only when the booker manually presses Sync Up**.
+
+---
+
+## 1. MISSION
+
+Build a mobile app (Android-first) named **"DistriFlow Booker"** that lets an order booker:
+
+1. **Log in** once (online), then work the whole day **fully offline**
+2. **Sync Down** (manual) — download today's shops, products, and settings to the device
+3. Create **orders (bills)** offline — with **mandatory GPS capture**
+4. Record **recoveries** (cash/cheque/bank) offline
+5. **Tag brand-new shops** offline — with the shop's **GPS location captured automatically and mandatorily**
+6. **Sync Up** (manual) — upload all locally-saved orders, recoveries, and new shops to the server
+7. See which of his tagged shops are still **PENDING admin approval**
+
+---
+
+## 2. HARD RULES (NON-NEGOTIABLE — these come directly from the business owner)
+
+| # | Rule |
+|---|------|
+| R1 | **100% offline-first.** Every core action (order, recovery, new shop tag) MUST succeed with airplane mode ON. Never block any core action because of no internet. |
+| R2 | **All data lives on the phone** until manually synced. Orders, recoveries, and new-shop records are saved to local storage (SQLite) the moment the booker taps Save — never queued in memory only. |
+| R3 | **NO AUTO-SYNC. EVER.** No interval timer, no connectivity-change listener, no background refresh. Data goes to the server ONLY when the booker taps **Sync Up**, and comes down ONLY when he taps **Sync Down**. If you add any automatic network call for data sync, the requirement is FAILED. |
+| R4 | **Sidebar has exactly two sync options:** "Sync Up (Upload)" and "Sync Down (Download)", each showing pending counts and last-sync timestamps. |
+| R5 | **GPS is mandatory** for: (a) every order, (b) every new shop tag. Without a successful GPS fix, the Save button stays disabled and a retry button is shown. |
+| R6 | **New shops start as PENDING.** A tagged shop is NOT usable as a normal approved shop until the admin approves it on the website. The app shows such shops with a "PENDING — admin approval ka intezar" badge. (The server already hides pending shops' bills from admin lists — the app only needs to label them.) |
+| R7 | **Idempotent sync.** Every offline record gets a `clientRef` (UUID v4) generated at creation time. Retries reuse the SAME `clientRef`. The server deduplicates on it, so double-tapping Sync Up never creates duplicates. |
+| R8 | **Crash-safe.** If the app is force-killed or the phone dies mid-day, all queued data must survive app restart. Queue is persisted in SQLite, not memory. |
+
+---
+
+## 3. BACKEND — ALREADY LIVE, DO NOT BUILD IT
+
+Base URL (set as a config constant at the top of the app):
+
+```ts
+// ⚠️ REPLACE with the real deployed DistriFlow Vercel URL before building
+const BASE_URL = 'https://YOUR-DISTRIFLOW-URL.vercel.app'
+```
+
+All endpoints return JSON. Errors return `{ "error": "message in Roman Urdu" }` with status 400/401/403/404/500.
+
+### 3.1 Login — `POST /api/auth/login`
+
+```jsonc
+// Request
+{ "email": "salesman@dms.pk", "password": "demo123" }
+
+// 200 Response (subset shown)
+{ "user": { "id": "usr_...", "name": "Booker Name", "email": "...", "role": "SALESMAN", "companyId": null } }
+
+// 401 → { "error": "Invalid credentials - ye email registered nahi hai" }
+```
+
+- If `user.role !== 'SALESMAN'` → block login in the app with message "Ye app sirf order booker ke liye hai".
+- Persist the user object on device; app opens straight to Home while the session exists.
+
+### 3.2 Sync Down — `GET /api/sync/down?userId={userId}`
+
+One call returns the complete working bundle. **SALESMAN only** (403 otherwise).
+
+```jsonc
+// 200 Response
+{
+  "serverTime": "2026-10-18T06:30:00.000Z",
+  "settings": { "fridayOff": true, "unplannedEnabled": false },
+  "shops": [  // ONLY APPROVED shops assigned to this booker
+    {
+      "outletId": "out_...", "name": "Barkat Store", "code": "OUT-1005",
+      "city": "Lahore", "channel": "KIRYANA",           // KIRYANA | SUPERMARKET | WHOLESALE | GENERAL
+      "visitDays": [1, 3, 5],                            // 0=Sun … 6=Sat
+      "address": "...", "ownerName": "...", "phone": "0300...",
+      "lat": 31.5204, "lng": 74.3587, "creditDays": 7,
+      "balance": 23400.00                                // +ve = udhaar (shop owes), -ve = advance
+    }
+  ],
+  "products": [  // active catalog (booker's assigned company) + available stock
+    {
+      "id": "prd_...", "sku": "SKU-001", "name": "Nestle Nido 900g", "brand": "Nestle",
+      "unitsPerCarton": 12, "boxesPerCarton": 4, "pcsPerBox": 3,
+      "tradePrice": 2900.00,        // per PIECE rate
+      "gstEnabled": true, "gstRate": 17.0,
+      "available": 120               // available-to-promise units
+    }
+  ],
+  "pendingShops": [  // shops THIS booker tagged that are still awaiting admin approval
+    {
+      "id": "out_...", "code": "OUT-1080", "name": "...", "address": "...", "city": "...",
+      "channel": "GENERAL", "ownerName": "...", "phone": "...", "cnic": "...", "ntn": null,
+      "lat": 31.5304, "lng": 74.3687, "createdAt": "ISO",
+      "ordersCount": 2, "ordersTotal": 15000.00   // orders already punched against the pending shop
+    }
+  ],
+  "pendingRecoveries": 3   // count of this booker's recovery entries awaiting admin approval
+}
+```
+
+- On success: overwrite the local snapshot (shops + products + settings + pendingShops). **Never touch the outbox queue** while syncing down.
+- Store `lastSync.down = now`.
+
+### 3.3 Tag New Shop — `POST /api/outlets/tag`
+
+```jsonc
+// Request — ALL of name/address/ownerName/ownerPhone/lat/lng are REQUIRED (400 if missing)
+{
+  "userId": "usr_...",
+  "clientRef": "550e8400-e29b-41d4-a716-446655440000",  // UUID v4 generated on device
+  "name": "New Kiryana Shop",        // ① Shop name (required)
+  "address": "Street, Area",         // ② Address (required)
+  "city": "Lahore",                  //    optional, defaults 'Lahore'
+  "ownerName": "Ali Raza",           // ③ Owner name (required)
+  "ownerPhone": "03001234567",       // ④ Owner phone (required)
+  "cnic": "35202-1234567-1",         // ⑤ CNIC (optional)
+  "ntn": "1234567-8",                // ⑥ NTN (optional — if present server marks shop FILER)
+  "channel": "KIRYANA",              // ⑦ Channel: KIRYANA | SUPERMARKET | WHOLESALE | GENERAL (default GENERAL)
+  "lat": 31.5204, "lng": 74.3587     // ⑧ GPS — REQUIRED, 400 without it
+}
+
+// 200 Response
+{ "outlet": { "id": "out_...", "code": "OUT-1080", "name": "New Kiryana Shop", "status": "PENDING" },
+  "message": "Shop tag ho gayi — admin approval ke baad route aur orders mein nazar aayegi" }
+
+// Idempotent: same clientRef again → 200 with the SAME outlet and "duplicate": true (no new record)
+// 400 → GPS missing/invalid | missing required field
+// 403 → not SALESMAN / not attached to a distributor
+```
+
+- Server always creates the shop with `status: "PENDING"` and auto-assigns code `OUT-XXXX`.
+- Shop appears in admin's Outlets/route/orders only after the admin approves it on the website.
+
+### 3.4 Create Order — `POST /api/orders`
+
+```jsonc
+// Request
+{
+  "outletId": "out_...",
+  "salesmanId": "usr_...",            // the logged-in booker's id
+  "items": [                           // CalcIncomingItem[]
+    { "productId": "prd_...", "ctn": 2 },   // cartons
+    { "productId": "prd_...", "pcs": 6 }    // or pieces; optional "box" also accepted
+  ],
+  "discount": { "type": "PERCENT", "value": 5 },  // or { "type": "FLAT", "value": 1000 } — optional, null
+  "notes": "optional free text",
+  "fromBooker": true,                  // MUST be true — enables booker gates
+  "lat": 31.5204, "lng": 74.3587,     // REQUIRED when fromBooker=true (400 without)
+  "unplanned": false,                  // true only if shop wasn't on today's route AND settings.unplannedEnabled
+  "clientRef": "uuid-v4-generated-on-device"
+}
+
+// 200 Response (order computed & priced server-side)
+{ "order": { "id": "ord_...", "orderNo": "ORD-5091", "total": 38400.00, "duplicate": false, "unplanned": false, ... } }
+
+// Idempotent: same clientRef → 200 with SAME order and "duplicate": true
+// 400 → GPS missing | no items | bad discount
+// 403 → Jumma OFF rule / unplanned disabled (see 3.6 rules)
+```
+
+- Server does ALL pricing (trade price, carton→pcs conversion, GST, schemes). The app shows estimates but the server response is the truth.
+- Orders against a **PENDING** shop are allowed (GPS still required); they only become visible to admin after shop approval.
+
+### 3.5 Record Recovery — `POST /api/recovery`
+
+```jsonc
+// Request (multiple shops in one call is fine — one entry per shop works too)
+{
+  "userId": "usr_...",                 // logged-in booker
+  "bookerId": "usr_...",               // same as userId for booker app
+  "date": "2026-10-18",                // device local date YYYY-MM-DD
+  "entries": [
+    {
+      "outletId": "out_...",
+      "amount": 5000.00,               // required, > 0
+      "method": "CASH",                // CASH | CHEQUE | BANK (default CASH)
+      "reference": null,               // REQUIRED when method is CHEQUE or BANK (400 without)
+      "note": "optional",
+      "clientRef": "uuid-v4-per-entry"
+    }
+  ]
+}
+
+// 200 Response
+{ "posted": [ { "recoveryNo": "RCV-...", "receiptNo": null, "outletName": "...", "amount": 5000, "method": "CASH", "status": "PENDING" } ],
+  "allPending": true }
+
+// Booker-created recoveries always land as status PENDING (admin approves).
+// Idempotent: entries whose clientRef already exists are silently skipped (no duplicate wasooli).
+```
+
+### 3.6 Server-side gates you must mirror in the UI (data comes from `settings` in Sync Down)
+
+- `settings.fridayOff === true` and today is Friday → planned shops cannot be ordered; only a shop NOT on today's route can be ordered with `unplanned: true`… except when the shop is a **PENDING tagged shop** (gates skipped, GPS still required). Show the reason messages exactly as the server returns them.
+- `settings.unplannedEnabled === false` → no unplanned orders at all (403 from server). Disable the "unplanned" path in UI.
+
+---
+
+## 4. LOCAL DATA ARCHITECTURE (device storage)
+
+Use **SQLite** (or the platform equivalent) with these logical tables. This mirrors the proven web implementation — keep the same shapes so behaviour matches exactly.
+
+### 4.1 Tables
+
+```sql
+-- logged-in user (persisted session)
+CREATE TABLE session ( id TEXT PRIMARY KEY, user_json TEXT NOT NULL );
+
+-- last successful Sync Down bundle
+CREATE TABLE snapshot (
+  user_id   TEXT PRIMARY KEY,
+  date      TEXT NOT NULL,        -- YYYY-MM-DD when downloaded
+  shops_json     TEXT NOT NULL,   -- Shop[]   (APPROVED shops)
+  products_json  TEXT NOT NULL,   -- Product[]
+  settings_json  TEXT NOT NULL,   -- { fridayOff, unplannedEnabled }
+  pending_shops_json TEXT NOT NULL-- PendingShop[] (awaiting approval)
+);
+
+-- the outbox: every offline record waiting for Sync Up
+CREATE TABLE outbox (
+  id         TEXT PRIMARY KEY,    -- 'loc_' + timestamp + random suffix
+  kind       TEXT NOT NULL,       -- 'NEW_SHOP' | 'ORDER' | 'RECOVERY'
+  label      TEXT NOT NULL,       -- human readable, e.g. "Barkat Store — Rs 12,000" / "Nayi Shop — Ali Store"
+  created_at TEXT NOT NULL,       -- ISO timestamp
+  url        TEXT NOT NULL,       -- '/api/outlets/tag' | '/api/orders' | '/api/recovery'
+  method     TEXT NOT NULL,       -- 'POST'
+  body       TEXT NOT NULL,       -- EXACT JSON string to send (clientRef already inside)
+  tries      INTEGER DEFAULT 0,
+  last_error TEXT
+);
+
+-- locally saved orders/recoveries/shops for the app's own lists (status QUEUED until synced)
+CREATE TABLE records (
+  local_id TEXT PRIMARY KEY, client_ref TEXT UNIQUE, kind TEXT, outlet_id TEXT,
+  status TEXT,                 -- 'QUEUED' | 'SYNCED'
+  amount REAL, label TEXT, created_at TEXT, payload_json TEXT
+);
+
+CREATE TABLE last_sync ( user_id TEXT PRIMARY KEY, up TEXT, down TEXT );  -- ISO timestamps or NULL
+```
+
+### 4.2 Record lifecycle
+
+```
+Booker taps Save (order / recovery / new shop)
+  → generate clientRef = UUID v4 (once, at creation)
+  → INSERT into records (status QUEUED) + INSERT into outbox (body = final API JSON incl. clientRef)
+  → UI immediately shows the record in "today's" lists with a ⏳ QUEUED badge
+After Sync Up item succeeds
+  → remove from outbox, set records.status = 'SYNCED'
+```
+
+- Every list that shows today's activity (orders, recoveries, tagged shops) must combine **local records** (queued + synced-today) — the booker never loses sight of what he did offline.
+
+---
+
+## 5. SYNC PROTOCOL (manual only — implement EXACTLY this)
+
+### 5.1 Sync Down ("Download")
+
+```
+1. GET {BASE_URL}/api/sync/down?userId={user.id}
+2. 200 → overwrite snapshot tables (shops/products/settings/pendingShops). DO NOT touch outbox.
+3. set last_sync.down = now()
+4. Refresh UI: shops list, product catalog, PENDING badges.
+5. Non-200 / network error → toast the error, change nothing.
+```
+
+### 5.2 Sync Up ("Upload")
+
+```
+1. rows = SELECT * FROM outbox ORDER BY created_at ASC   // FIFO
+2. Re-order rows by kind priority: NEW_SHOP first, then ORDER, then RECOVERY.
+   // WHY: an ORDER punched against a just-tagged shop must reach the server AFTER
+   // that NEW_SHOP, otherwise the server 404s the outletId.
+3. for each row (in that order):
+     try fetch {BASE_URL}{row.url} { method: row.method, body: row.body, Content-Type: application/json }
+     if 2xx:
+         if response contains "duplicate": true → mark UI "pehle se sync ho chuka" (not an error)
+         DELETE row from outbox; UPDATE records SET status='SYNCED' WHERE client_ref = row's clientRef
+     else (4xx/5xx — validation error):
+         UPDATE row SET tries+1, last_error = server error message
+         KEEP row in outbox (booker may fix/delete it manually) — continue with next row
+     catch (network failure):
+         UPDATE row tries+1, last_error='Network error — dobara Sync Up dabayen'
+         STOP the loop immediately (remaining rows stay queued)
+4. if outbox now empty → last_sync.up = now()
+5. Show result summary: "3 uploaded, 1 failed (error)", and the pending count badge.
+```
+
+### 5.3 What is FORBIDDEN
+
+- ❌ No `setInterval` sync loop
+- ❌ No `NetInfo`/`navigator.onLine`/connectivity listener that triggers sync
+- ❌ No background task / work manager / push-triggered sync
+- ✅ Sync happens ONLY inside the two button handlers (plus: if the user taps Sync Up while fully offline, it fails gracefully and the queue remains intact)
+
+### 5.4 clientRef rules
+
+- Generated **once** at creation time on the device (UUID v4), stored inside the outbox body.
+- Retries (second tap of Sync Up, or app restart) reuse the SAME clientRef → server responds with `duplicate: true` and no new server record is created. This is what makes repeated Sync Up taps 100% safe.
+
+---
+
+## 6. SCREENS (9)
+
+All UI labels in **Roman Urdu** (same tone as the examples below — the bookers read Roman Urdu, not English).
+
+**S1 — Login:** email + password → `POST /api/auth/login`. Role ≠ SALESMAN → block ("Ye app sirf order booker ke liye hai"). Persist session; app relaunch opens Home directly. First-run banner: "Pehli baar internet ON kar ke Sync Down karein".
+
+**S2 — Home (My Day):** Header: booker name + pending-sync count badge. Stat cards: Aaj ke Orders (count + value, local records), Aaj ki Recovery (total), Meri Shops (snapshot count). List "Aaj ki Route" = snapshot shops whose `visitDays` includes today's weekday (0=Sun…6=Sat); if `settings.fridayOff` and today is Friday → show "Aaj Jumma OFF hai" notice instead. Below: "Meri Tag ki Hui Shops (PENDING)" section from snapshot `pendingShops` + local queued NEW_SHOP records. If no snapshot yet → empty state with a big "Sync Down Karein" button (manual tap only).
+
+**S3 — Shops list:** search by name/code; each row: name, code, channel chip, balance badge (laal "+Rs X udhaar" / sabz "clear"), today-flag. PENDING shops live in their own section with amber badge "PENDING — admin approval ka intezar".
+
+**S4 — Shop detail:** balance, owner, phone, address, credit days, GPS. Action buttons: "Naya Order" → S5, "Recovery" → S6. Queued orders of this shop listed with ⏳ badges. (Shop history/ledger is online-only: show but disable with "Internet chahiye" when offline.)
+
+**S5 — Order builder:** product picker with **search by name/SKU/brand** (searches the local snapshot — works offline); line = product + qty (cartons and/or pieces); line total = tradePrice × pcs; order-level discount (PERCENT % / FLAT Rs); GST shown when `gstEnabled` (estimate only — server does final pricing). **GPS widget at top: auto-capture on open; states = capturing (spinner) / captured ("LOCATION CAPTURED (±12m) ✓") / failed (red retry button). Save disabled until GPS captured AND ≥1 item.** Save → local QUEUED record + outbox row (clientRef inside) → toast "Order save ho gaya — Sync Up par jayega". Show `available` stock; warn (don't block) when qty exceeds it.
+
+**S6 — Recovery:** shop (pre-filled from S4, or picker), amount, method (CASH/CHEQUE/BANK), reference (required for CHEQUE/BANK — validate locally), note. Save → QUEUED + outbox.
+
+**S7 — Nayi Shop Tag (new shop):** the 8 fields: Shop Name*, Address*, City, Owner Name*, Owner Phone*, CNIC, NTN, Channel (KIRYANA/SUPERMARKET/WHOLESALE/GENERAL picker). **GPS auto-capture starts on screen open — mandatory, same 3-state widget as S5; without a fix the Tag button stays disabled.** Save → QUEUED (kind NEW_SHOP) + outbox → toast "Shop tag ho gayi — admin approval ke baad route mein aayegi".
+
+**S8 — Pending shops:** merged list = local queued NEW_SHOP records (⏳ offline) + snapshot `pendingShops` (server-known PENDING with `ordersCount`/`ordersTotal`). Explains: "Admin approve karega tab ye shop Outlets aur bills mein nazar aayegi".
+
+**S9 — Sidebar / Menu:** user card (name, email); **"⬆ Sync Up (N) pending"** button — amber, disabled at N=0 with "Sab sync ho chuka ✓"; **"⬇ Sync Down"** button — emerald; last-sync timestamps ("Aakhri Sync Up: 18 Oct 4:30 PM / Sync Down: kabhi nahi"); BASE_URL/config info; failed queue items with last_error + "Delete" option; Logout.
+
+---
+
+## 7. BUSINESS RULES SUMMARY (enforce client-side; server re-validates)
+
+1. GPS required: order (always, `fromBooker:true`), new shop tag (always). No fix → no save.
+2. Friday OFF (`settings.fridayOff` + Friday): planned shops blocked from ordering; unplanned path only if `settings.unplannedEnabled`; PENDING tagged shops bypass route gates (GPS still required).
+3. Recovery: `amount > 0`; CHEQUE/BANK need `reference`.
+4. Order: ≥1 item; discount PERCENT ≤ 100, FLAT > 0; qty in cartons (`ctn`) and/or pieces (`pcs`) — carton × unitsPerCarton + pcs = total pieces × tradePrice = line total (estimate).
+5. New shop: name/address/ownerName/ownerPhone + GPS required; channel from the fixed 4-value list; CNIC/NTN optional.
+6. PENDING shop: orderable, but flagged; its orders stay invisible in admin lists until approval (server-side — nothing for the app to do except the badge).
+
+---
+
+## 8. EDGE CASES YOU MUST HANDLE
+
+1. **Offline tap on Sync Up/Down** → friendly toast ("Internet nahi — data phone par mehfooz hai, baad mein Sync Up karein"), queue untouched.
+2. **Force-kill / battery pull mid-day** → reopen app: snapshot + outbox + records all intact (SQLite).
+3. **Double-tap Sync Up** → duplicate: true handling, no duplicates.
+4. **Sync Up with a queued ORDER whose NEW_SHOP was never uploaded** (e.g. booker deleted the NEW_SHOP row manually) → server 404 "Outlet not found" → show last_error on the order row, keep both.
+5. **GPS permission denied** → explain, offer Settings shortcut + Retry; never save without GPS.
+6. **Snapshot from a previous day** → still usable for browsing, but Home's "Aaj ki Route" recomputes from `visitDays` with today's date; suggest fresh Sync Down.
+7. **Product unavailable (available = 0)** → visible but qty input blocked with "Stock nahi hai".
+8. **Logout** → keep snapshot? NO — clear session + snapshot; keep outbox with a warning ("Pehle Sync Up karein — warna N entries delete ho jayengi") and only clear after confirm.
+9. **Clock/date** → use device local date for recovery `date`; never UTC.
+10. **Large catalog** → product search must be indexed/local-instant (SQLite LIKE on name+sku+brand).
+
+---
+
+## 9. ACCEPTANCE CHECKLIST (self-test ALL before delivering; airplane mode = WiFi + data OFF)
+
+1. Login online → Sync Down → shops/products appear. 
+2. **Airplane mode ON**: punch order (GPS works offline — device GPS needs no internet), record recovery, tag new shop → all show ⏳ QUEUED.
+3. Force-close app, reopen in airplane mode → all three records still there.
+4. Sync Up in airplane mode → graceful failure, queue intact.
+5. Internet ON → tap Sync Up → "3 uploaded", queue 0; verify all 3 in the admin website.
+6. Tap Sync Up AGAIN → "duplicate" handling, still no duplicates on server (check twice).
+7. Order for the newly tagged shop was queued BEFORE its NEW_SHOP upload → after Sync Up both exist and the order is attached to the right outlet (kind-priority works).
+8. Admin website shows the tagged shop as PENDING (not in Outlets, its orders hidden); admin approves → booker taps Sync Down → shop moves out of PENDING into the main list.
+9. GPS denied → Save disabled with retry; grant → captured → save works.
+10. `fridayOff:true` + Friday → planned shop order blocked with the server's message; pending shop orderable.
+11. CHEQUE recovery without reference → blocked locally.
+12. **Verify NO auto-sync**: no timer, no connectivity listener anywhere in the codebase — grep for setInterval/NetInfo and confirm neither touches the sync functions.
+
+Deliver: complete buildable project + run instructions + the checklist results.
+
+---PROMPT END---
+
+---
+
+## 📌 Aap ki maloomat ke liye (ye hissa prompt ka hissa nahi — copy na karein)
+
+Website side par Task 85 ka kaam **mukammal ho chuka hai** (commit `9fd8f25`):
+
+- **Backend APIs ready hain** — bilkul wahi jo prompt mein likhi hain: `/api/sync/down`, `/api/outlets/tag`, `/api/orders` (clientRef idempotency + GPS gates), `/api/recovery` (clientRef dedupe), `/api/new-shops` (admin approval)
+- **Admin website** — sidebar mein "New Shops" page: pending/approved tabs, saare 8 fields + GPS, approve se pehle AUR baad dono waqt edit, 2-tap approve
+- **Pending shop ke bills** admin ko approve hone tak nazar nahi aate (server par filter laga hua hai)
+- **Web booker portal** mein bhi offline queue + manual Sync Up/Down laga diya gaya hai (auto-sync band)
+- Ye mobile app jab ban jaye to bas inhi APIs se connect hogi — **database mein koi tabdeeli nahi chahiye**
+
+**Base URL:** `BASE_URL` wali line mein apni Vercel site ka URL daal dein (jaise `https://distriflow.vercel.app`).
+
+
