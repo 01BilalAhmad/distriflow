@@ -1,6 +1,6 @@
 # 📱 DistriFlow — Offline-First Order Booker Mobile App (Task 85)
 
-> **Istemaal ka tareeqa:** Neeche `---PROMPT START---` se le kar `---PROMPT END---` tak ka **poora text copy** karein aur jis AI (Cursor, Claude, ChatGPT, Bolt, Lovable, Replit Agent waghera) se app banwani hai us ko paste kar dein. Prompt English mein hai taake har AI ko 100% clear ho. Sirf **1 cheez** badalni hai: `BASE_URL` ki jagah apni DistriFlow Vercel website ka URL daal dein (prompt ke andar bata diya hai kahan hai).
+> **Istemaal ka tareeqa:** Neeche `---PROMPT START---` se le kar `---PROMPT END---` tak ka **poora text copy** karein aur jis AI (Cursor, Claude, ChatGPT, Bolt, Lovable, Replit Agent waghera) se app banwani hai us ko paste kar dein. Prompt English mein hai taake har AI ko 100% clear ho. BASE_URL pehle se hi aap ki live website ka URL (`https://distriflow-solution.vercel.app`) likha hua hai — **kuch badalne ki zaroorat nahi**, seedha copy kar ke paste kar dein.
 
 ---PROMPT START---
 
@@ -41,11 +41,11 @@ Build a mobile app (Android-first) named **"DistriFlow Booker"** that lets an or
 
 ## 3. BACKEND — ALREADY LIVE, DO NOT BUILD IT
 
-Base URL (set as a config constant at the top of the app):
+Base URL (already set to the live production site — use as-is, no change needed):
 
 ```ts
-// ⚠️ REPLACE with the real deployed DistriFlow Vercel URL before building
-const BASE_URL = 'https://YOUR-DISTRIFLOW-URL.vercel.app'
+// ✅ DistriFlow production — live Vercel URL (already configured)
+const BASE_URL = 'https://distriflow-solution.vercel.app'
 ```
 
 All endpoints return JSON. Errors return `{ "error": "message in Roman Urdu" }` with status 400/401/403/404/500.
@@ -390,6 +390,6 @@ Website side par Task 85 ka kaam **mukammal ho chuka hai** (commit `9fd8f25`):
 - **Web booker portal** mein bhi offline queue + manual Sync Up/Down laga diya gaya hai (auto-sync band)
 - Ye mobile app jab ban jaye to bas inhi APIs se connect hogi — **database mein koi tabdeeli nahi chahiye**
 
-**Base URL:** `BASE_URL` wali line mein apni Vercel site ka URL daal dein (jaise `https://distriflow.vercel.app`).
+**Base URL:** `https://distriflow-solution.vercel.app` — prompt ke andar pehle se configured hai (kuch badalna nahi hai).
 
 
