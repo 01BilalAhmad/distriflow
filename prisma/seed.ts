@@ -150,6 +150,8 @@ async function main() {
         distributorId: distProfile.id,
         unit: 'CARTON', unitsPerCarton: p.unitsPerCarton, ...boxLevel(p.unitsPerCarton),
         tradePrice: p.tradePrice, consumerPrice: p.consumerPrice,
+        // Task 86: distributor margin demo — purchase ~88-93% of trade (deterministic, SKU index par)
+        purchasePrice: Math.round(p.tradePrice * (0.88 + ((p.tradePrice % 6) / 100))),
       },
     })
     products.push(prod)

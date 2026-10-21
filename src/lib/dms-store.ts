@@ -27,6 +27,7 @@ export type ViewKey =
   | 'returns'
   | 'reports'
   | 'reports-sales-profit'
+  | 'reports-sku-profit'
   | 'reports-zero-purchase'
   | 'reports-tax'
   | 'reports-recovery'

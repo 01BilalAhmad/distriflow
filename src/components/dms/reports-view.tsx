@@ -5,6 +5,7 @@
 // Pehle sirf ek basic analytics page tha — ab poora reports suite:
 //   1. Overview (charts — pehle wala analytics)
 //   2. Sales & Profit (product/booker/company breakdown, COGS, scheme claim)
+//   2b. SKU Profit (Task 86 — har SKU: kitny ka aya, kitny ki sale, profit, margin %)
 //   3. Zero Purchase (month-wise — har shop ko mahine 1 bill lazmi)
 //   4. Tax (GST + WHT 236H filer/non-filer + FBR annex print)
 //   5. Recovery (outstanding + collection history)
@@ -28,9 +29,10 @@ import { api, fmtPKR, fmtNum } from '@/lib/dms-api'
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import {
   BarChart3, TrendingUp, Percent, ShoppingCart, Receipt, HandCoins, Target,
-  Boxes, Users, Building2, Undo2, Store,
+  Boxes, Users, Building2, Undo2, Store, Coins,
 } from 'lucide-react'
 import { SalesProfitTab } from './reports/sales-profit-tab'
+import { SkuProfitTab } from './reports/sku-profit-tab'
 import { ZeroPurchaseTab } from './reports/zero-purchase-tab'
 import { TaxTab } from './reports/tax-tab'
 import { RecoveryTab } from './reports/recovery-tab'
@@ -46,6 +48,7 @@ const COLORS = ['#059669', '#10b981', '#34d399', '#6ee7b7', '#f59e0b', '#a7f3d0'
 const TABS = [
   { key: 'overview', label: 'Overview', icon: BarChart3 },
   { key: 'sales-profit', label: 'Sales & Profit', icon: TrendingUp },
+  { key: 'sku-profit', label: 'SKU Profit', icon: Coins },
   { key: 'zero-purchase', label: 'Zero Purchase', icon: ShoppingCart },
   { key: 'tax', label: 'Tax (GST/WHT)', icon: Receipt },
   { key: 'recovery', label: 'Recovery', icon: HandCoins },
@@ -74,7 +77,7 @@ export function ReportsView({ tab: tabProp }: { tab?: string }) {
           {active && active.key !== 'overview' ? (
             <>Business ka poora hisaab — <b className="text-emerald-700">{active.label}</b> report • Pehle filters set karein, phir &quot;Report Load Karein&quot; — sirf selected data load hoga (Excel, PDF, CSV, print sab mojood)</>
           ) : (
-            'Business ka poora hisaab — 11 detailed reports • Har report filter-first hai: filters set karein, phir load karein'
+            'Business ka poora hisaab — 12 detailed reports • Har report filter-first hai: filters set karein, phir load karein'
           )}
         </p>
       </div>
@@ -83,6 +86,7 @@ export function ReportsView({ tab: tabProp }: { tab?: string }) {
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         {tab === 'overview' && <OverviewTab />}
         {tab === 'sales-profit' && <SalesProfitTab />}
+        {tab === 'sku-profit' && <SkuProfitTab />}
         {tab === 'zero-purchase' && <ZeroPurchaseTab />}
         {tab === 'tax' && <TaxTab />}
         {tab === 'recovery' && <RecoveryTab />}

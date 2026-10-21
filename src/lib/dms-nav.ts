@@ -30,6 +30,7 @@ export const VIEW_PATH: Record<ViewKey, string> = {
   // Task 69 — Reports apna poora module: har report ka apna URL (bookmark/copy-link friendly)
   reports: '/reports',
   'reports-sales-profit': '/reports/sales-profit',
+  'reports-sku-profit': '/reports/sku-profit',
   'reports-zero-purchase': '/reports/zero-purchase',
   'reports-tax': '/reports/tax',
   'reports-recovery': '/reports/recovery',

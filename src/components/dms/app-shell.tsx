@@ -29,7 +29,7 @@ import {
   LayoutDashboard, ShoppingCart, Warehouse, Package, Store, Network, Route,
   Users, Gift, Undo2, BarChart3, Package2, LogOut, Building2,
   ClipboardList, FileStack, Wallet, BookText, HandCoins, Landmark,
-  Database, Map as MapIcon, TrendingUp, Receipt, Target, Boxes,
+  Database, Map as MapIcon, TrendingUp, Receipt, Target, Boxes, Coins,
   Settings as SettingsIcon, ChevronRight, ChevronLeft, Search, Calendar, Menu, PanelLeftClose, PanelLeftOpen, X,
 } from 'lucide-react'
 
@@ -55,6 +55,7 @@ const NAV: { key: string; label: string; icon: typeof LayoutDashboard; roles: st
   // Task 69 — Reports APNA POORA MODULE — har report ka apna URL
   { key: 'reports', label: 'Overview', icon: BarChart3, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'Sab reports ka KPI snapshot' },
   { key: 'reports-sales-profit', label: 'Sales & Profit', icon: TrendingUp, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'Revenue vs profit analysis' },
+  { key: 'reports-sku-profit', label: 'SKU Profit', icon: Coins, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'Har SKU: cost, sale, profit, margin %' },
   { key: 'reports-zero-purchase', label: 'Zero Purchase', icon: ShoppingCart, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'Dead shops 30/60/90 din' },
   { key: 'reports-tax', label: 'Tax (GST/WHT)', icon: Receipt, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'GST summary & FBR annex' },
   { key: 'reports-recovery', label: 'Recovery', icon: HandCoins, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'Wasooli performance report' },
