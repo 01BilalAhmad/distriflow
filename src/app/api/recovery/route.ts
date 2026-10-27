@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
+import { oldestUnpaidDays } from '@/lib/dms-recovery-ui'
 
 /**
  * RECOVERY — order-booker wise udhaar wasooli.
@@ -56,11 +57,12 @@ export async function GET(req: Request) {
     const mStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
 
     // Route shops (assigned + unassigned) — balance aggregation ke sath
+    // ledgerEntries.date: aging (oldest unpaid) FIFO waterfall ke liye (dms-recovery-ui.oldestUnpaidDays)
     const routeOutlets = await db.outlet.findMany({
       where: scope.outletWhere,
       select: {
         id: true, name: true, code: true, city: true, channel: true, salesmanId: true, visitDays: true,
-        ledgerEntries: { select: { type: true, amount: true } },
+        ledgerEntries: { select: { type: true, amount: true, date: true } },
       },
     })
 
@@ -72,8 +74,16 @@ export async function GET(req: Request) {
 
     const recoveries = await db.recovery.findMany({
       where: { outlet: scope.outletWhere, status: { not: 'REJECTED' } },
-      select: { bookerId: true, amount: true, recoveredAt: true, status: true },
+      select: { bookerId: true, amount: true, recoveredAt: true, status: true, outletId: true },
     })
+
+    // Per-shop aaj-ki-wasooli map — double-collection warning (admin post + booker pending dono)
+    const recsByOutlet = new Map<string, Array<{ amount: number; recoveredAt: Date; status: string }>>()
+    for (const r of recoveries) {
+      const list = recsByOutlet.get(r.outletId) ?? []
+      list.push({ amount: r.amount, recoveredAt: r.recoveredAt, status: r.status })
+      recsByOutlet.set(r.outletId, list)
+    }
 
     const bookerStats: Array<{ id: string | null; name: string; phone: string | null; allRoutesOpen: boolean }> = [
       ...bookerUsers.map((b) => ({ id: b.id as string | null, name: b.name, phone: b.phone, allRoutesOpen: b.allRoutesOpen })),
@@ -141,7 +151,10 @@ export async function GET(req: Request) {
 
     // Specific booker bucket ki route shops (Book Recovery tab ke liye)
     const bookerId = searchParams.get('bookerId')
-    let shops: Array<{ outletId: string; name: string; code: string; city: string; channel: string; balance: number; visitDays: string }> = []
+    let shops: Array<{
+      outletId: string; name: string; code: string; city: string; channel: string; balance: number; visitDays: string
+      collectedToday: number; pendingToday: number; lastPaymentAt: string | null; udhaarAgeDays: number
+    }> = []
     if (bookerId) {
       const bucketId = bookerId === 'none' ? null : bookerId
       // scope guard: bucket is scope ke bookers mein hona chahiye (ya 'none' jab unassigned shops hon)
@@ -156,14 +169,29 @@ export async function GET(req: Request) {
       shops = (selfBucket
         ? routeOutlets // apna poora route — assigned + planned dono
         : routeOutlets.filter((o) => (o.salesmanId ?? null) === bucketId))
-        .map((o) => ({
-          outletId: o.id, name: o.name, code: o.code, city: o.city, channel: o.channel,
-          visitDays: o.visitDays,
-          balance: round2(
+        .map((o) => {
+          const balance = round2(
             o.ledgerEntries.filter((e) => e.type === 'DEBIT').reduce((s, e) => s + e.amount, 0)
             - o.ledgerEntries.filter((e) => e.type === 'CREDIT').reduce((s, e) => s + e.amount, 0),
-          ),
-        }))
+          )
+          const mine = recsByOutlet.get(o.id) ?? []
+          const approvedToday = mine.filter((r) => r.status === 'APPROVED' && r.recoveredAt >= todayStart)
+          const pendingTodayRows = mine.filter((r) => r.status === 'PENDING' && r.recoveredAt >= todayStart)
+          const payDates = mine.filter((r) => r.status === 'APPROVED').map((r) => r.recoveredAt)
+          return {
+            outletId: o.id, name: o.name, code: o.code, city: o.city, channel: o.channel,
+            visitDays: o.visitDays,
+            balance,
+            // Aaj ki wasooli — admin ko double-entry se bachane ke liye (UI badges)
+            collectedToday: round2(approvedToday.reduce((s, r) => s + r.amount, 0)),
+            pendingToday: round2(pendingTodayRows.reduce((s, r) => s + r.amount, 0)),
+            lastPaymentAt: payDates.length
+              ? new Date(Math.max(...payDates.map((dt) => dt.getTime()))).toISOString()
+              : null,
+            // FIFO oldest-unpaid — purana udhaar pehle wasooli karne ka signal
+            udhaarAgeDays: balance > 0.005 ? oldestUnpaidDays(o.ledgerEntries) : 0,
+          }
+        })
         .sort((a, b) => b.balance - a.balance)
     }
 

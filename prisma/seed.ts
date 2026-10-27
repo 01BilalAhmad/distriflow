@@ -100,7 +100,7 @@ async function main() {
     { name: 'Usman Khan', email: 'usman@dms.pk', phone: '+92 302 4445556' },
     { name: 'Bilal Ahmed', email: 'bilal@dms.pk', phone: '+92 303 7778889' },
   ]
-  const salesmen = []
+  const salesmen: Awaited<ReturnType<typeof db.user.create>>[] = []
   for (const s of salesmanData) {
     const u = await db.user.create({
       data: { name: s.name, email: s.email, role: 'SALESMAN', phone: s.phone, region: 'Lahore', parentId: distUser.id },
@@ -142,7 +142,7 @@ async function main() {
     for (const d of PACKS) if (u % d === 0 && u / d >= 2) return { boxesPerCarton: u / d, pcsPerBox: d }
     return { boxesPerCarton: 0, pcsPerBox: 0 }
   }
-  const products = []
+  const products: Awaited<ReturnType<typeof db.product.create>>[] = []
   for (const p of productDefs) {
     const prod = await db.product.create({
       data: {
@@ -232,7 +232,7 @@ async function main() {
     { name: 'Bismillah General Store', owner: 'Rafiq jr', channel: 'GENERAL', area: 'Samanabad', lat: 31.5364, lng: 74.2741, dist: 'main', sm: 1 },
     { name: 'Grand Smokers & Grocers', owner: 'Kamran Akmal', channel: 'SUPERMARKET', area: 'Cantt', lat: 31.5204, lng: 74.3515, dist: 'sub', sm: 2 },
   ]
-  const outlets = []
+  const outlets: Awaited<ReturnType<typeof db.outlet.create>>[] = []
   let outCode = 1000
   for (const o of outletDefs) {
     outCode += 5

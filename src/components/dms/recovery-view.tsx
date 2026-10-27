@@ -4,15 +4,20 @@
  * RECOVERY — order-booker wise udhaar wasooli.
  * Tab 1 "Route Recovery": booker chuno -> uski route shops ki pending-udhaar sheet
  *   (amount + method per shop) -> Post = RCV voucher + ledger CREDIT + RCP receipt (ek transaction).
- * Tab 2 "History & Report": booker-wise recovery muqabla + voucher history + print.
+ *   UX v2: search + sort, quick chips (Full/R100/1000/5000), Enter-next navigation,
+ *   post confirm dialog, sticky action bar, udhaar aging, aaj-ki-wasooli badges
+ *   (double-entry guard: admin post + booker pending dono nazar aate hain).
+ * Tab 2 "Recovery Approvals": bookers ki pending recoveries — single + BULK approve.
+ * Tab 3 "History & Report": booker-wise muqabla + voucher history (date filter) + Excel/print.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -20,8 +25,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR, fmtDate } from '@/lib/dms-api'
 import type { RecoveryData, RecoveryRowDTO, RecoveryShopDTO } from '@/lib/dms-types'
+import { agingBucket, filterSortShops, roundDownTo, type SortKey } from '@/lib/dms-recovery-ui'
+import { exportRecoveryHistoryExcel } from '@/lib/excel-export'
 import { RouteSheetPrint, RecoveryReportPrint } from '@/components/dms/recovery-print'
-import { HandCoins, Loader2, Printer, ReceiptText, CheckCircle2, Users, AlertTriangle, History, ClipboardCheck, XCircle, Save, Clock3, ShieldCheck, Eye, Lock } from 'lucide-react'
+import { HandCoins, Loader2, Printer, ReceiptText, CheckCircle2, Users, AlertTriangle, History, ClipboardCheck, XCircle, Save, Clock3, ShieldCheck, Eye, Lock, Search, ArrowDownUp, FileSpreadsheet } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
 const METHOD_LABELS: Record<string, string> = { CASH: 'Cash', CHEQUE: 'Cheque', BANK: 'Bank Transfer' }
@@ -34,8 +41,27 @@ const STATUS_BADGE: Record<string, string> = {
 }
 const STATUS_TEXT: Record<string, string> = { PENDING: 'Approval Pending', APPROVED: 'Approved', REJECTED: 'Rejected' }
 
+/** Udhaar umar tone — dms-recovery-ui.agingBucket ke tones se match */
+const AGE_TONE: Record<string, string> = {
+  fresh: 'border-slate-200 text-slate-500 bg-white',
+  warn: 'border-amber-300 bg-amber-50 text-amber-700',
+  hot: 'border-orange-300 bg-orange-50 text-orange-700',
+  critical: 'border-red-300 bg-red-50 text-red-700',
+}
+
 interface Draft { amount: string; method: string; reference: string }
 const emptyDraft = (): Draft => ({ amount: '', method: 'CASH', reference: '' })
+
+/** Quick chips — partial wasooli allowed: Full | R100 (round down) | 1000 | 5000 */
+function quickChips(shop: RecoveryShopDTO): Array<{ label: string; value: number }> {
+  const bal = round2(shop.balance)
+  const r100 = roundDownTo(bal, 100)
+  const chips: Array<{ label: string; value: number }> = [{ label: 'Full', value: bal }]
+  if (r100 > 0 && r100 < bal) chips.push({ label: 'R100', value: r100 })
+  if (bal >= 1000) chips.push({ label: '1000', value: 1000 })
+  if (bal >= 5000) chips.push({ label: '5000', value: 5000 })
+  return chips
+}
 
 export function RecoveryView() {
   const { user } = useDMS()
@@ -59,6 +85,16 @@ export function RecoveryView() {
   const [rejecting, setRejecting] = useState<RecoveryRowDTO | null>(null)
   const [rejectNote, setRejectNote] = useState('')
   const [togglingRoutes, setTogglingRoutes] = useState(false)
+  // UX v2 — search/sort/confirm/bulk/date-filter
+  const [tab, setTab] = useState('route')
+  const [query, setQuery] = useState('')
+  const [sortKey, setSortKey] = useState<SortKey>('amount-desc')
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [selectedPending, setSelectedPending] = useState<Set<string>>(new Set())
+  const [busyBulk, setBusyBulk] = useState(false)
+  const [histFrom, setHistFrom] = useState('')
+  const [histTo, setHistTo] = useState('')
+  const amtRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
   const load = useCallback(async (uid: string) => {
     try {
@@ -100,7 +136,10 @@ export function RecoveryView() {
 
   const pendingShops = useMemo(() => shops.filter((s) => s.balance > 0.005), [shops])
 
-  const rows = useMemo(() => pendingShops.map((s) => {
+  // UX v2: client-side search + sort (bara udhaar pehle default)
+  const visibleShops = useMemo(() => filterSortShops(pendingShops, query, sortKey), [pendingShops, query, sortKey])
+
+  const rows = useMemo(() => visibleShops.map((s) => {
     const d = drafts[s.outletId] ?? emptyDraft()
     const amt = parseFloat(d.amount) || 0
     return {
@@ -108,7 +147,7 @@ export function RecoveryView() {
       over: amt > round2(s.balance) + 0.005,
       needRef: d.method !== 'CASH' && !d.reference.trim(),
     }
-  }), [pendingShops, drafts])
+  }), [visibleShops, drafts])
 
   const validRows = rows.filter((r) => r.amt > 0 && !r.over && !r.needRef)
   const enteredTotal = round2(validRows.reduce((a, r) => a + r.amt, 0))
@@ -118,15 +157,23 @@ export function RecoveryView() {
     setDrafts((prev) => ({ ...prev, [outletId]: { ...(prev[outletId] ?? emptyDraft()), ...patch } }))
   }
 
-  const fillFull = (outletId: string, balance: number) => setDraft(outletId, { amount: balance.toFixed(2) })
   const fillAllFull = () => {
     const next: Record<string, Draft> = {}
     for (const s of pendingShops) next[s.outletId] = { ...(drafts[s.outletId] ?? emptyDraft()), amount: s.balance.toFixed(2) }
     setDrafts(next)
   }
 
+  /** Enter dabao -> agli shop ka amount focus (tez typing — mouse ki zaroorat nahi) */
+  const focusNextAmount = (outletId: string) => {
+    const idx = visibleShops.findIndex((s) => s.outletId === outletId)
+    const next = visibleShops[idx + 1]
+    if (next?.outletId) amtRefs.current[next.outletId]?.focus()
+    else amtRefs.current[outletId]?.blur()
+  }
+
   /* ---------- Approvals: approve / reject / edit amount ---------- */
   const pendingRows: RecoveryRowDTO[] = data?.pending ?? []
+  const selectedTotal = round2(pendingRows.filter((r) => selectedPending.has(r.id)).reduce((s, r) => s + r.amount, 0))
 
   const reviewAction = async (row: RecoveryRowDTO, action: 'APPROVE' | 'REJECT' | 'EDIT', amount?: number, note?: string) => {
     if (!userId || busyId) return
@@ -142,11 +189,35 @@ export function RecoveryView() {
       })
       if (action === 'REJECT') { setRejecting(null); setRejectNote('') }
       setAmountDrafts((prev) => { const n = { ...prev }; delete n[row.id]; return n })
+      setSelectedPending((prev) => { const n = new Set(prev); n.delete(row.id); return n })
       await load(userId)
     } catch (e) {
       toast({ title: 'Review action failed', description: e instanceof Error ? e.message : '', variant: 'destructive' })
     } finally {
       setBusyId(null)
+    }
+  }
+
+  /** BULK APPROVE — checkbox selected pending recoveries ek sath approve (har entry apni transaction mein) */
+  const bulkApprove = async () => {
+    if (!userId || selectedPending.size === 0 || busyBulk) return
+    setBusyBulk(true)
+    try {
+      const res = await api<{ approvedCount: number; failedCount: number; message: string }>('/api/recovery/review', {
+        method: 'POST',
+        body: JSON.stringify({ userId, action: 'APPROVE', ids: Array.from(selectedPending) }),
+      })
+      toast({
+        title: res.failedCount > 0 ? `Bulk approve: ${res.approvedCount} OK, ${res.failedCount} fail` : `Bulk approve ho gaya ✓ — ${res.approvedCount} entries`,
+        description: res.message,
+        variant: res.failedCount > 0 ? 'destructive' : undefined,
+      })
+      setSelectedPending(new Set())
+      await load(userId)
+    } catch (e) {
+      toast({ title: 'Bulk approve failed', description: e instanceof Error ? e.message : '', variant: 'destructive' })
+    } finally {
+      setBusyBulk(false)
     }
   }
 
@@ -187,6 +258,7 @@ export function RecoveryView() {
         }),
       })
       setSuccess({ count: res.count, total: res.total, nos: res.posted.map((p) => p.recoveryNo) })
+      setConfirmOpen(false)
       toast({ title: `Recovery post ho gayi ✓ — ${fmtPKR(res.total)}`, description: `${res.count} shop(s) — ledgers update ho gaye` })
       await load(userId)
       const d = await api<{ shops: RecoveryShopDTO[] }>(`/api/recovery?userId=${userId}&bookerId=${bookerId}`)
@@ -210,19 +282,38 @@ export function RecoveryView() {
   }
 
   const bookerName = selectedBooker?.id ? selectedBooker.name : 'Unassigned Shops'
-  const historyRows: RecoveryRowDTO[] = (data?.history ?? []).filter((r) => historyFilter === 'all' || (r.bookerId ?? 'none') === historyFilter)
+  const businessName = user?.profile?.businessName ?? 'Company HQ'
+
+  // History — booker filter + date range (UX v2)
+  const inHistRange = (iso: string) => {
+    const t = new Date(iso).getTime()
+    if (histFrom && t < new Date(histFrom + 'T00:00:00').getTime()) return false
+    if (histTo && t > new Date(histTo + 'T23:59:59.999').getTime()) return false
+    return true
+  }
+  const historyRows: RecoveryRowDTO[] = (data?.history ?? [])
+    .filter((r) => historyFilter === 'all' || (r.bookerId ?? 'none') === historyFilter)
+    .filter((r) => inHistRange(r.date))
 
   return (
     <div className="h-full min-h-0 flex flex-col gap-3">
-      {/* KPI header */}
+      {/* KPI header — clickable: card par click = mutaliqa tab khulta hai */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
         {[
-          { label: 'Total Pending Udhaar (Sab Routes)', value: data?.totals.outstanding ?? 0, cls: 'text-red-600', icon: AlertTriangle },
-          { label: 'Recovered Today (Sab Bookers)', value: data?.totals.recoveredToday ?? 0, cls: 'text-emerald-600', icon: HandCoins },
-          { label: 'Recovered This Month', value: data?.totals.recoveredMonth ?? 0, cls: 'text-blue-600', icon: History },
-          { label: `Pending Approvals (${data?.totals.pendingCount ?? 0} entries)`, value: data?.totals.pendingAmount ?? 0, cls: 'text-amber-600', icon: Clock3 },
+          { label: 'Total Pending Udhaar (Sab Routes)', value: data?.totals.outstanding ?? 0, cls: 'text-red-600', icon: AlertTriangle, go: 'route' as const },
+          { label: 'Recovered Today (Sab Bookers)', value: data?.totals.recoveredToday ?? 0, cls: 'text-emerald-600', icon: HandCoins, go: 'report' as const },
+          { label: 'Recovered This Month', value: data?.totals.recoveredMonth ?? 0, cls: 'text-blue-600', icon: History, go: 'report' as const },
+          { label: `Pending Approvals (${data?.totals.pendingCount ?? 0} entries)`, value: data?.totals.pendingAmount ?? 0, cls: 'text-amber-600', icon: Clock3, go: 'approvals' as const },
         ].map((k) => (
-          <Card key={k.label} className={`border-slate-200 ${k.cls === 'text-amber-600' ? 'border-amber-200' : ''}`}>
+          <Card
+            key={k.label}
+            role="button"
+            tabIndex={0}
+            aria-label={`${k.label} — tab kholein`}
+            onClick={() => setTab(k.go)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setTab(k.go) } }}
+            className={`border-slate-200 cursor-pointer hover:shadow-md hover:border-slate-300 transition-shadow focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:outline-none ${k.cls === 'text-amber-600' ? 'border-amber-200' : ''}`}
+          >
             <CardContent className="px-4 py-3 flex items-center gap-3">
               <div className={`h-9 w-9 rounded-lg flex items-center justify-center shrink-0 ${k.cls === 'text-amber-600' ? 'bg-amber-100' : 'bg-slate-100'}`}><k.icon className={`h-4.5 w-4.5 ${k.cls === 'text-amber-600' ? 'text-amber-500' : 'text-slate-500'}`} /></div>
               <div className="min-w-0">
@@ -234,7 +325,7 @@ export function RecoveryView() {
         ))}
       </div>
 
-      <Tabs defaultValue="route" className="flex-1 min-h-0 flex flex-col">
+      <Tabs value={tab} onValueChange={setTab} className="flex-1 min-h-0 flex flex-col">
         <TabsList className="bg-slate-100 shrink-0 w-fit">
           <TabsTrigger value="route" className="data-[state=active]:bg-white data-[state=active]:text-emerald-700">
             <HandCoins className="h-3.5 w-3.5 mr-1.5" /> Route Recovery
@@ -263,9 +354,9 @@ export function RecoveryView() {
             </div>
           )}
 
-          {/* Booker select row */}
+          {/* Booker select + search + sort row */}
           <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <Select value={bookerId} onValueChange={(v) => { setBookerId(v); setSuccess(null) }}>
+            <Select value={bookerId} onValueChange={(v) => { setBookerId(v); setSuccess(null); setSelectedPending(new Set()) }}>
               <SelectTrigger className="h-9 w-full sm:w-80 text-sm"><SelectValue placeholder="Order booker chunein" /></SelectTrigger>
               <SelectContent>
                 {data?.bookers.map((b) => (
@@ -297,7 +388,29 @@ export function RecoveryView() {
                 </span>
               </button>
             )}
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              {/* UX v2: shop search + sort */}
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Shop dhoondein (naam/code/city)"
+                  className="h-9 w-full sm:w-52 pl-8 text-xs"
+                  aria-label="Route shops mein search karein"
+                />
+              </div>
+              <Select value={sortKey} onValueChange={(v) => setSortKey(v as SortKey)}>
+                <SelectTrigger className="h-9 w-full sm:w-44 text-xs" aria-label="Sort order">
+                  <div className="flex items-center gap-1.5 min-w-0"><ArrowDownUp className="h-3.5 w-3.5 text-slate-400 shrink-0" /><SelectValue /></div>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="amount-desc">Udhaar: bara pehle</SelectItem>
+                  <SelectItem value="amount-asc">Udhaar: chhota pehle</SelectItem>
+                  <SelectItem value="age-desc">Purana udhaar pehle</SelectItem>
+                  <SelectItem value="name-asc">Naam: A to Z</SelectItem>
+                </SelectContent>
+              </Select>
               <Input type="date" value={recDate} onChange={(e) => setRecDate(e.target.value)} className="h-9 w-38 text-xs" title="Recovery date" />
               <Button size="sm" variant="outline" className="border-violet-300 text-violet-700 hover:bg-violet-50 h-9" disabled={pendingShops.length === 0} onClick={() => setPrintSheet(true)}>
                 <Printer className="h-3.5 w-3.5 mr-1.5" /> Route Sheet
@@ -316,23 +429,31 @@ export function RecoveryView() {
                   <p className="text-sm font-semibold text-slate-700">Is booker ke route mein koi pending udhaar nahi</p>
                   <p className="text-xs text-slate-400 mt-1">Sab shops settled hain — dusra booker select karein</p>
                 </div>
+              ) : visibleShops.length === 0 ? (
+                <div className="py-12 text-center">
+                  <Search className="h-10 w-10 text-slate-300 mx-auto mb-2" />
+                  <p className="text-sm font-semibold text-slate-700">&quot;{query}&quot; se koi shop nahi mili</p>
+                  <button onClick={() => setQuery('')} className="text-xs text-emerald-600 hover:underline mt-1">Search clear karein</button>
+                </div>
               ) : (
-                <>
-                  <div className="overflow-x-auto">
-                    <Table className="min-w-[780px]">
-                      <TableHeader>
-                        <TableRow className="bg-slate-50/70">
-                          <TableHead>Shop</TableHead>
-                          <TableHead>City</TableHead>
-                          <TableHead className="text-right">Pending Udhaar</TableHead>
-                          <TableHead className="text-center" style={{ width: 150 }}>Wasooli Amount</TableHead>
-                          <TableHead className="text-center" style={{ width: 130 }}>Method</TableHead>
-                          <TableHead className="text-center" style={{ width: 150 }}>Reference</TableHead>
-                          <TableHead className="text-center" style={{ width: 64 }}></TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {rows.map((r) => (
+                <div className="overflow-x-auto">
+                  <Table className="min-w-[880px]">
+                    <TableHeader>
+                      <TableRow className="bg-slate-50/70">
+                        <TableHead>Shop</TableHead>
+                        <TableHead>City</TableHead>
+                        <TableHead className="text-right">Pending Udhaar</TableHead>
+                        <TableHead className="text-center">Purana</TableHead>
+                        <TableHead className="text-center" style={{ width: 170 }}>Wasooli Amount</TableHead>
+                        <TableHead className="text-center" style={{ width: 120 }}>Method</TableHead>
+                        <TableHead className="text-center" style={{ width: 140 }}>Reference</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {rows.map((r) => {
+                        const age = agingBucket(r.shop.udhaarAgeDays ?? 0)
+                        const chips = quickChips(r.shop)
+                        return (
                           <TableRow key={r.shop.outletId} className={r.amt > 0 && !r.over ? 'bg-emerald-50/40' : undefined}>
                             <TableCell>
                               <p className="text-sm font-medium text-slate-800">{r.shop.name}</p>
@@ -341,16 +462,49 @@ export function RecoveryView() {
                             <TableCell className="text-xs text-slate-500">{r.shop.city}</TableCell>
                             <TableCell className="text-right">
                               <span className="text-sm font-bold text-red-600 whitespace-nowrap">{fmtPKR(r.shop.balance)}</span>
+                              <div className="flex flex-col items-end gap-0.5 mt-0.5">
+                                {(r.shop.collectedToday ?? 0) > 0 && (
+                                  <span className="text-[9px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1 py-px whitespace-nowrap" title="Aaj is shop ki wasooli already post ho chuki hai">
+                                    Aaj: {fmtPKR(r.shop.collectedToday!)} ✓
+                                  </span>
+                                )}
+                                {(r.shop.pendingToday ?? 0) > 0 && (
+                                  <span className="text-[9px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 py-px whitespace-nowrap" title="Booker ne app se bheji hai — approval ka intezar. Approve hone par balance kam hoga.">
+                                    Approval mein: {fmtPKR(r.shop.pendingToday!)}
+                                  </span>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <Badge variant="outline" className={`text-[9px] whitespace-nowrap ${AGE_TONE[age.tone]}`} title="FIFO oldest unpaid udhaar ki umar">
+                                {age.label}
+                              </Badge>
                             </TableCell>
                             <TableCell>
                               <Input
+                                ref={(el) => { amtRefs.current[r.shop.outletId] = el }}
                                 type="number" min={0} step={0.01} inputMode="decimal"
                                 value={r.draft.amount}
                                 onChange={(e) => setDraft(r.shop.outletId, { amount: e.target.value })}
+                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); focusNextAmount(r.shop.outletId) } }}
                                 placeholder="0"
                                 className={`h-8 text-right text-sm ${r.over ? 'border-red-400 ring-1 ring-red-200' : ''}`}
                               />
                               {r.over && <p className="text-[10px] text-red-500 mt-0.5">Udhaar sirf {fmtPKR(r.shop.balance)} hai</p>}
+                              <div className="flex gap-1 mt-1 flex-wrap" role="group" aria-label={`${r.shop.name} quick amounts`}>
+                                {chips.map((c) => (
+                                  <button
+                                    key={c.label}
+                                    type="button"
+                                    disabled={posting}
+                                    onClick={() => setDraft(r.shop.outletId, { amount: c.value.toFixed(2) })}
+                                    title={`${r.shop.name} — ${fmtPKR(c.value)}`}
+                                    className="h-5 px-1.5 rounded border border-slate-200 bg-white text-[10px] font-semibold text-slate-600 hover:border-emerald-400 hover:text-emerald-700 disabled:opacity-40 disabled:hover:border-slate-200"
+                                  >
+                                    {c.label}
+                                  </button>
+                                ))}
+                              </div>
                             </TableCell>
                             <TableCell>
                               <Select value={r.draft.method} onValueChange={(v) => setDraft(r.shop.outletId, { method: v })}>
@@ -370,36 +524,37 @@ export function RecoveryView() {
                               />
                               {r.needRef && <p className="text-[10px] text-red-500 mt-0.5">Reference zaroori</p>}
                             </TableCell>
-                            <TableCell className="text-center">
-                              <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => fillFull(r.shop.outletId, r.shop.balance)} title="Poora pending udhaar bhar dein">Full</Button>
-                            </TableCell>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                  <div className="border-t border-slate-100 px-4 py-3 flex flex-wrap items-center gap-2 bg-slate-50/50 rounded-b-xl">
-                    <div className="min-w-0">
-                      <p className="text-sm font-bold text-slate-800">
-                        {validRows.length > 0 ? `${validRows.length} shop${validRows.length > 1 ? 's' : ''} — ${fmtPKR(enteredTotal)} wasooli` : 'Amount enter karein'}
-                      </p>
-                      <p className="text-[11px] text-slate-400">Post par: RCV voucher + shop ledger CREDIT + RCP receipt (ek transaction)</p>
-                    </div>
-                    {hasInvalid && (
-                      <Badge variant="outline" className="border-red-300 text-red-600 text-[11px]"><AlertTriangle className="h-3 w-3 mr-1" />Ghalat entries check karein</Badge>
-                    )}
-                    <div className="ml-auto flex gap-2">
-                      <Button size="sm" variant="outline" className="h-9" onClick={fillAllFull} disabled={posting}>Sab Full</Button>
-                      <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 h-9" onClick={post} disabled={posting || validRows.length === 0}>
-                        {posting ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <HandCoins className="h-4 w-4 mr-1.5" />}
-                        Post Recovery{validRows.length > 0 ? ` (${fmtPKR(enteredTotal)})` : ''}
-                      </Button>
-                    </div>
-                  </div>
-                </>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
               )}
             </CardContent>
           </Card>
+
+          {/* UX v2: STICKY action bar — Post button hamesha nazar mein (lambi route sheet par bhi) */}
+          {pendingShops.length > 0 && (
+            <div className="sticky bottom-0 z-20 border border-slate-200 bg-white/95 backdrop-blur px-4 py-2.5 flex flex-wrap items-center gap-2 rounded-xl shadow-[0_-6px_16px_rgba(15,23,42,0.08)]">
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-slate-800">
+                  {validRows.length > 0 ? `${validRows.length} shop${validRows.length > 1 ? 's' : ''} — ${fmtPKR(enteredTotal)} wasooli` : 'Amount enter karein'}
+                </p>
+                <p className="text-[11px] text-slate-400">Post par: RCV voucher + shop ledger CREDIT + RCP receipt (ek transaction)</p>
+              </div>
+              {hasInvalid && (
+                <Badge variant="outline" className="border-red-300 text-red-600 text-[11px]"><AlertTriangle className="h-3 w-3 mr-1" />Ghalat entries check karein</Badge>
+              )}
+              <div className="ml-auto flex gap-2">
+                <Button size="sm" variant="outline" className="h-9" onClick={fillAllFull} disabled={posting}>Sab Full</Button>
+                <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 h-9" onClick={() => setConfirmOpen(true)} disabled={posting || validRows.length === 0}>
+                  {posting ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <HandCoins className="h-4 w-4 mr-1.5" />}
+                  Post Recovery{validRows.length > 0 ? ` (${fmtPKR(enteredTotal)})` : ''}
+                </Button>
+              </div>
+            </div>
+          )}
         </TabsContent>
 
         {/* ==================== TAB 2: RECOVERY APPROVALS ==================== */}
@@ -408,7 +563,7 @@ export function RecoveryView() {
             <ShieldCheck className="h-4.5 w-4.5 text-amber-600 shrink-0 mt-0.5" />
             <div className="min-w-0">
               <p className="text-xs font-semibold text-amber-800">Order bookers ki wasooli pehle APPROVE hogi, tab shop ledger update hoga</p>
-              <p className="text-[11px] text-amber-700 mt-0.5">Amount edit kar sakte hain — ghalat entry Reject karein (ledger bilkul nahi chhooti). Approve par RCV + ledger CREDIT + RCP receipt ek sath banti hai.</p>
+              <p className="text-[11px] text-amber-700 mt-0.5">Amount edit kar sakte hain — ghalat entry Reject karein (ledger bilkul nahi chhooti). Approve par RCV + ledger CREDIT + RCP receipt ek sath banti hai. Bulk approve ke liye shops select kar ke &quot;Approve Selected&quot; dabayein.</p>
             </div>
           </div>
 
@@ -424,12 +579,31 @@ export function RecoveryView() {
                 <>
                   <div className="px-4 py-2.5 border-b border-slate-100 flex items-center gap-2 flex-wrap">
                     <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mr-auto">Pending Recovery Approvals ({pendingRows.length})</p>
+                    {/* UX v2: BULK APPROVE — selected entries ek sath approve */}
+                    {selectedPending.size > 0 && (
+                      <Button
+                        size="sm"
+                        className="bg-emerald-600 hover:bg-emerald-700 h-7 text-[11px]"
+                        disabled={busyBulk}
+                        onClick={bulkApprove}
+                      >
+                        {busyBulk ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5 mr-1" />}
+                        Approve Selected ({selectedPending.size}) — {fmtPKR(selectedTotal)}
+                      </Button>
+                    )}
                     <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50 text-[11px]">Total: {fmtPKR(pendingRows.reduce((s, r) => s + r.amount, 0))}</Badge>
                   </div>
                   <div className="overflow-x-auto">
-                    <Table className="min-w-[900px]">
+                    <Table className="min-w-[940px]">
                       <TableHeader>
                         <TableRow className="bg-slate-50/70">
+                          <TableHead className="w-10">
+                            <Checkbox
+                              aria-label="Sab pending select karein"
+                              checked={selectedPending.size === pendingRows.length && pendingRows.length > 0}
+                              onCheckedChange={(v) => setSelectedPending(v ? new Set(pendingRows.map((r) => r.id)) : new Set())}
+                            />
+                          </TableHead>
                           <TableHead>Voucher #</TableHead>
                           <TableHead>Booker</TableHead>
                           <TableHead>Shop</TableHead>
@@ -447,6 +621,18 @@ export function RecoveryView() {
                           const editedAmt = parseFloat(draftVal) || 0
                           return (
                             <TableRow key={r.id} className="bg-amber-50/20">
+                              <TableCell>
+                                <Checkbox
+                                  aria-label={`${r.recoveryNo} select karein`}
+                                  checked={selectedPending.has(r.id)}
+                                  onCheckedChange={(v) => setSelectedPending((prev) => {
+                                    const n = new Set(prev)
+                                    if (v) n.add(r.id)
+                                    else n.delete(r.id)
+                                    return n
+                                  })}
+                                />
+                              </TableCell>
                               <TableCell className="text-xs font-bold text-emerald-700 whitespace-nowrap">
                                 {r.recoveryNo}
                                 {r.editedAmount && r.originalAmount != null && (
@@ -528,11 +714,26 @@ export function RecoveryView() {
 
         {/* ==================== TAB 3: HISTORY & REPORT ==================== */}
         <TabsContent value="report" className="flex-1 min-h-0 mt-3 flex flex-col gap-3 overflow-y-auto pr-0.5">
-          <div className="flex items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center justify-between gap-2 shrink-0 flex-wrap">
             <p className="text-sm font-semibold text-slate-600">Booker-wise recovery performance + voucher history</p>
-            <Button size="sm" variant="outline" className="border-violet-300 text-violet-700 hover:bg-violet-50" onClick={() => setPrintReport(true)}>
-              <Printer className="h-3.5 w-3.5 mr-1.5" /> Print Report
-            </Button>
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* UX v2: date range filter + Excel export */}
+              <Input type="date" value={histFrom} onChange={(e) => setHistFrom(e.target.value)} className="h-8 w-36 text-xs" aria-label="Shuru ki tareekh" />
+              <span className="text-xs text-slate-400">se</span>
+              <Input type="date" value={histTo} onChange={(e) => setHistTo(e.target.value)} className="h-8 w-36 text-xs" aria-label="Aakhri tareekh" />
+              <Button size="sm" variant="ghost" className="h-8 text-[11px] text-slate-600" onClick={() => { const t = new Date().toISOString().slice(0, 10); setHistFrom(t); setHistTo(t) }}>
+                <Clock3 className="h-3.5 w-3.5 mr-1" />Aaj
+              </Button>
+              {(histFrom || histTo) && (
+                <Button size="sm" variant="ghost" className="h-8 text-[11px] text-slate-400 hover:text-slate-600" onClick={() => { setHistFrom(''); setHistTo('') }}>Clear</Button>
+              )}
+              <Button size="sm" variant="outline" className="border-emerald-300 text-emerald-700 hover:bg-emerald-50" disabled={historyRows.length === 0} onClick={() => exportRecoveryHistoryExcel(historyRows, `${bookerName === 'Unassigned Shops' ? 'Sab bookers' : 'Filter: ' + bookerName} — DistriFlow`)}>
+                <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" /> Excel
+              </Button>
+              <Button size="sm" variant="outline" className="border-violet-300 text-violet-700 hover:bg-violet-50" onClick={() => setPrintReport(true)}>
+                <Printer className="h-3.5 w-3.5 mr-1.5" /> Print Report
+              </Button>
+            </div>
           </div>
 
           {/* Section A: booker-wise */}
@@ -652,7 +853,7 @@ export function RecoveryView() {
       {/* Print overlays */}
       {printSheet && selectedBooker && (
         <RouteSheetPrint
-          businessName={user?.profile?.businessName ?? 'Company HQ'}
+          businessName={businessName}
           bookerName={bookerName}
           bookerPhone={selectedBooker.phone}
           date={recDate ? new Date(recDate + 'T12:00:00').toISOString() : new Date().toISOString()}
@@ -662,12 +863,51 @@ export function RecoveryView() {
       )}
       {printReport && data && (
         <RecoveryReportPrint
-          businessName={user?.profile?.businessName ?? 'Company HQ'}
+          businessName={businessName}
           bookers={data.bookers}
           history={data.history}
           onClose={() => setPrintReport(false)}
         />
       )}
+
+      {/* UX v2: POST CONFIRM — financial action se pehle poori summary (double-check guard) */}
+      <Dialog open={confirmOpen} onOpenChange={(v) => { if (!posting) setConfirmOpen(v) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-1.5"><HandCoins className="h-4.5 w-4.5 text-emerald-600" /> Recovery post confirm karein</DialogTitle>
+            <DialogDescription>
+              <b>{validRows.length}</b> shop{validRows.length > 1 ? 's' : ''} ki wasooli — total <b className="text-emerald-700">{fmtPKR(enteredTotal)}</b>
+              {recDate ? <> — date <b>{fmtDate(new Date(recDate + 'T12:00:00').toISOString())}</b></> : null}.
+              Confirm par RCV voucher + shop ledger CREDIT + RCP receipt ban jayega.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
+            {validRows.map((r) => (
+              <div key={r.shop.outletId} className="px-3 py-2 flex items-center justify-between gap-2 text-xs">
+                <div className="min-w-0">
+                  <p className="font-semibold text-slate-800 truncate">{r.shop.name}</p>
+                  <p className="text-[10px] text-slate-400">
+                    {METHOD_LABELS[r.draft.method] ?? r.draft.method}{r.draft.reference ? ` • Ref ${r.draft.reference}` : ''}
+                    {(r.shop.pendingToday ?? 0) > 0 ? ` — dhyan rakhein: booker ki Rs ${fmtPKR(r.shop.pendingToday!)} bhi approval mein hai` : ''}
+                  </p>
+                </div>
+                <span className="font-bold text-slate-700 whitespace-nowrap">{fmtPKR(r.amt)}</span>
+              </div>
+            ))}
+          </div>
+          <DialogFooter className="flex gap-2">
+            <Button variant="outline" className="flex-1" disabled={posting} onClick={() => setConfirmOpen(false)}>Wapas</Button>
+            <Button
+              className="flex-1 bg-emerald-600 hover:bg-emerald-700"
+              disabled={posting}
+              onClick={post}
+            >
+              {posting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <CheckCircle2 className="h-4 w-4 mr-1.5" />}
+              Confirm &amp; Post ({fmtPKR(enteredTotal)})
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Reject dialog — wajah booker ko nazar aayegi */}
       <Dialog open={!!rejecting} onOpenChange={(v) => { if (!v) { setRejecting(null); setRejectNote('') } }}>

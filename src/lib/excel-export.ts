@@ -3,7 +3,7 @@
  * Client-side only: XLSX.writeFile browser download trigger karta hai.
  */
 import * as XLSX from 'xlsx'
-import type { LedgerRowDTO, LedgerEntryDTO, LedgerOutletDTO } from './dms-types'
+import type { LedgerRowDTO, LedgerEntryDTO, LedgerOutletDTO, RecoveryRowDTO } from './dms-types'
 
 const r2 = (v: number) => Math.round(v * 100) / 100
 
@@ -158,4 +158,51 @@ export function exportAllShopsFullExcel(rows: LedgerRowDTO[], fetchEntries: (out
     XLSX.utils.book_append_sheet(wb, wsS, 'Summary')
     download(wb, `shops-ledgers-full-${stamp()}.xlsx`)
   })()
+}
+
+// ---------- 4) Recovery voucher history (date/booker filter ke baad jo UI par hai) ----------
+const RCV_STATUS: Record<string, string> = { PENDING: 'Approval Pending', APPROVED: 'Approved', REJECTED: 'Rejected' }
+
+export function exportRecoveryHistoryExcel(rows: RecoveryRowDTO[], scopeLabel: string) {
+  const total = r2(rows.reduce((s, r) => s + r.amount, 0))
+  const approved = rows.filter((r) => r.status === 'APPROVED')
+  const pending = rows.filter((r) => r.status === 'PENDING')
+
+  const aoa: (string | number)[][] = []
+  aoa.push(['RECOVERY VOUCHER HISTORY (Udhaar Wasooli)'])
+  aoa.push([`Scope: ${scopeLabel}`, `Printed: ${nowStr()}`, `Entries: ${rows.length}`])
+  aoa.push([`Total: Rs ${total.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, `Approved: ${approved.length} (Rs ${r2(approved.reduce((s, r) => s + r.amount, 0)).toLocaleString('en-US', { minimumFractionDigits: 2 })})`, `Pending: ${pending.length} (Rs ${r2(pending.reduce((s, r) => s + r.amount, 0)).toLocaleString('en-US', { minimumFractionDigits: 2 })})`])
+  aoa.push([])
+  aoa.push(['#', 'Voucher #', 'Date', 'Order Booker', 'Shop', 'Shop Code', 'Method', 'Reference', 'Amount (Rs)', 'Status', 'Posted By', 'Approved By'])
+
+  rows.forEach((r, i) => {
+    aoa.push([
+      i + 1,
+      r.recoveryNo,
+      dDMY(r.date),
+      r.bookerName,
+      r.outletName,
+      r.outletCode,
+      r.method,
+      r.reference ?? '',
+      r2(r.amount),
+      RCV_STATUS[r.status] ?? r.status,
+      r.postedByName ?? '',
+      r.approvedByName ?? '',
+    ])
+  })
+  aoa.push(['', 'TOTALS', '', '', '', '', '', '', total, '', '', ''])
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa)
+  ws['!cols'] = [{ wch: 4 }, { wch: 12 }, { wch: 11 }, { wch: 18 }, { wch: 28 }, { wch: 11 }, { wch: 9 }, { wch: 14 }, { wch: 13 }, { wch: 15 }, { wch: 14 }, { wch: 14 }]
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 11 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: 11 } },
+  ]
+  fmtMoneyCols(ws, [8], 5)
+  ws['!autofilter'] = { ref: `A5:L${5 + rows.length + 1}` }
+
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Recovery History')
+  download(wb, `recovery-history-${stamp()}.xlsx`)
 }

@@ -680,6 +680,14 @@ export interface RecoveryShopDTO {
   balance: number
   /** Visit schedule — "MON,WED,SAT" | empty = roz visit */
   visitDays: string
+  /** Aaj APPROVED wasooli (ledger update ho chuki) — double-entry warning ke liye */
+  collectedToday?: number
+  /** Aaj booker app se bheji PENDING wasooli — approval ka intezar, abhi ledger nahi lagi */
+  pendingToday?: number
+  /** Aakhri baar approved wasooli kab hui */
+  lastPaymentAt?: string | null
+  /** FIFO oldest-unpaid debit ki umar (din) — purana udhaar pehle wasooli karne ka signal */
+  udhaarAgeDays?: number
 }
 
 export interface RecoveryRowDTO {
