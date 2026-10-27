@@ -591,6 +591,9 @@
   .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-amber-6'] { color: #f5ca86; }
   .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-amber-7'] { color: #f5cc85; }
   .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-amber-8'] { color: #f8d9a0; }
+  /* Task 94 — amber-900 dark ink (bulk-import skipped-rows list) — pehle sirf -6/-7/-8
+     cover thay, 900 literal #78350f dark amber surface par ghayab ho jata tha */
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-amber-9'] { color: #fbd88f; }
   .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-red-4'] { color: #f08778; }
   .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-red-5'] { color: #f6938a; }
   .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-red-6'] { color: #f6a294; }
@@ -619,6 +622,17 @@
   /* Sidebar brand pill — Selvar dark side-pill */
   .dark .bg-\[\#eef2fb\] {
     background-color: #26334f;
+  }
+  /* Task 94 — active nav pill ka INK bhi flip karna zaroori tha: Task 91 ne sirf pill
+     bg ko #26334f kiya magar text-[#10182b] (dark navy ink) + icon text-[#2a4fd0]
+     (cobalt) literal reh gaye -> selected nav item ("Delivery Summaries") dark pill
+     par ghayab lagta tha (user: "visible hi ni ho rha"). Print guard laga — ye
+     classes sirf shell mein hain, magar safety first. */
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) .text-\[\#10182b\] {
+    color: #eef2fb;
+  }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) .text-\[\#2a4fd0\] {
+    color: #8ea6ff;
   }
 
   /* ---- 3b) Task 93 — bg-white/<opacity> frosted surfaces ka dark remap ----
