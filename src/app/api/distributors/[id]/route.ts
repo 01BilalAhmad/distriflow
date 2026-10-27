@@ -1,29 +1,32 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser } from '@/lib/api-auth'
 
 /**
  * Distributor profile edit (Task 21-l, Task 22 update).
- * PATCH /api/distributors/[id]  { userId, name?, businessName?, city?, region?, phone? }
+ * PATCH /api/distributors/[id]  { name?, businessName?, city?, region?, phone? }
  * id = target USER id (distributor)
  * Scope: har user sirf APNI details edit karta hai (mega admin console accounts manage karta hai,
  * ye business route nahi). Credit limit bhi Mega Admin console ki jagah hai.
  * Email login credential hai — yahan change nahi hota (read-only UI par).
+ * Task 95: identity cookie se (body userId IGNORE — IDOR band).
  */
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const body = await req.json()
-    const { userId, name, businessName, city, region, phone, creditLimit } = body
-    if (!userId) return jsonError('userId required')
-
-    const me = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-    if (!me) return jsonError('User not found', 404)
+    // Task 95: identity cookie se — caller hamesha login user (koi bhi kisi aur ki details nahi chhed sakta)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const me = auth.user
     const mb = megaBlocked(me.role)
     if (mb) return mb
     if (me.id !== id) {
       return jsonError('Aap sirf apni hi details edit kar sakte hain', 403)
     }
+
+    const body = await req.json()
+    const { name, businessName, city, region, phone, creditLimit } = body
 
     const target = await db.user.findUnique({ where: { id }, include: { profile: true } })
     if (!target) return jsonError('Distributor nahi mila', 404)

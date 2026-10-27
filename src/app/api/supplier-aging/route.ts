@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
-import { jsonError, distributorTenant } from '@/lib/dms-scope'
+import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser } from '@/lib/api-auth'
 
 /**
  * Task 36 — Supplier Aging & Payments overview (DISTRIBUTOR).
@@ -20,13 +21,15 @@ function startOfDay(d = new Date()): Date {
 
 export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
-    if (!userId) return jsonError('userId required')
-
-    const t = await distributorTenant(userId)
-    if ('error' in t) return t.error
-    const tenantId = t.tenantId
+    // Task 95: identity cookie se (userId param IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
+    const mb = megaBlocked(user.role)
+    if (mb) return mb
+    if (user.role !== 'DISTRIBUTOR') return jsonError('Sirf Distributor apna catalog manage kar sakta hai', 403)
+    if (!user.profile) return jsonError('Distributor profile nahi mila', 404)
+    const tenantId = user.profile.id
 
     const [companies, invoices, payments] = await Promise.all([
       db.company.findMany({

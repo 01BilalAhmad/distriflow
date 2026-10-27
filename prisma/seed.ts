@@ -1,8 +1,9 @@
 /**
  * DMS Seed Script - Pakistani FMCG Demo Data
- * Run: bun prisma/seed.ts
+ * Run: bun prisma/seed.ts  (ya: npx tsx prisma/seed.ts)
  */
 import { PrismaClient } from '@prisma/client'
+import bcrypt from 'bcryptjs'
 
 const db = new PrismaClient()
 
@@ -78,14 +79,16 @@ async function main() {
   // (banata hai, active/inactive karta hai, monthly subscription renew karta hai).
   // Business data (orders/shops/recovery) ka usay koi access NAHI hai.
   console.log('Creating users...')
+  // Task 95: bcrypt hashes — demo123 sab demo accounts ka password (hash DB mein jata hai)
+  const demoHash = await bcrypt.hash('demo123', 10)
   await db.user.create({
-    data: { name: 'Mega Admin (Software Seller)', email: 'admin@dms.pk', role: 'MEGA_ADMIN', phone: '+92 300 1234567', region: 'National' },
+    data: { name: 'Mega Admin (Software Seller)', email: 'admin@dms.pk', role: 'MEGA_ADMIN', phone: '+92 300 1234567', region: 'National', password: demoHash },
   })
 
   const distUser = await db.user.create({
     data: {
       name: 'Al-Madina Distribution', email: 'distributor@dms.pk', role: 'DISTRIBUTOR', phone: '+92 321 7654321', region: 'Lahore',
-      isActive: true, subscriptionStart: new Date(), subscriptionExpiry: daysAhead(30),
+      isActive: true, subscriptionStart: new Date(), subscriptionExpiry: daysAhead(30), password: demoHash,
     },
   })
   const distProfile = await db.distributorProfile.create({
@@ -100,10 +103,10 @@ async function main() {
     { name: 'Usman Khan', email: 'usman@dms.pk', phone: '+92 302 4445556' },
     { name: 'Bilal Ahmed', email: 'bilal@dms.pk', phone: '+92 303 7778889' },
   ]
-  const salesmen = []
+  const salesmen: Array<{ id: string; name: string }> = []
   for (const s of salesmanData) {
     const u = await db.user.create({
-      data: { name: s.name, email: s.email, role: 'SALESMAN', phone: s.phone, region: 'Lahore', parentId: distUser.id },
+      data: { name: s.name, email: s.email, role: 'SALESMAN', phone: s.phone, region: 'Lahore', parentId: distUser.id, password: demoHash },
     })
     salesmen.push(u)
   }
@@ -142,7 +145,7 @@ async function main() {
     for (const d of PACKS) if (u % d === 0 && u / d >= 2) return { boxesPerCarton: u / d, pcsPerBox: d }
     return { boxesPerCarton: 0, pcsPerBox: 0 }
   }
-  const products = []
+  const products: Array<{ id: string; sku: string; name: string; unitsPerCarton: number; tradePrice: number; companyId: string | null; category: string }> = []
   for (const p of productDefs) {
     const prod = await db.product.create({
       data: {
@@ -232,7 +235,7 @@ async function main() {
     { name: 'Bismillah General Store', owner: 'Rafiq jr', channel: 'GENERAL', area: 'Samanabad', lat: 31.5364, lng: 74.2741, dist: 'main', sm: 1 },
     { name: 'Grand Smokers & Grocers', owner: 'Kamran Akmal', channel: 'SUPERMARKET', area: 'Cantt', lat: 31.5204, lng: 74.3515, dist: 'sub', sm: 2 },
   ]
-  const outlets = []
+  const outlets: Array<{ id: string; code: string; name: string; channel: string; salesmanId: string | null; distributorId: string; lat: number | null; lng: number | null }> = []
   let outCode = 1000
   for (const o of outletDefs) {
     outCode += 5

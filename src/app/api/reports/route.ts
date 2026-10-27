@@ -1,20 +1,19 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser } from '@/lib/api-auth'
 
 export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
-    if (!userId) return jsonError('userId required')
-
-    const user = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-    if (!user) return jsonError('User not found', 404)
+    // Task 95: identity cookie se (userId param IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
     const mb = megaBlocked(user.role)
     if (mb) return mb
 
     const where =
       user.role === 'SALESMAN'
-        ? { salesmanId: userId }
+        ? { salesmanId: user.id }
         : { distributorId: user.profile?.id }
 
     const sixMonthsAgo = new Date()

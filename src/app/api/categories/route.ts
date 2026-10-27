@@ -1,20 +1,30 @@
 import { db } from '@/lib/db'
-import { jsonError, distributorTenant } from '@/lib/dms-scope'
+import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser, type AuthedUser } from '@/lib/api-auth'
 
 // Task 53: per-tenant product categories — GET (list + first-run seed), POST (naya
 // category), DELETE (products moveTo General par shift), PATCH (rename + merge).
 // Product.category string isi table ke naam se match hota hai.
 // Task 55: scheme us category ko refer karti ho to DELETE blocked — scheme ka target
 // ALL products par switch hona silent margin-loss hai (user decision: block).
+// Task 95: identity cookie se — distributorTenant(userId) helper ki jagah cookie-user
+// par direct checks (same semantics: mega block → DISTRIBUTOR-only → profile required).
+function distributorTenantOf(user: AuthedUser): { tenantId: string; error?: never } | { tenantId?: never; error: Response } {
+  const mb = megaBlocked(user.role)
+  if (mb) return { error: mb }
+  if (user.role !== 'DISTRIBUTOR') return { error: jsonError('Sirf Distributor apna catalog manage kar sakta hai', 403) }
+  if (!user.profile) return { error: jsonError('Distributor profile nahi mila', 404) }
+  return { tenantId: user.profile.id }
+}
 
 const DEFAULT_CATEGORIES = ['Tea', 'Beverages', 'Dairy', 'Snacks', 'Home Care', 'Personal Care', 'Chocolate', 'Candy', 'Wafer', 'Mints']
 
 export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
-    if (!userId) return jsonError('userId required')
-    const t = await distributorTenant(userId)
+    // Task 95: identity cookie se (userId param IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const t = distributorTenantOf(auth.user)
     if ('error' in t) return t.error
     const tenantId = t.tenantId
 
@@ -47,14 +57,17 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const t = distributorTenantOf(auth.user)
+    if ('error' in t) return t.error
+
     const body = await req.json()
-    const { userId, name } = body as { userId?: string; name?: string }
-    if (!userId) return jsonError('userId required')
+    const { name } = body as { name?: string }
     const clean = (name ?? '').trim()
     if (!clean) return jsonError('Category ka naam required hai')
     if (clean.length > 40) return jsonError('Category ka naam 40 characters se lamba nahi ho sakta')
-    const t = await distributorTenant(userId)
-    if ('error' in t) return t.error
 
     // Duplicate-safe: same naam wali wapas (UI ko select karne ke liye id chahiye)
     const cat = await db.category.upsert({
@@ -70,13 +83,16 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
+    // Task 95: identity cookie se (userId param IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const t = distributorTenantOf(auth.user)
+    if ('error' in t) return t.error
+
     const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
     const id = searchParams.get('id')
     const moveTo = (searchParams.get('moveTo') ?? 'General').trim() || 'General'
-    if (!userId || !id) return jsonError('userId aur id required hain')
-    const t = await distributorTenant(userId)
-    if ('error' in t) return t.error
+    if (!id) return jsonError('id required hai')
 
     const cat = await db.category.findFirst({ where: { id, distributorId: t.tenantId } })
     if (!cat) return jsonError('Category nahi mili', 404)
@@ -117,14 +133,18 @@ export async function DELETE(req: Request) {
 // (category sirf Product.category string hai, isi liye updateMany zaroori).
 export async function PATCH(req: Request) {
   try {
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const t = distributorTenantOf(auth.user)
+    if ('error' in t) return t.error
+
     const body = await req.json()
-    const { userId, id, name } = body as { userId?: string; id?: string; name?: string }
-    if (!userId || !id) return jsonError('userId aur id required hain')
+    const { id, name } = body as { id?: string; name?: string }
+    if (!id) return jsonError('id required hai')
     const clean = (name ?? '').trim()
     if (!clean) return jsonError('Category ka naam required hai')
     if (clean.length > 40) return jsonError('Category ka naam 40 characters se lamba nahi ho sakta')
-    const t = await distributorTenant(userId)
-    if ('error' in t) return t.error
 
     const cat = await db.category.findFirst({ where: { id, distributorId: t.tenantId } })
     if (!cat) return jsonError('Category nahi mili', 404)

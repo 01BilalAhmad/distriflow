@@ -1,21 +1,20 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser } from '@/lib/api-auth'
 
 /**
  * Warehouse management (Task 21-k, Task 22 update) — create / edit / delete warehouses.
- * GET  ?userId=                -> owner list (ab caller ka apna profile)
- * POST { userId, name, city, isPrimary? } -> naya warehouse (caller ke apne naam par)
+ * GET  -> owner list (ab caller ka apna profile)
+ * POST { name, city, isPrimary? } -> naya warehouse (caller ke apne naam par)
  * Scope: DISTRIBUTOR apne warehouses — mega admin business se door hai.
+ * Task 95: identity cookie se (userId param/body IGNORE — IDOR band).
  */
 
 export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
-    if (!userId) return jsonError('userId required')
-
-    const user = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-    if (!user) return jsonError('User not found', 404)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
     const mb = megaBlocked(user.role)
     if (mb) return mb
 
@@ -33,16 +32,17 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json()
-    const { userId, name, city, isPrimary } = body
-    if (!userId) return jsonError('userId required')
-    if (!name?.trim() || !city?.trim()) return jsonError('Warehouse ka naam aur city required hain')
-
-    const user = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-    if (!user) return jsonError('User not found', 404)
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
     const mbp = megaBlocked(user.role)
     if (mbp) return mbp
     if (user.role !== 'DISTRIBUTOR') return jsonError('Sirf Distributor warehouse bana sakta hai', 403)
+
+    const body = await req.json()
+    const { name, city, isPrimary } = body
+    if (!name?.trim() || !city?.trim()) return jsonError('Warehouse ka naam aur city required hain')
 
     // owner: hamesha caller ka apna profile
     const ownerId = user.profile?.id ?? null

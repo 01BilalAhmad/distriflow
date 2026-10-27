@@ -1,15 +1,24 @@
 import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
+import { requireUser, tenantMismatch } from '@/lib/api-auth'
 
 /** Edit outlet — basic info + Filer/Non-Filer tax status + NTN + CNIC + visit days + route booker assignment */
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // Task 95: identity cookie se (pehle bilkul unauthenticated tha)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
+
     const { id } = await params
     const body = await req.json()
     const { name, ownerName, phone, address, city, channel, creditDays, ntn, cnic, filerStatus, visitDays, salesmanId } = body
 
     const existing = await db.outlet.findUnique({ where: { id } })
     if (!existing) return jsonError('Outlet not found', 404)
+    // Task 95: tenant ownership — outlet usi distributor ka hona chahiye
+    const tm = await tenantMismatch(user, existing.distributorId)
+    if (tm) return tm
     if (!name || !String(name).trim()) return jsonError('Outlet name required hai')
 
     // Task 68 fix: form khali NTN/CNIC null bhejta hai — String(null) = "null" string ban kar save ho raha tha

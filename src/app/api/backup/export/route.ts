@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
+import { requireUser } from '@/lib/api-auth'
 
 /**
  * Task 42 — Full JSON data export (MEGA_ADMIN only).
@@ -48,12 +49,10 @@ const MODELS: Array<[string, keyof typeof db]> = [
 
 export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
-    if (!userId) return jsonError('userId required')
-    const user = await db.user.findUnique({ where: { id: userId } })
-    if (!user) return jsonError('User not found', 404)
-    if (user.role !== 'MEGA_ADMIN') return jsonError('Backup sirf Mega Admin kar sakta hai', 403)
+    // Task 95: identity cookie se (userId param IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    if (auth.user.role !== 'MEGA_ADMIN') return jsonError('Backup sirf Mega Admin kar sakta hai', 403)
 
     const tables: Record<string, unknown[]> = {}
     let total = 0

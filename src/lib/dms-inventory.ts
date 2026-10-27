@@ -83,9 +83,9 @@ export function oversellMessage(
   return parts.join(' | ')
 }
 
-/** FEFO (First Expired First Out) stock deduction */
-export async function deductStockFEFO(warehouseId: string, productId: string, qty: number) {
-  const batches = await db.stockBatch.findMany({
+/** FEFO (First Expired First Out) stock deduction — client pass karo to transaction ke andar chalega */
+export async function deductStockFEFO(warehouseId: string, productId: string, qty: number, client: DbClient = db) {
+  const batches = await client.stockBatch.findMany({
     where: { warehouseId, productId, qty: { gt: 0 } },
     orderBy: [{ expDate: 'asc' }, { receivedAt: 'asc' }],
   })
@@ -94,7 +94,7 @@ export async function deductStockFEFO(warehouseId: string, productId: string, qt
     if (remaining <= 0) break
     const take = Math.min(b.qty, remaining)
     if (take > 0) {
-      await db.stockBatch.update({ where: { id: b.id }, data: { qty: b.qty - take } })
+      await client.stockBatch.update({ where: { id: b.id }, data: { qty: b.qty - take } })
       remaining -= take
     }
   }

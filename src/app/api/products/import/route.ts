@@ -1,6 +1,16 @@
 import { db } from '@/lib/db'
-import { jsonError, distributorTenant } from '@/lib/dms-scope'
+import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser, type AuthedUser } from '@/lib/api-auth'
 import { packData } from '../../products/route'
+
+// Task 95: distributorTenant(userId) helper ki jagah cookie-user par direct checks (same semantics)
+function distributorTenantOf(user: AuthedUser): { tenantId: string; error?: never } | { tenantId?: never; error: Response } {
+  const mb = megaBlocked(user.role)
+  if (mb) return { error: mb }
+  if (user.role !== 'DISTRIBUTOR') return { error: jsonError('Sirf Distributor apna catalog manage kar sakta hai', 403) }
+  if (!user.profile) return { error: jsonError('Distributor profile nahi mila', 404) }
+  return { tenantId: user.profile.id }
+}
 
 // Task 30 — BULK PRODUCTS IMPORT: Excel/CSV se poora catalog ek sath add.
 // Rules:
@@ -19,15 +29,17 @@ function deriveShortCode(name: string): string {
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json()
-    const { userId, rows } = body as { userId?: string; rows?: Record<string, unknown>[] }
-    if (!userId) return jsonError('userId required')
-    if (!Array.isArray(rows) || rows.length === 0) return jsonError('Import rows khali hain')
-    if (rows.length > 500) return jsonError('Ek dafa mein max 500 products import ho sakte hain')
-
-    const t = await distributorTenant(userId)
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const t = distributorTenantOf(auth.user)
     if ('error' in t) return t.error
     const tenantId = t.tenantId
+
+    const body = await req.json()
+    const { rows } = body as { rows?: Record<string, unknown>[] }
+    if (!Array.isArray(rows) || rows.length === 0) return jsonError('Import rows khali hain')
+    if (rows.length > 500) return jsonError('Ek dafa mein max 500 products import ho sakte hain')
 
     // Caches — brand/company/sku (tenant scope, case-insensitive)
     const [brands, companies, products] = await Promise.all([

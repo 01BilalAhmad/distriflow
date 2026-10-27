@@ -1,9 +1,10 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser } from '@/lib/api-auth'
 
 /**
  * Task 85 — NEW SHOPS (booker-tagged) — admin approval page ka API
- * GET /api/new-shops?userId=
+ * GET /api/new-shops   (Task 95: identity cookie se — userId param IGNORE)
  * - DISTRIBUTOR-only (apne tenant ki shops)
  * - pending: status=PENDING shops (approve ka intezar) — har shop ke orders ka summary bhi
  *   (approve hone se pehle in orders ki billing nazar nahi aati)
@@ -47,12 +48,10 @@ function toDTO(o: ShopRow) {
 
 export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
-    if (!userId) return jsonError('userId required')
-
-    const user = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-    if (!user) return jsonError('User not found', 404)
+    // Task 95: identity cookie se (userId param IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
     const mb = megaBlocked(user.role)
     if (mb) return mb
     if (user.role !== 'DISTRIBUTOR' || !user.profile) return jsonError('Sirf distributor new shops dekh sakta hai', 403)

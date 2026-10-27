@@ -1,14 +1,17 @@
+import bcrypt from 'bcryptjs'
 import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
+import { requireUser } from '@/lib/api-auth'
 
 /**
  * PATCH /api/mega/distributors/[id] — Mega Admin account actions (Task 22)
  * id = target DISTRIBUTOR user id
- * Body: { userId (mega admin), action, months?, password? }
+ * Body: { action, months?, password? }
  *   action = 'activate'      : account ON
  *   action = 'deactivate'    : account OFF (distributor + uski team login se block)
  *   action = 'renew'         : monthly subscription extend — expiry = max(aaj, current expiry) + months
- *   action = 'resetPassword' : login password set
+ *   action = 'resetPassword' : login password set (bcrypt-hash store hota hai)
+ * Task 95: identity cookie se (body userId IGNORE) — acting user hamesha MEGA_ADMIN.
  */
 
 function addMonths(date: Date, months: number): Date {
@@ -20,16 +23,17 @@ function addMonths(date: Date, months: number): Date {
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const me = auth.user
+    if (me.role !== 'MEGA_ADMIN') return jsonError('Sirf Mega Admin ye action kar sakta hai', 403)
+
     const body = await req.json()
-    const { userId, action, months, password } = body
-    if (!userId) return jsonError('userId required')
+    const { action, months, password } = body
     if (!['activate', 'deactivate', 'renew', 'resetPassword'].includes(action)) {
       return jsonError('Action valid nahi hai (activate | deactivate | renew | resetPassword)')
     }
-
-    const me = await db.user.findUnique({ where: { id: userId } })
-    if (!me) return jsonError('User not found', 404)
-    if (me.role !== 'MEGA_ADMIN') return jsonError('Sirf Mega Admin ye action kar sakta hai', 403)
 
     const target = await db.user.findUnique({ where: { id }, include: { profile: true } })
     if (!target) return jsonError('Distributor account nahi mila', 404)
@@ -73,7 +77,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
     // resetPassword
     if (!password || String(password).length < 4) return jsonError('Naya password kam az kam 4 harf ka ho')
-    await db.user.update({ where: { id }, data: { password: String(password).trim() } })
+    // Task 95: password kabhi plaintext store nahi — bcrypt hash
+    await db.user.update({ where: { id }, data: { password: await bcrypt.hash(String(password).trim(), 10) } })
     return Response.json({ ok: true, message: `${target.profile?.businessName ?? target.name} ka login password update ho gaya` })
   } catch (e) {
     console.error(e)

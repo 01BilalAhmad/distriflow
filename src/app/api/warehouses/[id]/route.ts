@@ -1,17 +1,16 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser, type AuthedUser } from '@/lib/api-auth'
 
 /**
  * Warehouse edit/delete (Task 21-k, Task 22 update).
- * PATCH  { userId, name?, city?, isPrimary? } -> naam/city/primary edit
- * DELETE ?userId= -> khali warehouse delete (stock/deliveries/summaries/adjustments hon to block)
- * Scope: DISTRIBUTOR sirf apna warehouse
+ * PATCH  { name?, city?, isPrimary? } -> naam/city/primary edit
+ * DELETE -> khali warehouse delete (stock/deliveries/summaries/adjustments hon to block)
+ * Scope: DISTRIBUTOR sirf apna warehouse.
+ * Task 95: identity cookie se (userId param/body IGNORE — IDOR band).
  */
 
-async function loadOwned(id: string, userId: string | null) {
-  if (!userId) return { error: jsonError('userId required') }
-  const user = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-  if (!user) return { error: jsonError('User not found', 404) }
+async function loadOwned(id: string, user: AuthedUser) {
   const mb = megaBlocked(user.role)
   if (mb) return { error: mb }
   if (user.role !== 'DISTRIBUTOR') return { error: jsonError('Permission nahi hai', 403) }
@@ -29,10 +28,14 @@ async function loadOwned(id: string, userId: string | null) {
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const body = await req.json()
-    const { userId, name, city, isPrimary } = body
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
 
-    const owned = await loadOwned(id, userId)
+    const body = await req.json()
+    const { name, city, isPrimary } = body
+
+    const owned = await loadOwned(id, auth.user)
     if (owned.error) return owned.error
     const { warehouse } = owned
 
@@ -78,10 +81,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
+    // Task 95: identity cookie se (userId param IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
 
-    const owned = await loadOwned(id, userId)
+    const owned = await loadOwned(id, auth.user)
     if (owned.error) return owned.error
     const { warehouse } = owned
 

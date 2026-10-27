@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked, type ScopeContext } from '@/lib/dms-scope'
+import { requireUser, type AuthedUser } from '@/lib/api-auth'
 import { r2 } from '@/lib/reports-kit-server'
 
 // ============================================================
@@ -8,11 +9,11 @@ import { r2 } from '@/lib/reports-kit-server'
 // ka add/list karne ka UI pehle nahi tha — Field Force card sirf current
 // month ka target DIKHATA tha, set koi nahi kar sakta tha.
 //
-// GET  /api/targets?userId&month=YYYY-MM
+// GET  /api/targets?month=YYYY-MM          (Task 95: identity cookie se — userId param IGNORE)
 //      → is month ke saare targets + har target par ACHIEVED value
 //        (overall = orders ka total, brand = us brand ki lines ka lineTotal;
 //        CANCELLED orders exclude — reports/targets report jaisa hi math)
-// POST /api/targets { userId, salesmanId, month, targetValue, brandId? }
+// POST /api/targets { salesmanId, month, targetValue, brandId? }
 //      → UPSERT (same booker + month + brand par dobara save = update)
 // ============================================================
 
@@ -21,10 +22,7 @@ interface TargetCtx {
 }
 
 /** Caller DISTRIBUTOR hona chahiye — targets usi ke bookers ke hain (mega admin locked) */
-async function guard(userId: string | null): Promise<TargetCtx | Response> {
-  if (!userId) return jsonError('userId required')
-  const caller = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-  if (!caller) return jsonError('User not found', 404)
+function guard(caller: AuthedUser): TargetCtx | Response {
   const mb = megaBlocked(caller.role)
   if (mb) return mb
   if (caller.role !== 'DISTRIBUTOR') return jsonError('Sirf Distributor apne order bookers ka target set kar sakta hai', 403)
@@ -50,7 +48,11 @@ function validMonth(m: string | undefined | null): m is string {
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url)
-    const g = await guard(url.searchParams.get('userId'))
+
+    // Task 95: identity cookie se (userId param IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const g = guard(auth.user)
     if (g instanceof Response) return g
     const { profileUserId } = g.caller
 
@@ -145,15 +147,19 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const g = guard(auth.user)
+    if (g instanceof Response) return g
+
     const body = await req.json() as {
-      userId?: string
+      userId?: string // legacy — IGNORE
       salesmanId?: string
       month?: string
       targetValue?: number | string
       brandId?: string | null
     }
-    const g = await guard(body.userId ?? null)
-    if (g instanceof Response) return g
 
     const { salesmanId, month } = body
     const value = Number(body.targetValue)

@@ -3,15 +3,16 @@ import { db } from '@/lib/db'
 import { AUTH_COOKIE, authCookieOptions, makeAuthToken, verifyAuthToken } from '@/lib/auth-token'
 
 /**
- * Task 65 — Session sync / restore (page-route security ka bridge):
+ * Task 65 — Session sync / restore (cookie refresh):
  *
- * 1) LEGACY BRIDGE: purane logged-in users ke paas sirf localStorage session hai, cookie
- *    nahi. Login page par client { userId } bhejta hai — user DB mein mojood + active ho
- *    to cookie set ho jati hai aur bina dobara login kiye purana session chal jata hai.
- *    (Trust level wahi hai jo pehle se API model hai — client userId bhejta hai.)
- * 2) COOKIE REFRESH: shell mount par client bina body ke call karta hai — cookie se
- *    userId nikaal kar DB se fresh user wapas + cookie refresh. Cookie expire ho chuki
- *    ho (30 din) to 401 — client force-logout karega.
+ * Client bina body ke POST karta hai — cookie se userId nikaal kar DB se fresh user
+ * wapas + cookie refresh. Cookie expire ho chuki ho (30 din) to 401 — client force-logout.
+ *
+ * Task 95 (P0 SECURITY): LEGACY BRIDGE BAND —
+ * Pehle body mein { userId } bhej kar BINA PASSWORD cookie mint ho sakti thi (poora
+ * auth bypass — koi bhi userId likh kar kisi ka session ban sakta tha). Ab identity
+ * sirf signed cookie se aati hai. Purane localStorage-only users ek dafa login karenge
+ * (login page khud dikh jata hai jab session restore fail ho).
  */
 
 function userDTO(user: {
@@ -45,17 +46,9 @@ function userDTO(user: {
 
 export async function POST(req: Request) {
   try {
-    let bodyUserId: string | null = null
-    try {
-      const body = await req.json() as { userId?: string } | null
-      bodyUserId = body?.userId ?? null
-    } catch { /* empty body — cookie path */ }
-
-    let userId = bodyUserId
-    if (!userId) {
-      const m = req.headers.get('cookie')?.match(new RegExp(`${AUTH_COOKIE}=([^;]+)`))
-      userId = await verifyAuthToken(m?.[1] ?? null)
-    }
+    // Identity SIRF signed cookie se (body userId IGNORE — auth bypass tha)
+    const m = req.headers.get('cookie')?.match(new RegExp(`${AUTH_COOKIE}=([^;]+)`))
+    const userId = await verifyAuthToken(m?.[1] ?? null)
     if (!userId) return NextResponse.json({ error: 'Session nahi mili' }, { status: 401 })
 
     const user = await db.user.findUnique({

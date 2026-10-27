@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
+import { requireUser } from '@/lib/api-auth'
 
 const round2 = (n: number) => Math.round(n * 100) / 100
 
@@ -22,11 +23,11 @@ const round2 = (n: number) => Math.round(n * 100) / 100
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const body = await req.json() as { userId?: string }
-    if (!body.userId) return jsonError('userId required')
 
-    const user = await db.user.findUnique({ where: { id: body.userId }, include: { profile: true } })
-    if (!user) return jsonError('User not found', 404)
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
     if (user.role === 'SALESMAN') return jsonError('Salesman return cancel nahi kar sakta — distributor se karein')
     if (user.role === 'MEGA_ADMIN') return jsonError('Tenant data scope nahi')
 
@@ -76,7 +77,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           await tx.stockBatch.update({ where: { id: batch.id }, data: { qty: Math.max(0, batch.qty - it.qty) } })
         }
         await tx.stockAdjustment.create({
-          data: { warehouseId: summary.warehouseId, productId: it.productId, type: 'OUT', qty: it.qty, reason: `Return cancel ${ret.returnNo} — ${order.orderNo}`, userId: body.userId ?? null },
+          data: { warehouseId: summary.warehouseId, productId: it.productId, type: 'OUT', qty: it.qty, reason: `Return cancel ${ret.returnNo} — ${order.orderNo}`, userId: user.id },
         })
       }
 

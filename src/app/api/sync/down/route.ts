@@ -1,50 +1,55 @@
 import { db } from '@/lib/db'
-import { jsonError, megaBlocked, tenantProfileId } from '@/lib/dms-scope'
+import { jsonError, tenantProfileId } from '@/lib/dms-scope'
+import { requireUser } from '@/lib/api-auth'
 import { getAvailableToPromise } from '@/lib/dms-inventory'
 import { getPjpSettings, getTenantIdForSalesman } from '@/lib/dms-pjp'
 
 /**
  * Task 85 — SYNC DOWN (manual download — booker offline-first app ka poora data bundle)
- * GET /api/sync/down?userId=
+ * GET /api/sync/down   (Task 95: identity cookie se — userId param IGNORE)
  * SALESMAN-only. Ek hi call mein: shops (APPROVED, balances + visit schedule + GPS),
  * products (stock + rates), PJP settings, apni tag ki hui PENDING shops, pending approvals count.
  * Auto-sync NAHI hai — booker khud button daba kar download karega.
  */
 export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
-    if (!userId) return jsonError('userId required')
-
-    const user = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-    if (!user) return jsonError('User not found', 404)
-    const mb = megaBlocked(user.role)
-    if (mb) return mb
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
     if (user.role !== 'SALESMAN') return jsonError('Sync down sirf order booker ke liye hai', 403)
 
     const tenantId = await getTenantIdForSalesman(user.id)
     if (!tenantId) return jsonError('Aap kisi distributor se attached nahi hain', 403)
 
-    // --- Shops (sirf APPROVED — PENDING shops alag section mein) + ledger balances ---
+    // --- Shops (sirf APPROVED — PENDING shops alag section mein) + grouped ledger balances ---
+    // Task 95 perf: pehle har shop ki POORI ledger history load hoti thi (JS agg) — ab EK groupBy
     const outlets = await db.outlet.findMany({
       where: { salesmanId: user.id, status: 'APPROVED' },
       select: {
         id: true, name: true, code: true, city: true, channel: true, visitDays: true,
         address: true, ownerName: true, phone: true, lat: true, lng: true, creditDays: true,
-        ledgerEntries: { select: { type: true, amount: true } },
       },
       orderBy: { name: 'asc' },
     })
-    const shops = outlets.map((o) => {
-      const debit = o.ledgerEntries.filter((e) => e.type === 'DEBIT').reduce((s, e) => s + e.amount, 0)
-      const credit = o.ledgerEntries.filter((e) => e.type === 'CREDIT').reduce((s, e) => s + e.amount, 0)
-      return {
-        outletId: o.id, name: o.name, code: o.code, city: o.city, channel: o.channel,
-        visitDays: o.visitDays, address: o.address, ownerName: o.ownerName, phone: o.phone,
-        lat: o.lat, lng: o.lng, creditDays: o.creditDays,
-        balance: Math.round((debit - credit) * 100) / 100,
-      }
-    })
+    const outletIds = outlets.map((o) => o.id)
+    const ledgerSums = outletIds.length
+      ? await db.outletLedger.groupBy({
+          by: ['outletId', 'type'],
+          where: { outletId: { in: outletIds } },
+          _sum: { amount: true },
+        })
+      : []
+    const balanceByOutlet = new Map<string, number>()
+    for (const s of ledgerSums) {
+      const signed = s.type === 'DEBIT' ? (s._sum.amount ?? 0) : -(s._sum.amount ?? 0)
+      balanceByOutlet.set(s.outletId, (balanceByOutlet.get(s.outletId) ?? 0) + signed)
+    }
+    const shops = outlets.map((o) => ({
+      outletId: o.id, name: o.name, code: o.code, city: o.city, channel: o.channel,
+      visitDays: o.visitDays, address: o.address, ownerName: o.ownerName, phone: o.phone,
+      lat: o.lat, lng: o.lng, creditDays: o.creditDays,
+      balance: Math.round((balanceByOutlet.get(o.id) ?? 0) * 100) / 100,
+    }))
 
     // --- Products (tenant catalog + booker ki assigned company + ATP stock) ---
     const products = await (async () => {

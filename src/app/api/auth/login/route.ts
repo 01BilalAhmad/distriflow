@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server'
+import bcrypt from 'bcryptjs'
 import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
 import { AUTH_COOKIE, authCookieOptions, makeAuthToken } from '@/lib/auth-token'
+import { rateLimit, clientIp } from '@/lib/rate-limit'
 
 /**
  * MEGA ADMIN subscription model (Task 22):
@@ -10,7 +12,20 @@ import { AUTH_COOKIE, authCookieOptions, makeAuthToken } from '@/lib/auth-token'
  * - DISTRIBUTOR (subscriber): apna poora business portal — inactive/expired subscription par login BLOCK.
  * - SALESMAN (order booker): distributor ki team — us ka distributor band ho to ye bhi
  *   login nahi kar sakta (subscription poori team par lagti hai).
+ *
+ * Task 95 (P0 security):
+ * - bcrypt password compare (pehle PLAINTEXT tha — DB leak = sab passwords leak)
+ * - Lazy migration: pehle login par purana plaintext password verify ho kar bcrypt hash
+ *   mein upgrade ho jata hai (koi data migration script nahi chahiye)
+ * - Account lock: 5 galat attempts par 15 min lock (DB-backed — saare instances par effective)
+ * - IP rate limit: 10 login tries / 5 min (spam hammering slow)
  */
+
+const MAX_FAILED_ATTEMPTS = 5
+const LOCK_MINUTES = 15
+
+// User-enumeration timing block — unknown email par bhi wahi bcrypt compare chalega
+const DUMMY_HASH = '$2a$10$C6UzMDM.H6dfI/f/IKcEeO7VTgxjrpU8k95Lxvtqk1PGCvXnLBDF6'
 
 interface GateUser {
   id: string
@@ -37,6 +52,16 @@ function distributorGate(u: GateUser): string | null {
 
 export async function POST(req: Request) {
   try {
+    // ---- IP rate limit (per-instance) ----
+    const ip = clientIp(req)
+    const rl = rateLimit(`login:${ip}`, { windowMs: 5 * 60 * 1000, max: 10 })
+    if (!rl.ok) {
+      return Response.json(
+        { error: `Bohat zyada login attempts — ${rl.retryAfterSec} second baad koshish karein` },
+        { status: 429, headers: { 'Retry-After': String(rl.retryAfterSec) } },
+      )
+    }
+
     const { email, password } = await req.json()
     if (!email || !password) return jsonError('Email aur password required hai')
 
@@ -44,8 +69,51 @@ export async function POST(req: Request) {
       where: { email: email.toLowerCase().trim() },
       include: { profile: true, parent: { select: { name: true } } },
     })
-    if (!user) return jsonError('Invalid credentials - ye email registered nahi hai', 401)
-    if (user.password !== password) return jsonError('Invalid credentials', 401)
+    if (!user) {
+      await bcrypt.compare(String(password), DUMMY_HASH) // timing equalizer
+      return jsonError('Invalid credentials - ye email registered nahi hai', 401)
+    }
+
+    // ---- Account lock check (DB-backed — saare serverless instances par effective) ----
+    if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
+      const mins = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60000)
+      return jsonError(`Account lock hai — ${mins} minute baad koshish karein`, 429)
+    }
+
+    // ---- Password verify: bcrypt hash YA legacy plaintext (lazy upgrade) ----
+    let passwordOk = false
+    const isHashed = user.password.startsWith('$2a$') || user.password.startsWith('$2b$') || user.password.startsWith('$2y$')
+    if (isHashed) {
+      passwordOk = await bcrypt.compare(String(password), user.password)
+    } else {
+      passwordOk = user.password === password
+    }
+
+    if (!passwordOk) {
+      const failed = user.failedAttempts + 1
+      const lock = failed >= MAX_FAILED_ATTEMPTS
+      await db.user.update({
+        where: { id: user.id },
+        data: {
+          failedAttempts: lock ? 0 : failed,
+          lockedUntil: lock ? new Date(Date.now() + LOCK_MINUTES * 60 * 1000) : user.lockedUntil,
+        },
+      })
+      if (lock) {
+        return jsonError(`Bohat galat attempts — account ${LOCK_MINUTES} minute ke liye lock ho gaya`, 429)
+      }
+      return jsonError('Invalid credentials', 401)
+    }
+
+    // ---- Success: attempt counter reset + legacy plaintext password ko hash mein upgrade ----
+    await db.user.update({
+      where: { id: user.id },
+      data: {
+        failedAttempts: 0,
+        lockedUntil: null,
+        ...(isHashed ? {} : { password: await bcrypt.hash(String(password), 10) }),
+      },
+    })
 
     // ---- Subscription gate ----
     if (user.role === 'DISTRIBUTOR') {

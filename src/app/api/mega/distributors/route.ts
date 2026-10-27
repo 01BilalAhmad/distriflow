@@ -1,16 +1,19 @@
+import bcrypt from 'bcryptjs'
 import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
+import { requireUser } from '@/lib/api-auth'
 
 /**
  * MEGA ADMIN — Distributor Accounts (Task 22)
+ * Task 95: identity cookie se (userId param/body IGNORE) — acting user hamesha MEGA_ADMIN hona chahiye.
  *
- * GET  /api/mega/distributors?userId=<megaAdminId>
+ * GET  /api/mega/distributors
  *   Sirf MEGA_ADMIN. DISTRIBUTOR ACCOUNTS ki list — subscription status ke sath.
  *   Business data (orders/shops/recovery) yahan KAHI nahi aata — sirf account meta.
  *
- * POST /api/mega/distributors  { userId, name, email, password?, phone?, businessName, city, region?, months?, creditLimit? }
+ * POST /api/mega/distributors  { name, email, password?, phone?, businessName, city, region?, months?, creditLimit? }
  *   Naya distributor account: User (DISTRIBUTOR) + DistributorProfile + subscription
- *   (start = aaj, expiry = aaj + months, default 1 month).
+ *   (start = aaj, expiry = aaj + months, default 1 month). Password bcrypt-hash store hota hai.
  */
 
 function addMonths(date: Date, months: number): Date {
@@ -23,12 +26,10 @@ const DAY = 86400000
 
 export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
-    if (!userId) return jsonError('userId required')
-
-    const me = await db.user.findUnique({ where: { id: userId } })
-    if (!me) return jsonError('User not found', 404)
+    // Task 95: identity cookie se (userId param IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const me = auth.user
     if (me.role !== 'MEGA_ADMIN') return jsonError('Sirf Mega Admin distributor accounts dekh sakta hai', 403)
 
     const dists = await db.user.findMany({
@@ -81,17 +82,18 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const me = auth.user
+    if (me.role !== 'MEGA_ADMIN') return jsonError('Sirf Mega Admin distributor account bana sakta hai', 403)
+
     const body = await req.json()
-    const { userId, name, email, password, phone, businessName, city, region, months, creditLimit } = body
-    if (!userId) return jsonError('userId required')
+    const { name, email, password, phone, businessName, city, region, months, creditLimit } = body
     if (!name?.trim() || !businessName?.trim() || !city?.trim()) {
       return jsonError('Owner naam, business name aur city zaroori hain')
     }
     if (!email?.trim()) return jsonError('Email (login) zaroori hai')
-
-    const me = await db.user.findUnique({ where: { id: userId } })
-    if (!me) return jsonError('User not found', 404)
-    if (me.role !== 'MEGA_ADMIN') return jsonError('Sirf Mega Admin distributor account bana sakta hai', 403)
 
     const normEmail = email.toLowerCase().trim()
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normEmail)) return jsonError('Email ka format sahi nahi hai')
@@ -109,11 +111,13 @@ export async function POST(req: Request) {
     if (!Number.isFinite(cl) || cl < 0) return jsonError('Credit limit sahi number honi chahiye')
 
     const now = new Date()
+    // Task 95: password kabhi plaintext store nahi — bcrypt hash (default demo123 bhi hash hota hai)
+    const pw = password?.trim() ? String(password).trim() : 'demo123'
     const created = await db.user.create({
       data: {
         name: name.trim(),
         email: normEmail,
-        password: password?.trim() ? String(password).trim() : 'demo123',
+        password: await bcrypt.hash(pw, 10),
         role: 'DISTRIBUTOR',
         phone: phone?.trim() || null,
         region: region?.trim() || null,

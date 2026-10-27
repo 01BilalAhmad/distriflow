@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
-import { jsonError, distributorTenant, megaBlocked } from '@/lib/dms-scope'
+import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser, type AuthedUser } from '@/lib/api-auth'
 import { getTenantIdForSalesman } from '@/lib/dms-pjp'
 import {
   matchShopCategory,
@@ -16,6 +17,7 @@ import {
 // Storage AppSetting KV (shopCategories JSON[]) — ZERO schema migration (Task 78 pattern).
 // DELETE par channel-scheme block: scheme silently ALL-channels par switch hona margin-loss
 // hai (Task 55 wala user decision: block).
+// Task 95: identity cookie se (userId param/body IGNORE — IDOR band).
 
 const MAX_NAME = 40
 
@@ -23,10 +25,17 @@ function cleanName(raw: unknown): string {
   return String(raw ?? '').trim()
 }
 
+// Task 95: distributorTenant(userId) helper ki jagah cookie-user par direct checks (same semantics)
+function distributorTenantOf(user: AuthedUser): { tenantId: string; error?: never } | { tenantId?: never; error: Response } {
+  const mb = megaBlocked(user.role)
+  if (mb) return { error: mb }
+  if (user.role !== 'DISTRIBUTOR') return { error: jsonError('Sirf Distributor apna catalog manage kar sakta hai', 403) }
+  if (!user.profile) return { error: jsonError('Distributor profile nahi mila', 404) }
+  return { tenantId: user.profile.id }
+}
+
 /** GET reader — distributor apni list, order booker apne distributor ki (tag form select ke liye) */
-async function tenantForRead(userId: string): Promise<string | null> {
-  const user = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-  if (!user) return null
+async function tenantForRead(user: AuthedUser): Promise<string | null> {
   const mb = megaBlocked(user.role)
   if (mb) return null
   if (user.role === 'DISTRIBUTOR' && user.profile) return user.profile.id
@@ -36,10 +45,9 @@ async function tenantForRead(userId: string): Promise<string | null> {
 
 export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
-    if (!userId) return jsonError('userId required')
-    const tenantId = await tenantForRead(userId)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const tenantId = await tenantForRead(auth.user)
     if (!tenantId) return jsonError('Shop categories sirf distributor/booker dekh sakte hain', 403)
 
     // First run: 4 default categories seed (idempotent — products jaisa hi pattern)
@@ -75,14 +83,17 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const t = distributorTenantOf(auth.user)
+    if ('error' in t) return t.error
+
     const body = await req.json()
-    const { userId, name } = body as { userId?: string; name?: string }
-    if (!userId) return jsonError('userId required')
+    const { name } = body as { name?: string }
     const clean = cleanName(name)
     if (!clean) return jsonError('Category ka naam required hai')
     if (clean.length > MAX_NAME) return jsonError(`Category ka naam ${MAX_NAME} characters se lamba nahi ho sakta`)
-    const t = await distributorTenant(userId)
-    if ('error' in t) return t.error
 
     const cats = await readShopCategories(t.tenantId)
     // Duplicate-safe: same naam (case/underscore-insensitive) wapas — naya row nahi banta
@@ -102,16 +113,19 @@ export async function POST(req: Request) {
 // ki dusri category par rename = MERGE: shops/schemes clash par move, purani list se hat jati hai.
 export async function PATCH(req: Request) {
   try {
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const t = distributorTenantOf(auth.user)
+    if ('error' in t) return t.error
+    const tenantId = t.tenantId
+
     const body = await req.json()
-    const { userId, from, to } = body as { userId?: string; from?: string; to?: string }
-    if (!userId) return jsonError('userId required')
+    const { from, to } = body as { from?: string; to?: string }
     const cleanFrom = cleanName(from)
     const cleanTo = cleanName(to)
     if (!cleanFrom || !cleanTo) return jsonError('Purana aur naya naam dono required hain')
     if (cleanTo.length > MAX_NAME) return jsonError(`Category ka naam ${MAX_NAME} characters se lamba nahi ho sakta`)
-    const t = await distributorTenant(userId)
-    if ('error' in t) return t.error
-    const tenantId = t.tenantId
 
     const cats = await readShopCategories(tenantId)
     const fromCat = matchShopCategory(cats, cleanFrom)
@@ -138,14 +152,17 @@ export async function PATCH(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
-    const name = searchParams.get('name')
-    const moveTo = (searchParams.get('moveTo') ?? 'GENERAL').trim() || 'GENERAL'
-    if (!userId || !name) return jsonError('userId aur name required hain')
-    const t = await distributorTenant(userId)
+    // Task 95: identity cookie se (userId param IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const t = distributorTenantOf(auth.user)
     if ('error' in t) return t.error
     const tenantId = t.tenantId
+
+    const { searchParams } = new URL(req.url)
+    const name = searchParams.get('name')
+    const moveTo = (searchParams.get('moveTo') ?? 'GENERAL').trim() || 'GENERAL'
+    if (!name) return jsonError('name required hai')
 
     const cats = await readShopCategories(tenantId)
     const cat = matchShopCategory(cats, name)

@@ -1,25 +1,25 @@
 import { db } from '@/lib/db'
 import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
+import { requireUser } from '@/lib/api-auth'
 import { fulfillOrder } from '@/lib/dms-fulfill'
 import { orderGrandPayable } from '@/lib/dms-order-calc'
 import { persistLiveRecalc } from '@/lib/dms-live-recalc'
 
-/** GET /api/summaries?userId=&status= — list delivery summaries (scoped by role) */
+/** GET /api/summaries?status= — list delivery summaries (cookie user se scoped by role) */
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
     const status = searchParams.get('status')
-    if (!userId) return jsonError('userId required')
 
-    const user = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-    if (!user) return jsonError('User not found', 404)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
     const mb = megaBlocked(user.role)
     if (mb) return mb
 
     const where =
       user.role === 'SALESMAN'
-        ? { salesmanId: userId }
+        ? { salesmanId: user.id }
         : { distributorId: user.profile?.id }
     const fullWhere = status && status !== 'ALL' ? { ...where, status } : where
 
@@ -70,7 +70,6 @@ export async function GET(req: Request) {
 }
 
 interface ProcessBody {
-  userId?: string
   orderIds: string[]
   deliveryDate?: string
   notes?: string
@@ -85,6 +84,14 @@ interface ProcessBody {
  */
 export async function POST(req: Request) {
   try {
+    // Task 95: identity cookie se (pehle POST bilkul unauthenticated tha — koi bhi van out kar sakta tha)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const me = auth.user
+    const mb = megaBlocked(me.role)
+    if (mb) return mb
+    if (me.role === 'SALESMAN') return jsonError('Van out sirf distributor kar sakta hai', 403)
+
     const body = await req.json() as ProcessBody
     const { orderIds, deliveryDate, notes, processAnyway } = body
     if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
@@ -267,39 +274,45 @@ export async function POST(req: Request) {
       // Process hone se pehle har bill CURRENT schemes par re-calc + persist hoti hai —
       // isliye processed bill hamesha "us waqt ke latest scheme" par freeze hoti hai.
       // Unprocess → dobara process par purana snapshot NAHI, naya scheme lagta hai.
+      // (Task 95: recalc tx se BAHAAR — idempotent hai; stock+delivery neeche ek atomic tx mein)
       for (const oid of processedOrderIds) {
         const o = orders.find((x) => x.id === oid)
         if (o) await persistLiveRecalc(o)
       }
 
-      for (const o of seqOrders) {
-        const ov = overrideByOrder.get(o.id)
-        if (!ov) continue // skipped — ye bill CONFIRMED rehti hai (unprocessed)
-        await fulfillOrder(o.id, ov)
-      }
-      await db.order.updateMany({
-        where: { id: { in: processedOrderIds } },
-        data: { status: 'PROCESSING' },
-      })
+      // Task 95 ATOMIC VAN OUT: FEFO deduction + Delivery challans + PROCESSING flags +
+      // Summary — SAB ek interactive transaction mein. Pehle har fulfill apni autocommit
+      // mein tha: crash par aadha van load + stock deduct ho kar rah jata tha (no rollback).
+      const summary = await db.$transaction(async (tx) => {
+        for (const o of seqOrders) {
+          const ov = overrideByOrder.get(o.id)
+          if (!ov) continue // skipped — ye bill CONFIRMED rehti hai (unprocessed)
+          await fulfillOrder(o.id, ov, tx)
+        }
+        await tx.order.updateMany({
+          where: { id: { in: processedOrderIds } },
+          data: { status: 'PROCESSING' },
+        })
 
-      const processedOrders = orders.filter((o) => overrideByOrder.has(o.id))
-      const subtotal = processedOrders.reduce((s, o) => s + o.total, 0)
-      const seq = await nextSeq('summary')
-      const summary = await db.deliverySummary.create({
-        data: {
-          summaryNo: `STM-${seq}`,
-          salesmanId,
-          warehouseId: wh.id,
-          distributorId,
-          orderDate: orders[0].orderDate,
-          deliveryDate: deliveryDt,
-          status: 'UNSETTLED',
-          subtotal,
-          notes: notes ?? null,
-          orders: { connect: processedOrderIds.map((id) => ({ id })) },
-        },
-        include: { orders: true },
-      })
+        const processedOrders = orders.filter((o) => overrideByOrder.has(o.id))
+        const subtotal = processedOrders.reduce((s, o) => s + o.total, 0)
+        const seq = await nextSeq('summary', tx)
+        return tx.deliverySummary.create({
+          data: {
+            summaryNo: `STM-${seq}`,
+            salesmanId,
+            warehouseId: wh.id,
+            distributorId,
+            orderDate: orders[0].orderDate,
+            deliveryDate: deliveryDt,
+            status: 'UNSETTLED',
+            subtotal,
+            notes: notes ?? null,
+            orders: { connect: processedOrderIds.map((id) => ({ id })) },
+          },
+          include: { orders: true },
+        })
+      }, { timeout: 30000 })
 
       return Response.json({
         summary: {
@@ -319,38 +332,42 @@ export async function POST(req: Request) {
     // ---- Task 86: PROCESS-TIME LIVE REFRESH ----
     // Fulfill se pehle har bill CURRENT schemes se re-calc + persist (snapshot refresh)
     // — process ke baad bill IN values par frozen (backend scheme badle to asar nahi).
+    // (Task 95: recalc tx se bahar — idempotent; poora van-out neeche ek atomic tx mein)
     for (const o of orders) {
       await persistLiveRecalc(o)
     }
 
-    // Fulfill every invoice (FEFO deduction + Delivery challan), then mark PROCESSING
+    // Task 95 ATOMIC VAN OUT: FEFO deduction + Delivery challans + PROCESSING flags +
+    // Summary — SAB ek transaction mein (partial-failure par poora rollback).
     const warehouseId = wh.id
-    for (const o of seqOrders) {
-      await fulfillOrder(o.id)
-    }
-    await db.order.updateMany({
-      where: { id: { in: orders.map((o) => o.id) } },
-      data: { status: 'PROCESSING' },
-    })
+    const summary = await db.$transaction(async (tx) => {
+      for (const o of seqOrders) {
+        await fulfillOrder(o.id, undefined, tx)
+      }
+      await tx.order.updateMany({
+        where: { id: { in: orders.map((o) => o.id) } },
+        data: { status: 'PROCESSING' },
+      })
 
-    const subtotal = orders.reduce((s, o) => s + o.total, 0)
-    const seq = await nextSeq('summary')
+      const subtotal = orders.reduce((s, o) => s + o.total, 0)
+      const seq = await nextSeq('summary', tx)
 
-    const summary = await db.deliverySummary.create({
-      data: {
-        summaryNo: `STM-${seq}`,
-        salesmanId,
-        warehouseId,
-        distributorId,
-        orderDate: orders[0].orderDate,
-        deliveryDate: deliveryDt,
-        status: 'UNSETTLED',
-        subtotal,
-        notes: notes ?? null,
-        orders: { connect: orders.map((o) => ({ id: o.id })) },
-      },
-      include: { orders: true },
-    })
+      return tx.deliverySummary.create({
+        data: {
+          summaryNo: `STM-${seq}`,
+          salesmanId,
+          warehouseId,
+          distributorId,
+          orderDate: orders[0].orderDate,
+          deliveryDate: deliveryDt,
+          status: 'UNSETTLED',
+          subtotal,
+          notes: notes ?? null,
+          orders: { connect: orders.map((o) => ({ id: o.id })) },
+        },
+        include: { orders: true },
+      })
+    }, { timeout: 30000 })
 
     return Response.json({
       summary: {

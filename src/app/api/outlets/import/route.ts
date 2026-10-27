@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
-import { jsonError, distributorTenant } from '@/lib/dms-scope'
+import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser } from '@/lib/api-auth'
 import { matchShopCategory, readShopCategories } from '@/lib/dms-settings'
 
 // Task 30 — BULK SHOPS IMPORT: Excel/CSV se ek sath saari shops import.
@@ -20,15 +21,20 @@ function sanitizeVisitDays(raw: unknown): string {
 
 export async function POST(req: Request) {
   try {
+    // Task 95: identity cookie se (pehle body.userId se distributorTenant hota tha — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const me = auth.user
+    const mb = megaBlocked(me.role)
+    if (mb) return mb
+    if (me.role !== 'DISTRIBUTOR') return jsonError('Sirf Distributor apna catalog manage kar sakta hai', 403)
+    if (!me.profile) return jsonError('Distributor profile nahi mila', 404)
+    const tenantId = me.profile.id
+
     const body = await req.json()
-    const { userId, rows } = body as { userId?: string; rows?: Record<string, unknown>[] }
-    if (!userId) return jsonError('userId required')
+    const { rows } = body as { userId?: string; rows?: Record<string, unknown>[] } // userId legacy — IGNORE
     if (!Array.isArray(rows) || rows.length === 0) return jsonError('Import rows khali hain')
     if (rows.length > 500) return jsonError('Ek dafa mein max 500 shops import ho sakti hain')
-
-    const t = await distributorTenant(userId)
-    if ('error' in t) return t.error
-    const tenantId = t.tenantId
 
     // Tenant ke bookers (salesman column match ke liye)
     const profile = await db.distributorProfile.findUnique({ where: { id: tenantId } })

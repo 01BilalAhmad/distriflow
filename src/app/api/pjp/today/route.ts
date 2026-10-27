@@ -1,11 +1,12 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser } from '@/lib/api-auth'
 import { getTenantIdForSalesman, getPjpSettings, karachiDayCode, karachiDayBounds, dayMatches } from '@/lib/dms-pjp'
 
 /**
  * Task 82: AAJ KI ROUTE — AUTO (manual daily plan khatam).
  *
- * GET /api/pjp/today?userId=<salesmanId>
+ * GET /api/pjp/today (Task 95: identity cookie se — userId param IGNORE, SALESMAN-only)
  *  - Outlet pe assign booker + visitDays se aaj ki shops compute hoti hain (empty visitDays = har roz)
  *  - PJPPlan + Visits AUTO get-or-create hote hain (check-in/out + tracking isi se chalta hai)
  *  - Jumma OFF (admin toggle): fridayOff=true + visits [] — booker sirf unplanned order kar sakta hai
@@ -14,12 +15,10 @@ import { getTenantIdForSalesman, getPjpSettings, karachiDayCode, karachiDayBound
 
 export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
-    if (!userId) return jsonError('userId required')
-
-    const user = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-    if (!user) return jsonError('User not found', 404)
+    // Task 95: identity cookie se (userId param IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
     const mb = megaBlocked(user.role)
     if (mb) return mb
     if (user.role !== 'SALESMAN') return jsonError('Sirf order booker ki aaj ki route hoti hai', 403)

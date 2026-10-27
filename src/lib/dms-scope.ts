@@ -103,17 +103,44 @@ const SEQ_CONFIG = {
   purchase: { table: 'purchaseInvoice', field: 'invoiceNo', prefix: 'PIN-', base: 7000 },
 } as const
 
+/**
+ * Sequence generator — Task 95 (P1 perf) COUNTER TABLE version:
+ *
+ * PEHLE: har document insert par poora table scan (findMany sirf doc-number column) +
+ * JS max + 1 — Order table 50k rows par har booking ~50k rows load karti thi (hot path).
+ *
+ * AB: Counter table par atomic `UPDATE ... value = value + 1 RETURNING` (single query).
+ * - Pehli dafa (counter row nahi): ek dafa legacy max scan karke seed hota hai —
+ *   uske baad kabhi table scan nahi.
+ * - Transaction client ke andar row UPDATE lock hold karta hai — concurrent van-out /
+ *   recovery batch serial hota hai (unique constraint violation kabhi nahi).
+ * - upsert race-safe hai (Postgres INSERT ... ON CONFLICT DO UPDATE).
+ */
 export async function nextSeq(model: keyof typeof SEQ_CONFIG, client: DbClient = db): Promise<number> {
   const cfg = SEQ_CONFIG[model]
+  // create par bhi max+1 (legacy semantics) — warna pehli call par existing doc no. se P2002 collision
+  const counter = await client.counter.upsert({
+    where: { name: cfg.table },
+    update: { value: { increment: 1 } },
+    create: {
+      name: cfg.table,
+      value: Math.max(cfg.base, await scanMaxSeq(cfg, client)) + 1,
+    },
+  })
+  return counter.value
+}
+
+/** Legacy seed — sirf pehli dafa: table se max numeric suffix (gapped numbers OK) */
+async function scanMaxSeq(cfg: (typeof SEQ_CONFIG)[keyof typeof SEQ_CONFIG], client: DbClient): Promise<number> {
   const delegate = (client as unknown as Record<string, { findMany: (args: { select: Record<string, boolean> }) => Promise<Record<string, string | null>[]> }>)[cfg.table]
   const rows = await delegate.findMany({ select: { [cfg.field]: true } })
 
-  let max: number = cfg.base
+  let max: number = 0
   for (const r of rows) {
     const no = r[cfg.field]
     if (!no || !no.startsWith(cfg.prefix)) continue
     const n = parseInt(no.slice(cfg.prefix.length), 10)
     if (!isNaN(n) && n > max) max = n
   }
-  return max + 1
+  return max
 }

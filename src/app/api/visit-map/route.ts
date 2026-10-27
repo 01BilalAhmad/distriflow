@@ -1,9 +1,10 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser, salesmanGuard } from '@/lib/api-auth'
 
 /**
  * Task 36 — Visit Map API.
- * GET /api/visit-map?userId=&date=YYYY-MM-DD(&salesmanId=)
+ * GET /api/visit-map?date=YYYY-MM-DD(&salesmanId=)   (Task 95: userId param IGNORE — cookie identity)
  *
  * Day-scoped PJP visits + outlet geo coords for map plotting:
  * - DISTRIBUTOR: apne saare order bookers ke plans (salesmanId filter optional)
@@ -26,15 +27,19 @@ function dayRange(dateStr: string | null): { gte: Date; lt: Date } {
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
     const dateParam = searchParams.get('date')
-    const salesmanFilter = searchParams.get('salesmanId')
-    if (!userId) return jsonError('userId required')
 
-    const user = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-    if (!user) return jsonError('User not found', 404)
+    // Task 95: identity cookie se (userId param IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
     const mb = megaBlocked(user.role)
     if (mb) return mb
+
+    // Task 95: SALESMAN hamesha apne plans — doosre booker ka filter 403
+    const sg = salesmanGuard(user, searchParams.get('salesmanId'))
+    if ('error' in sg) return sg.error
+    const salesmanFilter = sg.value
 
     let scopeSalesmanIds: string[]
     if (user.role === 'SALESMAN') {

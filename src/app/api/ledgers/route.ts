@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser } from '@/lib/api-auth'
 
 /**
  * GET /api/ledgers?userId=&outletId= — shop keepers ledger (udhaar khata).
@@ -9,18 +10,18 @@ import { jsonError, megaBlocked } from '@/lib/dms-scope'
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
     const outletId = searchParams.get('outletId')
-    if (!userId) return jsonError('userId required')
 
-    const user = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-    if (!user) return jsonError('User not found', 404)
+    // Task 95: identity cookie se (userId param IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
     const mb = megaBlocked(user.role)
     if (mb) return mb
 
     // Scope outlets by role
     let outletWhere: Record<string, unknown> = {}
-    if (user.role === 'SALESMAN') outletWhere = { salesmanId: userId }
+    if (user.role === 'SALESMAN') outletWhere = { salesmanId: user.id }
     else outletWhere = { distributorId: user.profile?.id }
 
     if (outletId) {

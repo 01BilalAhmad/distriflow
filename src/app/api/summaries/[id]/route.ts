@@ -1,9 +1,17 @@
 import { db } from '@/lib/db'
-import { jsonError } from '@/lib/dms-scope'
+import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser, tenantMismatch } from '@/lib/api-auth'
 
 /** GET /api/summaries/[id] — full detail: invoices, product load summary, settlements */
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // Task 95: identity cookie se (pehle bilkul unauthenticated tha)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
+    const mb = megaBlocked(user.role)
+    if (mb) return mb
+
     const { id } = await params
     const summary = await db.deliverySummary.findUnique({
       where: { id },
@@ -23,6 +31,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       },
     })
     if (!summary) return jsonError('Summary not found', 404)
+    // Task 95: tenant ownership — summary usi distributor ki honi chahiye
+    const tm = await tenantMismatch(user, summary.distributorId)
+    if (tm) return tm
 
     // Product-wise load summary across all invoices (what the delivery man pulls from warehouse)
     const prodMap = new Map<string, { productId: string; sku: string; name: string; brand: string; unitsPerCarton: number; boxesPerCarton: number; pcsPerBox: number; qty: number; freeQty: number; rate: number; amount: number }>()
@@ -147,11 +158,21 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 /** PATCH /api/summaries/[id] — edit delivery date (only while UNSETTLED) */
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // Task 95: identity cookie se (pehle bilkul unauthenticated tha)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
+    const mb = megaBlocked(user.role)
+    if (mb) return mb
+
     const { id } = await params
     const body = await req.json() as { deliveryDate?: string; notes?: string }
 
     const summary = await db.deliverySummary.findUnique({ where: { id } })
     if (!summary) return jsonError('Summary not found', 404)
+    // Task 95: tenant ownership — summary usi distributor ki honi chahiye
+    const tm = await tenantMismatch(user, summary.distributorId)
+    if (tm) return tm
     if (summary.status !== 'UNSETTLED') return jsonError('Settled summary edit nahi ho sakti')
 
     const data: { deliveryDate?: Date; notes?: string } = {}

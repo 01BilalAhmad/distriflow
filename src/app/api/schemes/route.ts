@@ -1,11 +1,13 @@
 import { db } from '@/lib/db'
-import { jsonError, tenantProfileId, distributorTenant } from '@/lib/dms-scope'
+import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser, type AuthedUser } from '@/lib/api-auth'
 
 /**
  * Task 23 — SCHEMES per-tenant: har distributor apni schemes/discounts khud banata hai.
- * GET  ?userId= -> sirf USI tenant ki schemes (salesman => owner distributor ki).
- * POST { userId, ... } -> DISTRIBUTOR apni nayi scheme banata hai.
- * PATCH { userId, id, ... } -> apni scheme edit/toggle.
+ * GET  -> sirf USI tenant ki schemes (salesman => owner distributor ki).
+ * POST -> DISTRIBUTOR apni nayi scheme banata hai.
+ * PATCH -> apni scheme edit/toggle.
+ * Task 95: identity cookie se (userId param/body IGNORE — IDOR band).
  *
  * Task 55 — CATEGORY-WIDE + FILER SCOPE:
  * - categoryId: "Apply To: Whole Category" — puri category par ek discount (null = filter off)
@@ -13,16 +15,35 @@ import { jsonError, tenantProfileId, distributorTenant } from '@/lib/dms-scope'
  * - Engine (computeOrderLines) FULL STACK (Task 58): jitni schemes bill qualify karein
  *   (product + channel + category + filerScope match) wo SAB lagti hain — har ek apni row
  */
+
+// Task 95: tenantProfileId(userId) helper ki jagah cookie-user se tenant resolve
+// (same semantics: apna profile, warna salesman parent walk-up, warna null)
+async function tenantProfileOf(user: AuthedUser): Promise<string | null> {
+  if (user.profile) return user.profile.id
+  if (user.parentId) {
+    const owner = await db.user.findUnique({ where: { id: user.parentId }, include: { profile: true } })
+    return owner?.profile?.id ?? null
+  }
+  return null
+}
+
+// Task 95: distributorTenant(userId) helper ki jagah cookie-user par direct checks (same semantics)
+function distributorTenantOf(user: AuthedUser): { tenantId: string; error?: never } | { tenantId?: never; error: Response } {
+  const mb = megaBlocked(user.role)
+  if (mb) return { error: mb }
+  if (user.role !== 'DISTRIBUTOR') return { error: jsonError('Sirf Distributor apna catalog manage kar sakta hai', 403) }
+  if (!user.profile) return { error: jsonError('Distributor profile nahi mila', 404) }
+  return { tenantId: user.profile.id }
+}
 const FILER_SCOPES = ['FILER', 'NON_FILER'] as const
 const normScope = (v: unknown): string | null => (typeof v === 'string' && (FILER_SCOPES as readonly string[]).includes(v) ? v : null)
 
 export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
-    if (!userId) return jsonError('userId required')
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
 
-    const tenantId = await tenantProfileId(userId)
+    const tenantId = await tenantProfileOf(auth.user)
     if (!tenantId) return Response.json({ schemes: [] })
 
     const schemes = await db.scheme.findMany({
@@ -66,12 +87,14 @@ async function validCategory(categoryId: string | null | undefined, tenantId: st
 export async function POST(req: Request) {
   try {
     const body = await req.json()
-    const { name, description, type, channel, productId, categoryId, filerScope, value, buyQty, freeQty, startDate, endDate, userId } = body
-    if (!userId) return jsonError('userId required')
+    const { name, description, type, channel, productId, categoryId, filerScope, value, buyQty, freeQty, startDate, endDate } = body
     if (!name || !type) return jsonError('Scheme name aur type required hain')
 
     // Task 23: sirf DISTRIBUTOR apni scheme bana sakta hai — tenant ke product par hi
-    const t = await distributorTenant(userId)
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const t = distributorTenantOf(auth.user)
     if ('error' in t) return t.error
     const tenantId = t.tenantId
     if (productId) {
@@ -107,12 +130,14 @@ export async function POST(req: Request) {
 
 export async function PATCH(req: Request) {
   try {
-    const { id, isActive, userId, name, description, type, channel, productId, categoryId, filerScope, value, buyQty, freeQty, startDate, endDate } = await req.json()
+    const { id, isActive, name, description, type, channel, productId, categoryId, filerScope, value, buyQty, freeQty, startDate, endDate } = await req.json()
     if (!id) return jsonError('Scheme id required')
-    if (!userId) return jsonError('userId required')
 
     // ownership — sirf apni scheme edit/toggle
-    const t = await distributorTenant(userId)
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const t = distributorTenantOf(auth.user)
     if ('error' in t) return t.error
     const existing = await db.scheme.findUnique({ where: { id } })
     if (!existing) return jsonError('Scheme nahi mili', 404)

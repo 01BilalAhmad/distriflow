@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
-import { jsonError } from '@/lib/dms-scope'
+import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser, tenantMismatch } from '@/lib/api-auth'
 import { restockStock } from '@/lib/dms-inventory'
 
 /**
@@ -14,18 +15,23 @@ import { restockStock } from '@/lib/dms-inventory'
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // Task 95: identity cookie se (pehle body optional tha — ab identity cookie se, unauthenticated band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
+    const mb = megaBlocked(user.role)
+    if (mb) return mb
+
     const { id } = await params
-    let userId: string | null = null
-    try {
-      const body = await req.json() as { userId?: string }
-      userId = body.userId ?? null
-    } catch { /* body optional */ }
 
     const summary = await db.deliverySummary.findUnique({
       where: { id },
       include: { orders: { select: { id: true, orderNo: true, status: true } }, settlements: { select: { id: true } } },
     })
     if (!summary) return jsonError('Summary not found', 404)
+    // Task 95: tenant ownership — summary usi distributor ki honi chahiye
+    const tm = await tenantMismatch(user, summary.distributorId)
+    if (tm) return tm
     if (summary.status === 'SETTLED') {
       return jsonError('Ye summary SETTLE ho chuki hai — settled summary un-process nahi ho sakti (payment/receipt book ho chuke hain)')
     }
@@ -46,7 +52,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       let restockedPcs = 0
       for (const d of deliveries) {
         for (const it of d.items) {
-          await restockStock(summary.warehouseId, it.productId, it.qty, `Un-process ${summary.summaryNo} (${d.deliveryNo})`, userId, tx)
+          await restockStock(summary.warehouseId, it.productId, it.qty, `Un-process ${summary.summaryNo} (${d.deliveryNo})`, user.id, tx)
           restockedPcs += it.qty
         }
       }

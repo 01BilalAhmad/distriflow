@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
-import { jsonError, tenantProfileId, distributorTenant } from '@/lib/dms-scope'
+import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser, type AuthedUser } from '@/lib/api-auth'
 
 const MAX_LOGO_LEN = 700_000 // ~700KB base64 guard
 
@@ -13,20 +14,39 @@ interface CompanyBody {
   notes?: string
   logo?: string | null
   isActive?: boolean
-  userId?: string
+}
+
+// Task 95: tenantProfileId(userId) helper ki jagah cookie-user se tenant resolve
+// (same semantics: apna profile, warna salesman parent walk-up, warna null)
+async function tenantProfileOf(user: AuthedUser): Promise<string | null> {
+  if (user.profile) return user.profile.id
+  if (user.parentId) {
+    const owner = await db.user.findUnique({ where: { id: user.parentId }, include: { profile: true } })
+    return owner?.profile?.id ?? null
+  }
+  return null
+}
+
+// Task 95: distributorTenant(userId) helper ki jagah cookie-user par direct checks (same semantics)
+function distributorTenantOf(user: AuthedUser): { tenantId: string; error?: never } | { tenantId?: never; error: Response } {
+  const mb = megaBlocked(user.role)
+  if (mb) return { error: mb }
+  if (user.role !== 'DISTRIBUTOR') return { error: jsonError('Sirf Distributor apna catalog manage kar sakta hai', 403) }
+  if (!user.profile) return { error: jsonError('Distributor profile nahi mila', 404) }
+  return { tenantId: user.profile.id }
 }
 
 /**
- * GET /api/companies?userId= — companies with details, product/salesman counts + payable balance
+ * GET /api/companies — companies with details, product/salesman counts + payable balance
  * Task 23: sirf caller ke APNI tenant ki companies (naye distributor ki list khali hoti hai).
+ * Task 95: identity cookie se (userId param IGNORE — IDOR band).
  */
 export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
-    if (!userId) return jsonError('userId required')
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
 
-    const tenantId = await tenantProfileId(userId)
+    const tenantId = await tenantProfileOf(auth.user)
     if (!tenantId) return Response.json({ companies: [], totals: { payable: 0, purchaseTotal: 0, count: 0 } })
 
     const companies = await db.company.findMany({
@@ -77,14 +97,16 @@ export async function GET(req: Request) {
 /** POST /api/companies — nayi company (logo + details ke saath) — DISTRIBUTOR apni tenant mein */
 export async function POST(req: Request) {
   try {
-    const b = await req.json() as CompanyBody
-    if (!b.userId) return jsonError('userId required hai')
-    if (!b.name?.trim()) return jsonError('Company name required hai')
-    if (b.logo && b.logo.length > MAX_LOGO_LEN) return jsonError('Logo bohat bara hai — chhoti image use karein')
-
-    const t = await distributorTenant(b.userId)
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const t = distributorTenantOf(auth.user)
     if ('error' in t) return t.error
     const tenantId = t.tenantId
+
+    const b = await req.json() as CompanyBody
+    if (!b.name?.trim()) return jsonError('Company name required hai')
+    if (b.logo && b.logo.length > MAX_LOGO_LEN) return jsonError('Logo bohat bara hai — chhoti image use karein')
 
     // duplicate name — SIRF isi tenant ke andar (do distributors ki same-name company allowed)
     const exists = await db.company.findFirst({ where: { name: b.name.trim(), distributorId: tenantId } })

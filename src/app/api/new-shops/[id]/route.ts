@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser } from '@/lib/api-auth'
 import { matchShopCategory, readShopCategories } from '@/lib/dms-settings'
 
 const DAY_CODES = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'] as const
@@ -13,22 +14,21 @@ function sanitizeVisitDays(raw: unknown): string | undefined {
 /**
  * Task 85 — NEW SHOP EDIT / APPROVE (admin)
  * PATCH /api/new-shops/[id]
- * Body: { userId, ...fields }                    => shop edit (approval se pehle BHI, baad MEIN bhi)
- * Body: { userId, action: 'APPROVE' }            => status PENDING -> APPROVED (shop Outlets/route/orders mein aa jati hai)
+ * Body: { action: 'APPROVE' } | { ...fields }   (userId legacy — IGNORE, identity cookie se)
  * DISTRIBUTOR-only, sirf apne tenant ki shop.
  */
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params
-    const body = await req.json()
-    const { userId } = body as { userId?: string; action?: string }
-    if (!userId) return jsonError('userId required')
-
-    const user = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-    if (!user) return jsonError('User not found', 404)
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
     const mb = megaBlocked(user.role)
     if (mb) return mb
     if (user.role !== 'DISTRIBUTOR' || !user.profile) return jsonError('Sirf distributor shop edit/approve kar sakta hai', 403)
+
+    const { id } = await params
+    const body = await req.json() as { userId?: string; action?: string } // userId legacy — IGNORE
 
     const outlet = await db.outlet.findUnique({ where: { id } })
     if (!outlet || outlet.distributorId !== user.profile.id) return jsonError('Shop not found', 404)

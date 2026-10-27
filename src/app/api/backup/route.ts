@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
+import { requireUser } from '@/lib/api-auth'
 
 /**
  * Task 36 — Backup & Safety (MEGA_ADMIN only).
@@ -31,10 +32,8 @@ function isCloudDb() {
   return url.startsWith('postgres://') || url.startsWith('postgresql://')
 }
 
-async function requireMegaAdmin(userId: string | null) {
-  if (!userId) return { error: jsonError('userId required') }
-  const user = await db.user.findUnique({ where: { id: userId } })
-  if (!user) return { error: jsonError('User not found', 404) }
+/** Task 95: MEGA_ADMIN guard — identity cookie session se (userId param/body IGNORE) */
+function requireMegaAdmin(user: { role: string }) {
   if (user.role !== 'MEGA_ADMIN') return { error: jsonError('Backup sirf Mega Admin kar sakta hai', 403) }
   return { user }
 }
@@ -59,7 +58,10 @@ export async function GET(req: Request) {
       return Response.json({ cloudMode: true, message: CLOUD_BACKUP_MSG, backups: [] })
     }
     const { searchParams } = new URL(req.url)
-    const guard = await requireMegaAdmin(searchParams.get('userId'))
+    // Task 95: identity cookie se (userId param IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const guard = requireMegaAdmin(auth.user)
     if ('error' in guard) return guard.error
 
     const download = searchParams.get('download')
@@ -90,8 +92,10 @@ export async function POST(req: Request) {
     if (isCloudDb()) {
       return Response.json({ cloudMode: true, error: CLOUD_BACKUP_MSG }, { status: 400 })
     }
-    const b = (await req.json()) as { userId?: string }
-    const guard = await requireMegaAdmin(b.userId ?? null)
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const guard = requireMegaAdmin(auth.user)
     if ('error' in guard) return guard.error
 
     fs.mkdirSync(BACKUP_DIR, { recursive: true })

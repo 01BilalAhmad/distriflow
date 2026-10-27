@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
+import { requireUser, tenantMismatch } from '@/lib/api-auth'
 import { fulfillOrder } from '@/lib/dms-fulfill'
 import { computeOrderLines, recalcManualDiscount, applyManualMerge, orderGrandPayable, type CalcIncomingItem } from '@/lib/dms-order-calc'
 import { advanceTaxFor, getTaxRates, getDistributorAddress } from '@/lib/dms-settings'
@@ -8,6 +9,11 @@ import { liveRecalcOrder } from '@/lib/dms-live-recalc'
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // Task 95: identity cookie se (pehle bilkul unauthenticated tha)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
+
     const { id } = await params
     const order = await db.order.findUnique({
       where: { id },
@@ -21,6 +27,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       },
     })
     if (!order) return jsonError('Order not found', 404)
+    // Task 95: tenant ownership — order usi distributor ka hona chahiye
+    const tm = await tenantMismatch(user, order.distributorId)
+    if (tm) return tm
     // Task 78b: bill print header par Address (AppSetting KV — settings page se, zero migration)
     const distributorAddress = await getDistributorAddress(order.distributorId)
 
@@ -115,12 +124,20 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 /** Deliver order (full) with FEFO stock deduction, or cancel */
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // Task 95: identity cookie se (pehle bilkul unauthenticated tha)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
+
     const { id } = await params
     const body = await req.json()
     const { action } = body
 
     const order = await db.order.findUnique({ where: { id }, include: { items: true } })
     if (!order) return jsonError('Order not found', 404)
+    // Task 95: tenant ownership — order usi distributor ka hona chahiye
+    const tm = await tenantMismatch(user, order.distributorId)
+    if (tm) return tm
 
     if (action === 'CANCEL') {
       const updated = await db.order.update({ where: { id }, data: { status: 'CANCELLED' } })

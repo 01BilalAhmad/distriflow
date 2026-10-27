@@ -1,10 +1,11 @@
 import { db } from '@/lib/db'
-import { jsonError, nextSeq } from '@/lib/dms-scope'
+import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
+import { requireUser, tenantMismatch } from '@/lib/api-auth'
 import { restockStock } from '@/lib/dms-inventory'
 
 interface LateReturnItem { productId: string; qty: number }
 interface LateReturnBody {
-  userId?: string
+  userId?: string // legacy — IGNORE
   orderId: string
   reason?: string // UNSOLD | DAMAGED | EXPIRED
   items: LateReturnItem[]
@@ -26,6 +27,13 @@ const round2 = (v: number) => Math.round(v * 100) / 100
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // Task 95: identity cookie se (pehle bilkul unauthenticated tha)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
+    const mb = megaBlocked(user.role)
+    if (mb) return mb
+
     const { id } = await params
     const body = await req.json() as LateReturnBody
     if (!body.orderId) return jsonError('Order required hai')
@@ -38,6 +46,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       include: { orders: { include: { items: { include: { product: { select: { name: true } } } }, outlet: { select: { name: true } } } } },
     })
     if (!summary) return jsonError('Summary not found', 404)
+    // Task 95: tenant ownership — summary usi distributor ki honi chahiye
+    const tm = await tenantMismatch(user, summary.distributorId)
+    if (tm) return tm
     if (summary.status !== 'SETTLED') {
       return jsonError('Ye summary settled nahi hai — unsettled summaries ke liye settlement form ka Return button use karein')
     }
@@ -79,11 +90,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (lines.length === 0) return jsonError('Return qty 0 hai')
     returnValue = round2(returnValue)
 
-    let actorName: string | null = null
-    if (body.userId) {
-      const actor = await db.user.findUnique({ where: { id: body.userId } })
-      actorName = actor?.name ?? null
-    }
+    // Task 95: actor cookie user se (pehle body.userId se aata tha)
+    const actorName = user.name
 
     const result = await db.$transaction(async (tx) => {
       const seq = await nextSeq('return', tx)
@@ -103,7 +111,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
       // Stock wapas summary (van) warehouse mein
       for (const l of lines) {
-        await restockStock(summary.warehouseId, l.productId, l.qty, `Late return ${returnNo} — ${order.orderNo}`, body.userId, tx)
+        await restockStock(summary.warehouseId, l.productId, l.qty, `Late return ${returnNo} — ${order.orderNo}`, user.id, tx)
       }
 
       // Task 29: settlement row pehle load — pro-rata tax reversal isi se compute hota hai

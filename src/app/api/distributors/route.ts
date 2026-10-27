@@ -1,15 +1,14 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser } from '@/lib/api-auth'
 import type { HierarchyNode } from '@/lib/dms-types'
 
 export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
-    if (!userId) return jsonError('userId required')
-
-    const me = await db.user.findUnique({ where: { id: userId } })
-    if (!me) return jsonError('User not found', 404)
+    // Task 95: identity cookie se (userId param IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const me = auth.user
     const mb = megaBlocked(me.role)
     if (mb) return mb
 

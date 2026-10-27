@@ -1,33 +1,36 @@
+import bcrypt from 'bcryptjs'
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser } from '@/lib/api-auth'
 
 /**
  * PATCH /api/field-force/[id] — order booker edit (Task 21-n, Task 22 update).
- * Body: { userId (caller), companyId?, name?, phone?, email?, region?, password? }
+ * Body: { companyId?, name?, phone?, email?, region?, password? }
  * - companyId: DISTRIBUTOR apne booker ko company assign karta hai
  * - name/phone/email/region/password: sirf apne (parentId check) bookers
  * - Email unique hai — duplicate block. Password blank = koi change nahi.
+ * Task 95: identity cookie se (body userId IGNORE — IDOR band); password bcrypt-hash store hota hai.
  */
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
+    // Task 95: identity cookie se — DISTRIBUTOR sirf APNE bookers edit kar sakta hai
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const caller = auth.user
+    const mb = megaBlocked(caller.role)
+    if (mb) return mb
+    if (caller.role !== 'DISTRIBUTOR') {
+      return jsonError('Permission nahi hai', 403)
+    }
+
     const body = await req.json() as {
-      userId?: string
       companyId?: string | null
       name?: string
       phone?: string
       email?: string
       region?: string
       password?: string
-    }
-    if (!body.userId) return jsonError('userId required hai')
-
-    const caller = await db.user.findUnique({ where: { id: body.userId }, include: { profile: true } })
-    if (!caller) return jsonError('Caller user not found', 404)
-    const mb = megaBlocked(caller.role)
-    if (mb) return mb
-    if (caller.role !== 'DISTRIBUTOR') {
-      return jsonError('Permission nahi hai', 403)
     }
 
     const salesman = await db.user.findUnique({ where: { id } })
@@ -75,7 +78,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
     if (body.password !== undefined && body.password !== '') {
       if (String(body.password).length < 4) return jsonError('Password kam az kam 4 harf ka ho')
-      data.password = String(body.password).trim()
+      // Task 95: password kabhi plaintext store nahi — bcrypt hash (sirf jab naya password aaye)
+      data.password = await bcrypt.hash(String(body.password).trim(), 10)
     }
 
     const updated = await db.user.update({

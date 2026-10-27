@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
-import { jsonError, distributorTenant } from '@/lib/dms-scope'
+import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser, tenantMismatch, type AuthedUser } from '@/lib/api-auth'
 
 const MAX_LOGO_LEN = 700_000
 
@@ -13,12 +14,25 @@ interface CompanyBody {
   notes?: string
   logo?: string | null
   isActive?: boolean
-  userId?: string
+}
+
+// Task 95: distributorTenant(userId) helper ki jagah cookie-user par direct checks (same semantics)
+function distributorTenantOf(user: AuthedUser): { tenantId: string; error?: never } | { tenantId?: never; error: Response } {
+  const mb = megaBlocked(user.role)
+  if (mb) return { error: mb }
+  if (user.role !== 'DISTRIBUTOR') return { error: jsonError('Sirf Distributor apna catalog manage kar sakta hai', 403) }
+  if (!user.profile) return { error: jsonError('Distributor profile nahi mila', 404) }
+  return { tenantId: user.profile.id }
 }
 
 /** GET /api/companies/[id] — company detail + quick stats */
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // Task 95: identity cookie se (pehle koi auth nahi tha — koi bhi company detail parh sakta tha)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
+
     const { id } = await params
     const c = await db.company.findUnique({
       where: { id },
@@ -28,6 +42,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       },
     })
     if (!c) return jsonError('Company not found', 404)
+    // Task 95: tenant ownership — sirf isi tenant ki company ka detail
+    const tm = await tenantMismatch(user, c.distributorId)
+    if (tm) return tm
     const balance = c.ledgerEntries.reduce((s, e) => s + e.credit - e.debit, 0)
     return Response.json({
       company: {
@@ -48,14 +65,16 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 /** PATCH /api/companies/[id] — profile update (logo, details, active toggle) — sirf APNI company */
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const t = distributorTenantOf(auth.user)
+    if ('error' in t) return t.error
+
     const { id } = await params
     const b = await req.json() as CompanyBody
-    if (!b.userId) return jsonError('userId required hai')
     if (b.logo && b.logo.length > MAX_LOGO_LEN) return jsonError('Logo bohat bara hai — chhoti image use karein')
     if (b.name !== undefined && !b.name.trim()) return jsonError('Company name required hai')
-
-    const t = await distributorTenant(b.userId)
-    if ('error' in t) return t.error
 
     const existing = await db.company.findUnique({ where: { id } })
     if (!existing) return jsonError('Company not found', 404)

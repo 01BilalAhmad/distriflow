@@ -21,7 +21,7 @@ salesmen offline-first mobile flow use karte hain.
 | Database / ORM | PostgreSQL (Neon) + Prisma 6 — `prisma/schema.prisma` (30 models) |
 | UI | Tailwind CSS + shadcn/ui (Radix primitives) |
 | State/Fetching | Bare `fetch` wrapper (`src/lib/dms-api.ts`) — React Query installed magar unused |
-| Auth | Custom HMAC-signed httpOnly cookie (`src/lib/auth-token.ts`) + `src/proxy.ts` page guard |
+| Auth | Custom HMAC-signed httpOnly cookie (`src/lib/auth-token.ts`) + `src/proxy.ts` **page + API gate** + per-route `requireUser()` (`src/lib/api-auth.ts`) |
 | Deployment | Vercel (`vercel.json`), standalone server self-host ke liye bhi |
 
 ## 3. Roles & Tenancy
@@ -59,12 +59,18 @@ Order booking (POST /api/orders)
 - **Up**: orders/recoveries/outlet-tags apne `clientRef` ke saath POST hote hain; server unique constraint se duplicates reject/reconcile karta hai
 - Client-side cache: `src/lib/route-cache.ts` (localStorage snapshot — server cache NAHI)
 
-## 6. Auth (current state — audit ke baad bhi dekhen)
+## 6. Auth (Task 95 ke baad — server-side session har jagah)
 
-- Login: `POST /api/auth/login` → `dms_auth` cookie = `u.<userId>.<hmac>`
-- Page routes: `src/proxy.ts` cookie verify karta hai
-- **API routes is guard se bahar hain** (matcher `api` exclude karta hai) — yehi
-  audit ka sab se bara finding hai; planned fix ka ADR: `docs/adr/0002-*.md`
+- Login: `POST /api/auth/login` → `dms_auth` cookie = `u.<userId>.<hmac>` + **bcrypt**
+  password verify (legacy plaintext par lazy upgrade) + account lock (5 fail = 15 min) + IP rate limit
+- **Page routes**: `src/proxy.ts` cookie verify karta hai (redirect → /login)
+- **API routes bhi ab proxy gate ke andar hain**: valid cookie nahi → 401 JSON
+  (exempt: /api/auth/login|session|logout, /api/health)
+- **Per-route identity**: har business route `requireUser(req)` (src/lib/api-auth.ts) se
+  DB user uthata hai — client-supplied `userId` param IGNORE hota hai (IDOR band).
+  Role scoping helpers: `salesmanGuard`, `tenantMismatch`, `outletScopeError`.
+- Legacy bridge (`/api/auth/session` body userId → passwordless cookie) BAND — auth bypass tha.
+- Passwords: **bcryptjs hashes** (seed + create-user + lazy login upgrade)
 
 ## 7. Directory Map
 

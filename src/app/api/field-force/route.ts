@@ -1,15 +1,15 @@
+import bcrypt from 'bcryptjs'
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser } from '@/lib/api-auth'
 import type { SalesmanPerfDTO, BookerParentDTO } from '@/lib/dms-types'
 
 export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
-    if (!userId) return jsonError('userId required')
-
-    const me = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-    if (!me) return jsonError('User not found', 404)
+    // Task 95: identity cookie se (userId param IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const me = auth.user
     const mb = megaBlocked(me.role)
     if (mb) return mb
 
@@ -86,25 +86,26 @@ export async function GET(req: Request) {
 
 /**
  * POST /api/field-force — naya order booker (SALESMAN user) banao (Task 21-n, Task 22 update).
- * Body: { userId (caller), name, email, phone?, region?, password?, companyId? }
+ * Body: { name, email, phone?, region?, password?, companyId? }
  * DISTRIBUTOR APNE network ke under booker banata hai (parentId auto = caller).
  * Distributor chahe to booker ko company assign bhi kar sakta hai (ab Admin nahi — mega admin
- * business data se door hai). Password default "demo123".
+ * business data se door hai). Password default "demo123" — bcrypt-hash store hota hai (Task 95).
  */
 export async function POST(req: Request) {
   try {
-    const body = await req.json()
-    const { userId, name, email, phone, region, password, companyId } = body
-    if (!userId) return jsonError('userId required')
-    if (!name?.trim() || !email?.trim()) return jsonError('Order booker ka naam aur email zaroori hain')
-
-    const caller = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-    if (!caller) return jsonError('Caller user not found', 404)
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const caller = auth.user
     const mbp = megaBlocked(caller.role)
     if (mbp) return mbp
     if (caller.role !== 'DISTRIBUTOR') {
       return jsonError('Sirf Distributor apne order booker bana sakta hai', 403)
     }
+
+    const body = await req.json()
+    const { name, email, phone, region, password, companyId } = body
+    if (!name?.trim() || !email?.trim()) return jsonError('Order booker ka naam aur email zaroori hain')
 
     const normEmail = email.toLowerCase().trim()
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normEmail)) return jsonError('Email ka format sahi nahi hai')
@@ -134,7 +135,8 @@ export async function POST(req: Request) {
       data: {
         name: name.trim(),
         email: normEmail,
-        password: password?.trim() ? String(password).trim() : 'demo123',
+        // Task 95: password kabhi plaintext store nahi — bcrypt hash (default demo123 bhi hash hota hai)
+        password: await bcrypt.hash(password?.trim() ? String(password).trim() : 'demo123', 10),
         role: 'SALESMAN',
         phone: phone?.trim() || null,
         region: region?.trim() || parent.region || null,

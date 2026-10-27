@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
-import { jsonError, megaBlocked, tenantProfileId, distributorTenant } from '@/lib/dms-scope'
+import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser, type AuthedUser } from '@/lib/api-auth'
 import { getAvailableToPromise } from '@/lib/dms-inventory'
 
 /**
@@ -8,20 +9,41 @@ import { getAvailableToPromise } from '@/lib/dms-inventory'
  * - SALESMAN: apne owner distributor ka catalog (parent walk-up) + assigned company filter
  * - MEGA_ADMIN: 403 (business data locked)
  * Naya distributor ka catalog BILKUL KHALI hota hai.
+ * Task 95: identity cookie se (userId param IGNORE — IDOR band).
  */
+
+// Task 95: tenantProfileId(userId) helper ki jagah cookie-user se tenant resolve
+// (same semantics: apna profile, warna salesman parent walk-up, warna null)
+async function tenantProfileOf(user: AuthedUser): Promise<string | null> {
+  if (user.profile) return user.profile.id
+  if (user.parentId) {
+    const owner = await db.user.findUnique({ where: { id: user.parentId }, include: { profile: true } })
+    return owner?.profile?.id ?? null
+  }
+  return null
+}
+
+// Task 95: distributorTenant(userId) helper ki jagah cookie-user par direct checks (same semantics)
+function distributorTenantOf(user: AuthedUser): { tenantId: string; error?: never } | { tenantId?: never; error: Response } {
+  const mb = megaBlocked(user.role)
+  if (mb) return { error: mb }
+  if (user.role !== 'DISTRIBUTOR') return { error: jsonError('Sirf Distributor apna catalog manage kar sakta hai', 403) }
+  if (!user.profile) return { error: jsonError('Distributor profile nahi mila', 404) }
+  return { tenantId: user.profile.id }
+}
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
     const companyId = searchParams.get('companyId')
-    if (!userId) return jsonError('userId required')
 
-    const user = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-    if (!user) return jsonError('User not found', 404)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
     const mb = megaBlocked(user.role)
     if (mb) return mb
 
-    const tenantId = await tenantProfileId(userId)
+    const tenantId = await tenantProfileOf(user)
     if (!tenantId) return Response.json({ products: [], companyScoped: false })
 
     // Stock bhi sirf ISI tenant ke warehouses se (cross-tenant stock leak band)
@@ -73,14 +95,16 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json()
-    const { sku, name, brand, companyId, category, unitsPerCarton, boxesPerCarton, pcsPerBox, purchasePrice, tradePrice, consumerPrice, gstEnabled, gstRate, userId } = body
-    if (!userId) return jsonError('userId required')
-    if (!sku || !name || !brand || !tradePrice) return jsonError('SKU, name, brand aur trade price required hain')
-
-    const t = await distributorTenant(userId)
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const t = distributorTenantOf(auth.user)
     if ('error' in t) return t.error
     const tenantId = t.tenantId
+
+    const body = await req.json()
+    const { sku, name, brand, companyId, category, unitsPerCarton, boxesPerCarton, pcsPerBox, purchasePrice, tradePrice, consumerPrice, gstEnabled, gstRate } = body
+    if (!sku || !name || !brand || !tradePrice) return jsonError('SKU, name, brand aur trade price required hain')
 
     // brand per-tenant — find or create isi distributor ke andar
     let brandRec = await db.brand.findFirst({ where: { name: brand.trim(), distributorId: tenantId } })

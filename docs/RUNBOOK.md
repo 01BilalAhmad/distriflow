@@ -19,6 +19,16 @@ Template: `.env.example` ko `.env` mein copy karein. Real `.env` kabhi commit na
 - Node 22 pin: `.nvmrc` (CI isi se install karta hai)
 - Vercel dashboard mein **Environment Variables** set karein: `DATABASE_URL`, `AUTH_SECRET`
 
+### Task 95 schema deploy (one-time)
+Task 95 ne indexes (~45), `Counter` table aur User lock fields add kiye. Deploy ke
+baad EK dafa chalayein (local se prod DATABASE_URL ke sath):
+
+```bash
+DATABASE_URL="<prod-url>" npx prisma db push   # --accept-data-loss ke bagair — additive-only changes
+```
+
+`Counter` rows khud seed ho jati hain (pehli nextSeq call par legacy max se).
+
 ## 3. Database Schema Changes — KHATRE ka note
 
 `package.json` mein `db:push` script `--accept-data-loss` ke saath hai (audit

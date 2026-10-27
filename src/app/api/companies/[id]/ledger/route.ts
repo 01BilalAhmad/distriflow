@@ -1,19 +1,40 @@
 import { db } from '@/lib/db'
-import { jsonError, tenantProfileId, distributorTenant } from '@/lib/dms-scope'
+import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser, type AuthedUser } from '@/lib/api-auth'
+
+// Task 95: tenantProfileId(userId) helper ki jagah cookie-user se tenant resolve
+// (same semantics: apna profile, warna salesman parent walk-up, warna null)
+async function tenantProfileOf(user: AuthedUser): Promise<string | null> {
+  if (user.profile) return user.profile.id
+  if (user.parentId) {
+    const owner = await db.user.findUnique({ where: { id: user.parentId }, include: { profile: true } })
+    return owner?.profile?.id ?? null
+  }
+  return null
+}
+
+// Task 95: distributorTenant(userId) helper ki jagah cookie-user par direct checks (same semantics)
+function distributorTenantOf(user: AuthedUser): { tenantId: string; error?: never } | { tenantId?: never; error: Response } {
+  const mb = megaBlocked(user.role)
+  if (mb) return { error: mb }
+  if (user.role !== 'DISTRIBUTOR') return { error: jsonError('Sirf Distributor apna catalog manage kar sakta hai', 403) }
+  if (!user.profile) return { error: jsonError('Distributor profile nahi mila', 404) }
+  return { tenantId: user.profile.id }
+}
 
 /**
- * GET /api/companies/[id]/ledger?userId= — payable ledger entries (ascending) + running balance.
+ * GET /api/companies/[id]/ledger — payable ledger entries (ascending) + running balance.
  * Balance = SUM(credit) - SUM(debit) => positive = company ko dena hai.
  * Task 23: company ownership check — sirf apni tenant ki company ka ledger.
+ * Task 95: identity cookie se (userId param IGNORE — IDOR band).
  */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params
-    const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
-    if (!userId) return jsonError('userId required')
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
 
-    const tenantId = await tenantProfileId(userId)
+    const { id } = await params
+    const tenantId = await tenantProfileOf(auth.user)
     if (!tenantId) return jsonError('Tenant nahi mila', 404)
 
     const company = await db.company.findUnique({ where: { id } })
@@ -69,21 +90,22 @@ interface LedgerPostBody {
   description?: string
   refNo?: string
   invoiceId?: string | null // payment ko invoice par apply karne ke liye
-  userId?: string
 }
 
 /** POST /api/companies/[id]/ledger — manual payment / adjustment entry — sirf APNI company */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const t = distributorTenantOf(auth.user)
+    if ('error' in t) return t.error
+
     const { id } = await params
     const b = await req.json() as LedgerPostBody
-    if (!b.userId) return jsonError('userId required hai')
     const amount = Number(b.amount ?? 0)
     if (!amount || amount <= 0) return jsonError('Amount 0 se bara hona chahiye')
     if (!b.description?.trim()) return jsonError('Description required hai')
-
-    const t = await distributorTenant(b.userId)
-    if ('error' in t) return t.error
 
     const company = await db.company.findUnique({ where: { id } })
     if (!company) return jsonError('Company not found', 404)

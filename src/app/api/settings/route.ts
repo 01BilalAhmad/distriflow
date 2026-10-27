@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
-import { jsonError, tenantProfileId, distributorTenant } from '@/lib/dms-scope'
+import { jsonError, tenantProfileId } from '@/lib/dms-scope'
+import { requireUser } from '@/lib/api-auth'
 import { getTaxRates, getGstSettings, getDistributorAddress, setDistributorAddress, TAX_KEYS, GST_KEYS } from '@/lib/dms-settings'
 import { getPjpSettings, upsertPjpFlag, PJP_KEYS } from '@/lib/dms-pjp'
 
@@ -7,15 +8,14 @@ import { getPjpSettings, upsertPjpFlag, PJP_KEYS } from '@/lib/dms-pjp'
  * Task 78: ab profile (distribution name, distributor name, cell, city) bhi — bill print isi se. */
 export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
-    const tenantId = userId ? await tenantProfileId(userId) : null
-    const [rates, gst, user, address, pjp] = await Promise.all([
+    // Task 95: identity cookie se (userId param IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
+    const tenantId = await tenantProfileId(user.id)
+    const [rates, gst, address, pjp] = await Promise.all([
       getTaxRates(tenantId),
       getGstSettings(tenantId),
-      userId
-        ? db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-        : null,
       getDistributorAddress(tenantId),
       getPjpSettings(tenantId),
     ])
@@ -52,9 +52,14 @@ export async function GET(req: Request) {
  * bhi isi PUT se update hote hain — ye hi fields bill print par chapte hain. */
 export async function PUT(req: Request) {
   try {
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
+
     const body = await req.json()
-    const { userId, filerTaxRate, nonFilerTaxRate, gstEnabled, gstRate, distributorName, phone, businessName, city, address, pjpFridayOff, pjpUnplannedEnabled } = body as {
-      userId: string
+    const { filerTaxRate, nonFilerTaxRate, gstEnabled, gstRate, distributorName, phone, businessName, city, address, pjpFridayOff, pjpUnplannedEnabled } = body as {
+      userId?: string // legacy — IGNORE
       filerTaxRate?: number
       nonFilerTaxRate?: number
       gstEnabled?: boolean | number | string
@@ -68,10 +73,7 @@ export async function PUT(req: Request) {
       pjpFridayOff?: boolean | number | string
       pjpUnplannedEnabled?: boolean | number | string
     }
-    if (!userId) return jsonError('userId required')
-
-    const user = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-    if (!user || user.role !== 'DISTRIBUTOR' || !user.profile) {
+    if (user.role !== 'DISTRIBUTOR' || !user.profile) {
       return jsonError('Sirf Distributor apni settings change kar sakta hai', 403)
     }
     const tenantId = user.profile.id
@@ -94,7 +96,7 @@ export async function PUT(req: Request) {
     if (pAddr !== undefined) await setDistributorAddress(tenantId, pAddr)
     if (pName !== undefined || pPhone !== undefined) {
       await db.user.update({
-        where: { id: userId },
+        where: { id: user.id },
         data: {
           ...(pName !== undefined ? { name: pName } : {}),
           ...(pPhone !== undefined ? { phone: pPhone || null } : {}),
@@ -147,7 +149,7 @@ export async function PUT(req: Request) {
     }
 
     const [rates, gst, freshAddr, freshPjp] = await Promise.all([getTaxRates(tenantId), getGstSettings(tenantId), getDistributorAddress(tenantId), getPjpSettings(tenantId)])
-    const fresh = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
+    const fresh = await db.user.findUnique({ where: { id: user.id }, include: { profile: true } })
     return Response.json({
       settings: {
         filerTaxRate: rates.filer,

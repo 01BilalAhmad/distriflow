@@ -1,15 +1,36 @@
 import { db } from '@/lib/db'
-import { jsonError, nextSeq, tenantProfileId, distributorTenant } from '@/lib/dms-scope'
+import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
+import { requireUser, type AuthedUser } from '@/lib/api-auth'
 
-/** GET /api/purchase-invoices?userId=&companyId= — list with company + items summary (apna tenant) */
+// Task 95: tenantProfileId(userId) helper ki jagah cookie-user se tenant resolve
+// (same semantics: apna profile, warna salesman parent walk-up, warna null)
+async function tenantProfileOf(user: AuthedUser): Promise<string | null> {
+  if (user.profile) return user.profile.id
+  if (user.parentId) {
+    const owner = await db.user.findUnique({ where: { id: user.parentId }, include: { profile: true } })
+    return owner?.profile?.id ?? null
+  }
+  return null
+}
+
+// Task 95: distributorTenant(userId) helper ki jagah cookie-user par direct checks (same semantics)
+function distributorTenantOf(user: AuthedUser): { tenantId: string; error?: never } | { tenantId?: never; error: Response } {
+  const mb = megaBlocked(user.role)
+  if (mb) return { error: mb }
+  if (user.role !== 'DISTRIBUTOR') return { error: jsonError('Sirf Distributor apna catalog manage kar sakta hai', 403) }
+  if (!user.profile) return { error: jsonError('Distributor profile nahi mila', 404) }
+  return { tenantId: user.profile.id }
+}
+
+/** GET /api/purchase-invoices?companyId= — list with company + items summary (apna tenant) */
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url)
     const companyId = searchParams.get('companyId') || undefined
-    const userId = searchParams.get('userId')
-    if (!userId) return jsonError('userId required')
 
-    const tenantId = await tenantProfileId(userId)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const tenantId = await tenantProfileOf(auth.user)
     if (!tenantId) return Response.json({ invoices: [] })
 
     const invoices = await db.purchaseInvoice.findMany({
@@ -93,7 +114,6 @@ interface ItemBody {
 }
 
 interface InvoicePostBody {
-  userId?: string
   companyId?: string
   date?: string
   supplierInvoiceNo?: string
@@ -113,15 +133,19 @@ interface InvoicePostBody {
  *  + ledger PURCHASE (credit = payable barh) + optional advance payment (debit) */
 export async function POST(req: Request) {
   try {
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
+    const t = distributorTenantOf(user)
+    if ('error' in t) return t.error
+    const tenantId = t.tenantId
+
     const b = await req.json() as InvoicePostBody
-    if (!b.userId) return jsonError('userId required hai')
     if (!b.companyId) return jsonError('Company select karein')
     if (!b.items?.length) return jsonError('Kam az kam ek product add karein')
 
     // Task 23: tenant guard + ownership — company/product/warehouse sab ISI tenant ke
-    const t = await distributorTenant(b.userId)
-    if ('error' in t) return t.error
-    const tenantId = t.tenantId
 
     const company = await db.company.findFirst({ where: { id: b.companyId, distributorId: tenantId } })
     if (!company) return jsonError('Company nahi mili (ya aap ki nahi hai)', 404)
@@ -300,7 +324,7 @@ export async function POST(req: Request) {
             type: 'IN',
             qty: i.units,
             reason: `Purchase ${invoiceNo} — ${company.shortCode ?? company.name}`,
-            userId: b.userId ?? null,
+            userId: user.id,
           },
         })
       }

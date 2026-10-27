@@ -1,6 +1,16 @@
 import { db } from '@/lib/db'
-import { jsonError, distributorTenant } from '@/lib/dms-scope'
+import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser, type AuthedUser } from '@/lib/api-auth'
 import { packData } from '../route'
+
+// Task 95: distributorTenant(userId) helper ki jagah cookie-user par direct checks (same semantics)
+function distributorTenantOf(user: AuthedUser): { tenantId: string; error?: never } | { tenantId?: never; error: Response } {
+  const mb = megaBlocked(user.role)
+  if (mb) return { error: mb }
+  if (user.role !== 'DISTRIBUTOR') return { error: jsonError('Sirf Distributor apna catalog manage kar sakta hai', 403) }
+  if (!user.profile) return { error: jsonError('Distributor profile nahi mila', 404) }
+  return { tenantId: user.profile.id }
+}
 
 /**
  * PATCH /api/products/[id] — product edit + rate update (DISTRIBUTOR, apna catalog)
@@ -14,9 +24,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const { id } = await params
     const body = await req.json()
 
-    // Task 22/23: caller verify — DISTRIBUTOR-only + tenant resolve
-    if (!body.userId) return jsonError('userId required')
-    const t = await distributorTenant(body.userId)
+    // Task 95: caller cookie se — DISTRIBUTOR-only + tenant resolve (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const t = distributorTenantOf(auth.user)
     if ('error' in t) return t.error
     const tenantId = t.tenantId
 

@@ -1,11 +1,12 @@
 import { db } from '@/lib/db'
-import { jsonError, nextSeq } from '@/lib/dms-scope'
+import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
+import { requireUser, tenantMismatch } from '@/lib/api-auth'
 import { restockStock } from '@/lib/dms-inventory'
 
 interface SettleReturnItem { productId: string; qty: number }
 interface SettleReturn { reason?: string; items: SettleReturnItem[] }
 interface SettleBody {
-  userId?: string
+  userId?: string // legacy — IGNORE
   settlements: { orderId: string; cashAmount: number; notes?: string; return?: SettleReturn }[]
 }
 
@@ -23,6 +24,13 @@ const RETURN_TYPES = ['UNSOLD', 'DAMAGED', 'EXPIRED']
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // Task 95: identity cookie se (pehle bilkul unauthenticated tha — koi bhi settle kar sakta tha)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
+    const mb = megaBlocked(user.role)
+    if (mb) return mb
+
     const { id } = await params
     const body = await req.json() as SettleBody
     const { settlements } = body
@@ -35,13 +43,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       include: { orders: { include: { outlet: true, items: true } } },
     })
     if (!summary) return jsonError('Summary not found', 404)
+    // Task 95: tenant ownership — summary usi distributor ki honi chahiye
+    const tm = await tenantMismatch(user, summary.distributorId)
+    if (tm) return tm
     if (summary.status === 'SETTLED') return jsonError('Ye summary pehle se settled hai')
 
-    let actorName: string | null = null
-    if (body.userId) {
-      const actor = await db.user.findUnique({ where: { id: body.userId } })
-      actorName = actor?.name ?? null
-    }
+    // Task 95: actor cookie user se (pehle body.userId se aata tha)
+    const actorName = user.name
 
     // Validate orders belong to this summary
     const orderMap = new Map(summary.orders.map((o) => [o.id, o]))
@@ -101,7 +109,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
             })
             // Restock into the summary's (van) warehouse
             for (const l of lines) {
-              await restockStock(summary.warehouseId, l.productId, l.qty, `Settlement return ${returnNo} — ${order.orderNo}`, body.userId, tx)
+              await restockStock(summary.warehouseId, l.productId, l.qty, `Settlement return ${returnNo} — ${order.orderNo}`, user.id, tx)
             }
           }
         }

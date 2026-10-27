@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
-import { jsonError } from '@/lib/dms-scope'
-import { distributorGuard, unitCostMap, r2 } from '@/lib/reports-kit-server'
+import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser } from '@/lib/api-auth'
+import { unitCostMap, r2 } from '@/lib/reports-kit-server'
 
 // ============================================================
 // Task 66 — STOCK REPORT
@@ -16,9 +17,15 @@ import { distributorGuard, unitCostMap, r2 } from '@/lib/reports-kit-server'
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url)
-    const g = await distributorGuard(url.searchParams.get('userId'))
-    if (g instanceof Response) return g
-    const { profileId } = g
+    // Task 95: identity cookie se (userId param IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
+    const mb = megaBlocked(user.role)
+    if (mb) return mb
+    if (user.role !== 'DISTRIBUTOR') return jsonError('Reports sirf distributor account ke liye hain', 403)
+    if (!user.profile) return jsonError('Distributor profile not found', 404)
+    const profileId = user.profile.id
 
     const lowCtns = Math.max(1, Number(url.searchParams.get('lowCtns')) || 5)
     const slowDays = Math.max(1, Number(url.searchParams.get('slowDays')) || 30)

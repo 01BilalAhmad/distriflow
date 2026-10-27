@@ -1,15 +1,28 @@
 import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
+import { requireUser, tenantMismatch } from '@/lib/api-auth'
 
 export async function POST(req: Request) {
   try {
+    // Task 95: identity cookie se (pehle koi auth nahi tha — koi bhi stock adjust kar sakta tha).
+    // Body userId IGNORE. Warehouse tenant scope check (Task 95) — doosre distributor ka
+    // warehouse touch nahi ho sakta.
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
+
     const body = await req.json()
-    const { warehouseId, productId, type, qty, reason, userId } = body
+    const { warehouseId, productId, type, qty, reason } = body
     if (!warehouseId || !productId || !type || !qty || !reason) {
       return jsonError('Warehouse, product, type, qty aur reason required hain')
     }
     const nQty = Number(qty)
     if (nQty <= 0) return jsonError('Qty positive honi chahiye')
+
+    const warehouse = await db.warehouse.findUnique({ where: { id: warehouseId } })
+    if (!warehouse) return jsonError('Warehouse nahi mila', 404)
+    const tm = await tenantMismatch(user, warehouse.distributorId)
+    if (tm) return tm
 
     if (type === 'OUT') {
       const available = await db.stockBatch.aggregate({
@@ -46,7 +59,7 @@ export async function POST(req: Request) {
     }
 
     const adjustment = await db.stockAdjustment.create({
-      data: { warehouseId, productId, type, qty: nQty, reason, userId: userId ?? null },
+      data: { warehouseId, productId, type, qty: nQty, reason, userId: user.id },
     })
     return Response.json({ adjustment })
   } catch (e) {

@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser, type AuthedUser } from '@/lib/api-auth'
 import { r2 } from '@/lib/reports-kit-server'
 
 // ============================================================
@@ -7,27 +8,28 @@ import { r2 } from '@/lib/reports-kit-server'
 // Ownership: target ka salesman caller (DISTRIBUTOR) ka apna booker hona chahiye.
 // ============================================================
 
-async function ownTarget(id: string, userId: string | undefined) {
-  if (!userId) return { error: jsonError('userId required') }
-  const caller = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-  if (!caller) return { error: jsonError('User not found', 404) }
-  const mb = megaBlocked(caller.role)
+async function ownTarget(id: string, user: AuthedUser) {
+  const mb = megaBlocked(user.role)
   if (mb) return { error: mb }
-  if (caller.role !== 'DISTRIBUTOR') return { error: jsonError('Permission nahi hai', 403) }
-  if (!caller.profile) return { error: jsonError('Distributor profile nahi mila', 404) }
+  if (user.role !== 'DISTRIBUTOR') return { error: jsonError('Permission nahi hai', 403) }
+  if (!user.profile) return { error: jsonError('Distributor profile nahi mila', 404) }
 
   const target = await db.salesTarget.findUnique({ where: { id }, select: { id: true, salesman: { select: { parentId: true } } } })
   if (!target) return { error: jsonError('Target nahi mila', 404) }
-  if (target.salesman.parentId !== caller.profile.userId) return { error: jsonError('Ye target aapke booker ka nahi hai', 403) }
+  if (target.salesman.parentId !== user.profile.userId) return { error: jsonError('Ye target aapke booker ka nahi hai', 403) }
   return { target }
 }
 
 /** PATCH — sirf targetValue edit (inline edit) */
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // Task 95: identity cookie se (body userId IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+
     const { id } = await params
     const body = await req.json() as { userId?: string; targetValue?: number | string }
-    const own = await ownTarget(id, body.userId)
+    const own = await ownTarget(id, auth.user)
     if ('error' in own) return own.error
 
     const value = Number(body.targetValue)
@@ -44,9 +46,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 /** DELETE — target hatao (galti se ban gaya ho) */
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // Task 95: identity cookie se (userId query param IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+
     const { id } = await params
-    const url = new URL(req.url)
-    const own = await ownTarget(id, url.searchParams.get('userId') ?? undefined)
+    const own = await ownTarget(id, auth.user)
     if ('error' in own) return own.error
 
     await db.salesTarget.delete({ where: { id } })

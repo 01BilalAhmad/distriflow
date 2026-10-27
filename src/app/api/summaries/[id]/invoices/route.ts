@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
-import { jsonError } from '@/lib/dms-scope'
+import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { requireUser, tenantMismatch } from '@/lib/api-auth'
 import { orderGrandPayable } from '@/lib/dms-order-calc'
 import { getDistributorAddress } from '@/lib/dms-settings'
 
@@ -8,8 +9,15 @@ import { getDistributorAddress } from '@/lib/dms-settings'
  * Ek summary ki SAB invoices ka full print data ek hi call mein —
  * bulk "Print All Invoices" (har invoice apne A4 page par) ke liye.
  */
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // Task 95: identity cookie se (pehle bilkul unauthenticated tha)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
+    const mb = megaBlocked(user.role)
+    if (mb) return mb
+
     const { id } = await params
     const summary = await db.deliverySummary.findUnique({
       where: { id },
@@ -26,6 +34,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       },
     })
     if (!summary) return jsonError('Summary not found', 404)
+    // Task 95: tenant ownership — summary usi distributor ki honi chahiye
+    const tm = await tenantMismatch(user, summary.distributorId)
+    if (tm) return tm
     // Task 78b: bill print header par Address (AppSetting KV — settings page se, zero migration)
     const distributorAddress = await getDistributorAddress(summary.distributorId)
 

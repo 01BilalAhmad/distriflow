@@ -4,25 +4,18 @@
 > **zero tests** the. Yeh guide minimum viable test setup deti hai jo bina kisi
 > existing file ke badle ready hai.
 
-## 1. Setup (5 minute)
+## 1. Setup — DONE (Task 95)
 
-Vitest is repo ke liye recommended hai — esbuild transform se TS/TSX native
-chalta hai, `@/` alias mirror hota hai, aur `vitest.config.mts (repo package.json mein "type":"module" nahi — .mts extension zaroori)` already mojood hai.
+Vitest ab **installed devDependency hai** + `test`/`test:watch` scripts package.json
+mein mojood hain. Bas chalayein:
 
 ```bash
-# 1) vitest install karein
-npm i -D vitest
-
-# 2) package.json ke "scripts" mein add karein (manual edit — existing files audit mein untouched hain)
-#    "test": "vitest run",
-#    "test:watch": "vitest"
-
-# 3) chalayein
-npm test
+npm test        # 39 unit tests (dms-order-calc 28 + auth-token 11)
+npm run test:watch
 ```
 
-CI (`.github/workflows/ci.yml`) ka `test` job graceful skip karta hai jab tak
-vitest installed nahi — jaise hi aap `npm i -D vitest` karenge, job green ho jayega.
+CI (`.github/workflows/ci.yml`) ka `test` job ab **hard blocking gate** hai —
+Task 95 ne continue-on-error flags hata diye (lint/typecheck/build bhi blocking).
 
 ## 2. Abhi kya covered hai?
 

@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
+import { requireUser, tenantMismatch } from '@/lib/api-auth'
 import { computeOrderLines, recalcManualDiscount, applyManualMerge, orderGrandPayable, type CalcIncomingItem } from '@/lib/dms-order-calc'
 import { advanceTaxFor, getTaxRates } from '@/lib/dms-settings'
 import { getAvailableToPromise, groupQtyByProduct, oversellMessage } from '@/lib/dms-inventory'
@@ -9,18 +10,18 @@ import { loadActiveSchemes, liveRecalcFromParts, type LiveRecalcOrderParts } fro
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url)
-    const userId = searchParams.get('userId')
     const status = searchParams.get('status')
-    if (!userId) return jsonError('userId required')
 
-    const user = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-    if (!user) return jsonError('User not found', 404)
+    // Task 95: identity cookie se (userId param IGNORE — IDOR band)
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
     const mb = megaBlocked(user.role)
     if (mb) return mb
 
     const where =
       user.role === 'SALESMAN'
-        ? { salesmanId: userId }
+        ? { salesmanId: user.id }
         : { distributorId: user.profile?.id }
 
     // Task 82: booker ko sirf AAJ ka data — purane bills server se hi filter (client filter ke ilawa)
@@ -127,6 +128,12 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    // Task 95: identity cookie se. salesmanId DATA param rehta hai — distributor kisi
+    // booker ke liye book kar sakta hai; acting scope neeche outlet ke tenant se check hota hai.
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
+
     const body = await req.json()
     const { outletId, salesmanId, items, notes } = body as {
       outletId: string; salesmanId?: string; items: CalcIncomingItem[]; notes?: string
@@ -154,6 +161,11 @@ export async function POST(req: Request) {
 
     const outlet = await db.outlet.findUnique({ where: { id: outletId } })
     if (!outlet) return jsonError('Outlet not found', 404)
+
+    // Task 95: tenant ownership — order sirf usi distributor tenant ke member book kar sakta hai
+    // (SALESMAN assigned + PJP-planned shops dono, DISTRIBUTOR apni shops, cross-tenant 403)
+    const tm = await tenantMismatch(user, outlet.distributorId)
+    if (tm) return tm
 
     // Task 23: tenant = jis distributor ki shop hai — products/schemes/tax SIRF usi tenant ke
     const tenantId = outlet.distributorId

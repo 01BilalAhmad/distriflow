@@ -1,7 +1,6 @@
-# DistriFlow CI — skills-audit 2026-10
-# Pipeline design per audit Finding 2-d#2: explicit gates for lint / typecheck / test / build.
-# NOTE (typecheck + build + audit): jobs marked continue-on-error until the baseline
-# errors documented in the audit report are fixed — flip to strict afterwards.
+# DistriFlow CI — skills-audit 2026-10 + Task 95 hard gates
+# Task 95 (P0/P1): continue-on-error flags REMOVED — lint/typecheck/test/build
+# ab blocking gates hain. Baseline: tsc 0 errors, vitest 39 tests, next build clean.
 
 name: CI
 
@@ -32,9 +31,6 @@ jobs:
   typecheck:
     name: Typecheck (tsc --noEmit)
     runs-on: ubuntu-latest
-    # next.config.ts sets typescript.ignoreBuildErrors=true, so `next build`
-    # will NOT catch type errors — this explicit job is the only net.
-    continue-on-error: true # TODO: remove after fixing the type baseline (audit Finding 2-c#3)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -56,20 +52,12 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - run: npx prisma generate
-      - name: Run vitest (graceful skip until vitest is installed — see docs/TESTING.md)
-        run: |
-          if npx --no-install vitest --version >/dev/null 2>&1; then
-            npx vitest run
-          else
-            echo "::warning::vitest devDependency not installed yet — see docs/TESTING.md"
-          fi
+      - run: npx vitest run
 
   build:
     name: Build (next build)
     runs-on: ubuntu-latest
     # Prerendering may touch DB-dependent pages; a dummy URL keeps prisma happy.
-    # Flip continue-on-error off once the first green run is observed.
-    continue-on-error: true
     env:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
       AUTH_SECRET: ci-only-not-a-secret
@@ -86,7 +74,8 @@ jobs:
   audit:
     name: Dependency audit (advisory)
     runs-on: ubuntu-latest
-    continue-on-error: true # make blocking after triaging the 3 critical / 16 high findings
+    # Task 95 ke baad known-critical advisories fix ho gaye (next 16.4.3, dompurify chain,
+    # next-auth REMOVE) — high+ par fail hona ab signal hai, noise nahi.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
