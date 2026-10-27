@@ -25,6 +25,7 @@ import { useDMS, loadSession, saveSession } from '@/lib/dms-store'
 import { VIEW_PATH, viewFromPath } from '@/lib/dms-nav'
 import { SalesmanApp } from './salesman-app'
 import { QuickNav } from './quick-nav'
+import { ThemeToggle } from './theme-toggle'
 import {
   LayoutDashboard, ShoppingCart, Warehouse, Package, Store, Network, Route,
   Users, Gift, Undo2, BarChart3, Package2, LogOut, Building2,
@@ -575,8 +576,9 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
               {activeItem?.label ?? (activeView === 'purchase-entry' ? 'Purchase Entry' : 'Dashboard')}
             </span>
           </nav>
-          {/* Right — quick search + date */}
+          {/* Right — theme toggle + quick search + date */}
           <div className="ml-auto flex shrink-0 items-center gap-2">
+            <ThemeToggle />
             <button
               onClick={() => setQuickOpen(true)}
               className="hidden h-9 items-center gap-2 rounded-full border border-transparent bg-white px-3.5 text-slate-500 shadow-[0_1px_2px_rgba(21,28,46,0.04),0_12px_32px_-22px_rgba(21,28,46,0.28)] transition-all hover:text-slate-800 hover:shadow-[0_2px_8px_rgba(21,28,46,0.08),0_24px_60px_-18px_rgba(21,28,46,0.32)] sm:flex"

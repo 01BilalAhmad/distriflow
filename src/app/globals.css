@@ -13,8 +13,14 @@
    - 742 emerald + 20 teal utilities ek hi jagah se re-brand ho jati hain — koi component
      file touch nahi hoti, is liye kuch bhi break nahi ho sakta.
    Typography (Urbanist) layout.tsx mein, shell/sidebar app-shell.tsx mein. */
-@theme inline {
-  /* --- Selvar cobalt blue family (replaces emerald scale) --- */
+/* ============ Task 91 — BRAND SCALES (non-inline @theme) ============
+   Task 90 mein ye @theme inline thi (literal values baked). Dark mode ke liye utilities
+   ko var() reference chahiye — tabhi .dark scope mein --color-emerald-* / --color-teal-*
+   override hote hain aur bg-emerald-50 jaisi saari utilities (opacity modifiers + hover:
+   variants included) khud dark tints par switch ho jati hain. Visual output light mode
+   mein bilkul wahi (Task 90 ke hi values). */
+@theme {
+  /* Selvar cobalt blue family (replaces emerald scale) */
   --color-emerald-50: #eef3fe;
   --color-emerald-100: #d7defa;
   --color-emerald-200: #c4d0f7;
@@ -26,7 +32,7 @@
   --color-emerald-800: #1f3a9c;
   --color-emerald-900: #1a3180;
   --color-emerald-950: #132153;
-  /* --- Selvar sky blue family (replaces teal scale — gradient ends) --- */
+  /* Selvar sky blue family (replaces teal scale — gradient ends) */
   --color-teal-50: #eef4fd;
   --color-teal-100: #d9e7fd;
   --color-teal-200: #c2d8fb;
@@ -38,7 +44,9 @@
   --color-teal-800: #234a94;
   --color-teal-900: #1d3d79;
   --color-teal-950: #142a55;
+}
 
+@theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
@@ -487,5 +495,203 @@
       transition: none;
       transform: none;
     }
+  }
+}
+
+/* ============ Task 91 — SELVAR DARK MODE (Light / Dark / System) ============
+   Selvar demo ke [data-theme=dark] tokens (bg #0c0f14, card #151a22, line #ffffff14,
+   text #eceef3, muted #a2a9b9, pastel t-* text family) ka DistriFlow mapping:
+     - next-themes class strategy (.dark on <html>), localStorage, system follow,
+       no-flash built-in. Theme toggle app-shell topbar mein.
+     - Pura remap @media screen ke andar -> @media print mein vars HAMESHA light,
+       CBL print/PDF output par zero asar.
+     - Print PREVIEW bhi safe: vars .cbl-print-root par light reset + text overrides
+       :not() guard ke sath print subtree se bahar.
+     - 600/700 solid shades (bg-emerald-600 text-white buttons waghera) JAAN BOOJH KAR
+       saturated rakhe gaye hain — sirf text-* direction class-attribute override se
+       pastel hoti hai. hover:bg-red-500 jaisi full-opacity bg bhi intact. */
+
+:root {
+  color-scheme: light;
+}
+.dark {
+  color-scheme: dark;
+}
+
+@media screen {
+  /* ---- 1) Shade vars -> dark tints (bg/border/ring/fill + hover:, /50 opacity,
+          sab color-mix(var()) se compile hote hain is liye khud adapt) ---- */
+  .dark {
+    /* neutral surfaces — Selvar card-2 / line family */
+    --color-slate-50: #1a2029;
+    --color-slate-100: #1e242f;
+    --color-slate-200: #262d38;
+    --color-slate-300: #333c4a;
+    /* brand cobalt tints (50-200) */
+    --color-emerald-50: #182142;
+    --color-emerald-100: #1d2950;
+    --color-emerald-200: #263463;
+    /* amber */
+    --color-amber-50: #2a2312;
+    --color-amber-100: #332a15;
+    --color-amber-200: #4a3d1d;
+    --color-amber-300: #5c4c24;
+    /* red (500 saturated — hover:bg-red-500 button intact) */
+    --color-red-50: #2e1614;
+    --color-red-100: #3a1c19;
+    --color-red-200: #4f2622;
+    --color-red-300: #5f2f2a;
+    --color-red-400: #f08778;
+    /* blue */
+    --color-blue-50: #14203a;
+    --color-blue-100: #1a2947;
+    --color-blue-200: #233557;
+    --color-blue-300: #2b4169;
+    --color-blue-500: #9db9ff;
+    /* violet */
+    --color-violet-50: #1e1735;
+    --color-violet-100: #261d44;
+    --color-violet-200: #33275c;
+    --color-violet-300: #403171;
+    --color-violet-400: #574ab3;
+    --color-violet-500: #a78bfa;
+    /* orange */
+    --color-orange-50: #2a2013;
+    --color-orange-100: #352818;
+    --color-orange-200: #4a3820;
+    --color-orange-300: #5a4527;
+    /* sky (text-only shades — bg-sky-6xx/9xx kahin use nahi) */
+    --color-sky-50: #142438;
+    --color-sky-200: #24425f;
+    --color-sky-600: #8db4ff;
+    --color-sky-700: #9fc4ff;
+    --color-sky-900: #cfe0ff;
+    /* teal / rose tints */
+    --color-teal-100: #132e30;
+    --color-rose-50: #301418;
+  }
+
+  /* ---- 2) Text direction -> Selvar pastel family (t-*) ----
+     Attribute matching is liye ke hover:text-* / group-hover:text-* variants bhi
+     cover hon. :not() guard print preview (cbl-print-root portal) ko chhor deta hai. */
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-slate-2'] { color: #e2e8f0; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-slate-3'] { color: #cbd5e1; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-slate-4'] { color: #8a93a6; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-slate-5'] { color: #a2a9b9; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-slate-6'] { color: #b3bac7; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-slate-7'] { color: #c3c9d5; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-slate-8'] { color: #d7dce6; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-slate-9'] { color: #eceef3; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-emerald-1'] { color: #dbe4ff; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-emerald-3'] { color: #a2b6f0; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-emerald-5'] { color: #8fa7ff; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-emerald-6'] { color: #9db4ff; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-emerald-7'] { color: #b2c2ff; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-emerald-8'] { color: #cfd9ff; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-amber-6'] { color: #f5ca86; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-amber-7'] { color: #f5cc85; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-amber-8'] { color: #f8d9a0; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-red-4'] { color: #f08778; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-red-5'] { color: #f6938a; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-red-6'] { color: #f6a294; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-red-7'] { color: #f9b0a4; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-red-8'] { color: #fbc2b8; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-blue-6'] { color: #a5c2ff; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-blue-7'] { color: #bfd4ff; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-violet-5'] { color: #b9a8ff; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-violet-6'] { color: #b9a8ff; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-violet-7'] { color: #cabdff; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-orange-5'] { color: #f6bd60; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-orange-6'] { color: #f6bd60; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-orange-7'] { color: #f8cd8a; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-teal-6'] { color: #6fd4cb; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-teal-7'] { color: #8adfd6; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-rose-6'] { color: #ff9fb0; }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='text-rose-7'] { color: #ffb3c0; }
+
+  /* ---- 3) Hardcoded light surfaces -> Selvar dark surfaces ---- */
+  .dark .bg-white:not(:is(.cbl-print-root, .cbl-print-root *)) {
+    background-color: var(--card);
+  }
+  .dark .bg-\[\#eceef2\] {
+    background-color: var(--background);
+  }
+  /* Sidebar brand pill — Selvar dark side-pill */
+  .dark .bg-\[\#eef2fb\] {
+    background-color: #26334f;
+  }
+
+  /* ---- 4) Selvar dark card surface (soft inset line + deep diffuse) ---- */
+  .dark [data-slot='card'] {
+    border-color: rgba(255, 255, 255, 0.08);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.03) inset,
+      0 16px 40px -26px rgba(0, 0, 0, 0.9);
+  }
+  .dark [data-slot='card']:hover {
+    border-color: rgba(255, 255, 255, 0.14);
+    box-shadow:
+      0 24px 60px -18px rgba(0, 0, 0, 0.8),
+      0 0 0 1px rgba(255, 255, 255, 0.08);
+  }
+
+  /* ---- 5) Dark scrollbars / selection / focus (Selvar jaisa) ---- */
+  .dark * {
+    scrollbar-color: #3a4354 transparent;
+  }
+  .dark *::-webkit-scrollbar-thumb {
+    background: #3a4354;
+  }
+  .dark *::-webkit-scrollbar-thumb:hover {
+    background: #4a5468;
+  }
+  .dark ::selection {
+    background: rgba(125, 151, 255, 0.3);
+  }
+  .dark :focus-visible {
+    outline-color: rgba(142, 166, 255, 0.55);
+  }
+
+  /* ---- 6) PRINT PREVIEW protection — cbl-print-root portal ke andar vars wapas
+     light (screen preview == print output). Sirf remap KIYE GAYE vars. ---- */
+  .cbl-print-root {
+    --color-slate-50: #f8fafc;
+    --color-slate-100: #f1f5f9;
+    --color-slate-200: #e2e8f0;
+    --color-slate-300: #cbd5e1;
+    --color-emerald-50: #eef3fe;
+    --color-emerald-100: #d7defa;
+    --color-emerald-200: #c4d0f7;
+    --color-amber-50: #fffbeb;
+    --color-amber-100: #fef3c7;
+    --color-amber-200: #fde68a;
+    --color-amber-300: #fcd34d;
+    --color-red-50: #fef2f2;
+    --color-red-100: #fee2e2;
+    --color-red-200: #fecaca;
+    --color-red-300: #fca5a5;
+    --color-red-400: #f87171;
+    --color-blue-50: #eff6ff;
+    --color-blue-100: #dbeafe;
+    --color-blue-200: #bfdbfe;
+    --color-blue-300: #93c5fd;
+    --color-blue-500: #3b82f6;
+    --color-violet-50: #f5f3ff;
+    --color-violet-100: #ede9fe;
+    --color-violet-200: #ddd6fe;
+    --color-violet-300: #c4b5fd;
+    --color-violet-400: #a78bfa;
+    --color-violet-500: #8b5cf6;
+    --color-orange-50: #fff7ed;
+    --color-orange-100: #ffedd5;
+    --color-orange-200: #fed7aa;
+    --color-orange-300: #fdba74;
+    --color-sky-50: #f0f9ff;
+    --color-sky-200: #bae6fd;
+    --color-sky-600: #0284c7;
+    --color-sky-700: #0369a1;
+    --color-sky-900: #0c4a6e;
+    --color-teal-100: #ccfbf1;
+    --color-rose-50: #fff1f2;
   }
 }
