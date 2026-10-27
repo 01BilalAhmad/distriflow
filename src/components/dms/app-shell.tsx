@@ -133,7 +133,7 @@ function SidebarNav({ modules, activeKey, collapsed, itemClick, openGroups, togg
                     title={n.label}
                     className={`mx-auto my-0.5 flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
                       on
-                        ? 'bg-gradient-to-br from-emerald-600 to-emerald-500 text-white shadow-lg shadow-emerald-600/25'
+                        ? 'bg-[#eef2fb] text-[#10182b] shadow-[0_6px_16px_-8px_rgba(0,0,0,0.5)]'
                         : 'text-slate-400 hover:bg-white/5 hover:text-white'
                     }`}
                   >
@@ -183,11 +183,11 @@ function SidebarNav({ modules, activeKey, collapsed, itemClick, openGroups, togg
                       onClick={itemClick(n.key)}
                       className={`group/i mt-0.5 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] transition-colors ${
                         on
-                          ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 font-semibold text-white shadow-lg shadow-emerald-600/20'
+                          ? 'bg-[#eef2fb] font-semibold text-[#10182b] shadow-[0_6px_16px_-8px_rgba(0,0,0,0.5)]'
                           : 'font-medium text-slate-400 hover:bg-white/5 hover:text-white'
                       }`}
                     >
-                      <n.icon className={`h-4 w-4 shrink-0 ${on ? 'text-white' : 'text-slate-500 group-hover/i:text-emerald-300'}`} />
+                      <n.icon className={`h-4 w-4 shrink-0 ${on ? 'text-[#2a4fd0]' : 'text-slate-500 group-hover/i:text-emerald-300'}`} />
                       <span className="min-w-0 flex-1 truncate">{n.label}</span>
                     </Link>
                   )
@@ -205,7 +205,7 @@ function SidebarNav({ modules, activeKey, collapsed, itemClick, openGroups, togg
 function SidebarBrand({ collapsed }: { collapsed: boolean }) {
   return (
     <div className={`flex h-14 shrink-0 items-center gap-2.5 border-b border-white/10 ${collapsed ? 'justify-center px-0' : 'px-4'}`}>
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-600 to-teal-500 shadow-lg shadow-emerald-500/25">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[#f0a83f] to-[#e3952a] shadow-[0_8px_20px_-8px_rgba(227,149,42,0.55)]">
         <Package2 className="h-4.5 w-4.5 text-white" />
       </span>
       {!collapsed && (
@@ -473,7 +473,7 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
   function sidebarFooter(collapsedMode: boolean) {
     return (
       <div className={`shrink-0 border-t border-white/10 p-2.5 ${collapsedMode ? 'flex flex-col items-center gap-1' : 'flex items-center gap-2.5'}`}>
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-600 to-teal-500 text-[11px] font-bold text-white">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#2f56d6] to-[#6b98ee] text-[11px] font-bold text-white">
           {initials}
         </span>
         {!collapsedMode && (
@@ -494,10 +494,11 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="h-screen overflow-hidden flex bg-[#f6f8fb]">
-      {/* ============ DARK SIDEBAR (desktop ≥lg) ============ */}
+    <div className="h-screen overflow-hidden flex bg-[#eceef2]">
+      {/* ============ DARK SIDEBAR (desktop ≥lg) — Task 90 SELVAR: floating navy panel,
+          rounded 22px, inset top-highlight + deep shadow (demo.codeandchill.store/selvar jaisa) ============ */}
       <aside
-        className={`df-sidebar relative hidden h-full shrink-0 flex-col bg-slate-900 transition-[width] duration-200 lg:flex ${collapsed ? 'w-[72px]' : 'w-[264px]'}`}
+        className={`df-sidebar relative hidden shrink-0 flex-col bg-[#10182b] transition-[width] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] max-lg:hidden lg:my-2.5 lg:ml-2.5 lg:flex lg:h-[calc(100%-1.25rem)] lg:rounded-[22px] lg:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06),0_0_0_1px_rgba(16,24,43,0.9),0_24px_50px_-30px_rgba(10,14,24,0.75)] ${collapsed ? 'w-[72px]' : 'w-[264px]'}`}
       >
         {/* Task 73 — EDGE COLLAPSE PIN: sidebar ke border par floating toggle (Notion/
             Supabase style). User feedback tha ke collapse effect nazar nahi aata — ab
@@ -522,7 +523,7 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
       {drawerOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="df-overlay absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setDrawerOpen(false)} />
-          <aside className="df-sidebar df-drawer absolute left-0 top-0 flex h-full w-[280px] flex-col bg-slate-900 shadow-2xl">
+          <aside className="df-sidebar df-drawer absolute left-0 top-0 flex h-full w-[280px] flex-col bg-[#10182b] shadow-2xl">
             <div className="relative">
               <SidebarBrand collapsed={false} />
               <button
@@ -543,7 +544,7 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
 
       {/* ============ RIGHT COLUMN — top strip + page ============ */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="z-20 flex h-12 shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-3 sm:px-5">
+        <header className="z-20 flex h-12 shrink-0 items-center gap-2 border-b border-transparent bg-[#eceef2] px-3 sm:px-5">
           {/* Mobile hamburger */}
           <button
             onClick={() => setDrawerOpen(true)}
@@ -578,11 +579,11 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <button
               onClick={() => setQuickOpen(true)}
-              className="hidden h-9 items-center gap-2 rounded-lg border border-slate-200 px-3 text-slate-500 transition-colors hover:border-emerald-300 hover:text-emerald-700 sm:flex"
+              className="hidden h-9 items-center gap-2 rounded-full border border-transparent bg-white px-3.5 text-slate-500 shadow-[0_1px_2px_rgba(21,28,46,0.04),0_12px_32px_-22px_rgba(21,28,46,0.28)] transition-all hover:text-slate-800 hover:shadow-[0_2px_8px_rgba(21,28,46,0.08),0_24px_60px_-18px_rgba(21,28,46,0.32)] sm:flex"
               title="Quick search (Ctrl+K)"
             >
               <Search className="h-3.5 w-3.5" />
-              <span className="text-[12.5px]">Search…</span>
+              <span className="text-[12.5px]">Search deals, shops, pages…</span>
               <kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] text-slate-500">⌘K</kbd>
             </button>
             <button
@@ -592,7 +593,7 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
             >
               <Search className="h-4 w-4" />
             </button>
-            <span className="hidden shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11.5px] font-medium text-slate-500 md:inline-flex">
+            <span className="hidden shrink-0 items-center gap-1.5 rounded-full border border-transparent bg-white px-3 py-1.5 text-[11.5px] font-medium text-slate-500 shadow-[0_1px_2px_rgba(21,28,46,0.04)] md:inline-flex">
               <Calendar className="h-3.5 w-3.5 text-slate-400" />
               {new Date().toLocaleDateString('en-PK', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
             </span>

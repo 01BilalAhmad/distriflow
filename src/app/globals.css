@@ -3,7 +3,42 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ============ Task 90 — SELVAR BRAND REMAP (theme-only, zero component changes) ============
+   Selvar demo (demo.codeandchill.store/selvar) ka poora design system token-level par
+   map kiya gaya hai:
+   - Brand primary  : emerald scale -> COBALT BLUE family (Selvar --primary #2a4fd0)
+   - Gradient end   : teal scale    -> SKY BLUE family (Selvar --c-sky #6b98ee)
+   - Surat-e-haal   : slate/red/amber/violet scales waise hi (Selvar bhi yahi neutral
+                      grays + semantic colors use karta hai) — inhe chhedna zero-risk nahi
+   - 742 emerald + 20 teal utilities ek hi jagah se re-brand ho jati hain — koi component
+     file touch nahi hoti, is liye kuch bhi break nahi ho sakta.
+   Typography (Urbanist) layout.tsx mein, shell/sidebar app-shell.tsx mein. */
 @theme inline {
+  /* --- Selvar cobalt blue family (replaces emerald scale) --- */
+  --color-emerald-50: #eef3fe;
+  --color-emerald-100: #d7defa;
+  --color-emerald-200: #c4d0f7;
+  --color-emerald-300: #a2b6f0;
+  --color-emerald-400: #7d97ff;
+  --color-emerald-500: #4a6bdf;
+  --color-emerald-600: #2a4fd0;
+  --color-emerald-700: #2546b8;
+  --color-emerald-800: #1f3a9c;
+  --color-emerald-900: #1a3180;
+  --color-emerald-950: #132153;
+  /* --- Selvar sky blue family (replaces teal scale — gradient ends) --- */
+  --color-teal-50: #eef4fd;
+  --color-teal-100: #d9e7fd;
+  --color-teal-200: #c2d8fb;
+  --color-teal-300: #97bcf6;
+  --color-teal-400: #6b98ee;
+  --color-teal-500: #4f83e8;
+  --color-teal-600: #3569d9;
+  --color-teal-700: #2a5bb4;
+  --color-teal-800: #234a94;
+  --color-teal-900: #1d3d79;
+  --color-teal-950: #142a55;
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
@@ -43,73 +78,79 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* ============ Task 90 — SELVAR DESIGN TOKENS (light) ============
+   Source: demo.codeandchill.store/selvar :root (97 vars) — computed + dumped.
+   bg #eceef2, card #fbfbfc, ink #151a26, primary #2a4fd0, side #10182b,
+   border rgba(21,28,46,.08-.15), radius card 22/ctl 12, shadow soft diffuse. */
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.596 0.145 163.225);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.966 0.044 166);
-  --accent-foreground: oklch(0.375 0.077 168);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.696 0.17 162.48);
-  --chart-1: oklch(0.596 0.145 163.225);
-  --chart-2: oklch(0.627 0.194 149.214);
-  --chart-3: oklch(0.696 0.17 162.48);
-  --chart-4: oklch(0.765 0.177 163.223);
-  --chart-5: oklch(0.444 0.177 26.899);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.596 0.145 163.225);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.966 0.044 166);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.696 0.17 162.48);
+  --radius: 0.875rem; /* Selvar controls 12px (rounded-md) + cards 18px (rounded-xl) */
+  --background: #eceef2;
+  --foreground: #151a26;
+  --card: #fbfbfc;
+  --card-foreground: #151a26;
+  --popover: #fbfbfc;
+  --popover-foreground: #151a26;
+  --primary: #2a4fd0;
+  --primary-foreground: #f6f8ff;
+  --secondary: #f3f4f7;
+  --secondary-foreground: #151a26;
+  --muted: #eef0f4;
+  --muted-foreground: #586073;
+  --accent: #d7defa;
+  --accent-foreground: #233f9e;
+  --destructive: #cf4436;
+  --border: rgba(21, 28, 46, 0.1);
+  --input: rgba(21, 28, 46, 0.13);
+  --ring: #4a6bdf;
+  /* Selvar accent family — cobalt, amber, teal, coral, sky */
+  --chart-1: #2f56d6;
+  --chart-2: #e3952a;
+  --chart-3: #17948a;
+  --chart-4: #e0705a;
+  --chart-5: #6b98ee;
+  --sidebar: #10182b;
+  --sidebar-foreground: #e8ecf5;
+  --sidebar-primary: #2f56d6;
+  --sidebar-primary-foreground: #f6f8ff;
+  --sidebar-accent: rgba(255, 255, 255, 0.08);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-ring: #7d97ff;
 }
 
+/* Task 90 — SELVAR dark tokens (data-theme dark jaisa, .dark class convention) */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: #0c0f14;
+  --foreground: #eceef3;
+  --card: #151a22;
+  --card-foreground: #eceef3;
+  --popover: #151a22;
+  --popover-foreground: #eceef3;
+  --primary: #8ea6ff;
+  --primary-foreground: #121620;
+  --secondary: #1d2430;
+  --secondary-foreground: #eceef3;
+  --muted: #1d2430;
+  --muted-foreground: #a2a9b9;
+  --accent: #1d2430;
+  --accent-foreground: #eceef3;
+  --destructive: #e0705a;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.12);
+  --ring: #8ea6ff;
+  --chart-1: #7d97ff;
+  --chart-2: #ec9f33;
+  --chart-3: #2fb5a9;
+  --chart-4: #e0705a;
+  --chart-5: #6b98ee;
+  --sidebar: #111827;
+  --sidebar-foreground: #e8ecf5;
+  --sidebar-primary: #7d97ff;
+  --sidebar-primary-foreground: #121620;
+  --sidebar-accent: rgba(255, 255, 255, 0.08);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-ring: #7d97ff;
 }
 
 @layer base {
@@ -145,19 +186,19 @@
   background: #94a3b8;
   background-clip: content-box;
 }
-/* Brand selection color — text select karo to emerald highlight */
+/* Brand selection color — text select karo to cobalt highlight (Task 90: Selvar blue) */
 ::selection {
-  background: rgba(16, 185, 129, 0.18);
+  background: rgba(42, 79, 208, 0.16);
 }
 /* Keyboard focus ring — accessible + brand consistent (mouse click par nahi aata) */
 :focus-visible {
-  outline: 2px solid rgba(5, 150, 105, 0.55);
+  outline: 2px solid rgba(42, 79, 208, 0.5);
   outline-offset: 2px;
   border-radius: 4px;
 }
-/* Dark sidebar ke andar apna focus ring (light ring dark par) */
+/* Dark sidebar ke andar apna focus ring (light periwinkle ring dark par) */
 .df-sidebar :focus-visible {
-  outline-color: rgba(52, 211, 153, 0.6);
+  outline-color: rgba(125, 151, 255, 0.65);
 }
 /* Dark sidebar ka apna scrollbar (light thumb dark track par) */
 .sidebar-scroll {
@@ -379,5 +420,72 @@
 @media (max-width: 639px) {
   [data-slot="dialog-content"] {
     max-width: calc(100% - 2rem) !important;
+  }
+}
+
+/* ============ Task 90 — SELVAR MOTION + SURFACES (screen-only) ============
+   Selvar ka motion system: sab kuch cubic-bezier(.2,.8,.2,1) par chalta hai,
+   transitions 0.12–0.3s, hover par cards halka sa upar uthte hain. Poora block
+   @media screen ke andar hai — PRINT/PDF output par is ki zero asar (cbl docs safe). */
+@media screen {
+  :root {
+    --df-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  /* Selvar easing — har interactive element ki existing transition-colors/all ab
+     wahi smooth curve se chalegi (timing-function override, property/behavior same) */
+  button,
+  a,
+  [role='button'],
+  summary,
+  [data-slot='tabs-trigger'] {
+    transition-timing-function: var(--df-ease);
+  }
+
+  /* Cards — Selvar surface: 20px radius, soft diffuse shadow, hover par halka lift */
+  [data-slot='card'] {
+    border-radius: 20px;
+    border-color: rgba(21, 28, 46, 0.08);
+    box-shadow:
+      0 1px 2px rgba(21, 28, 46, 0.04),
+      0 12px 32px -22px rgba(21, 28, 46, 0.28);
+    transition:
+      transform 0.3s var(--df-ease),
+      box-shadow 0.3s var(--df-ease),
+      border-color 0.3s var(--df-ease);
+  }
+  [data-slot='card']:hover {
+    transform: translateY(-2px);
+    border-color: rgba(21, 28, 46, 0.14);
+    box-shadow:
+      0 2px 8px rgba(21, 28, 46, 0.08),
+      0 24px 60px -18px rgba(21, 28, 46, 0.32);
+  }
+
+  /* Page entrance — har navigation par content halka fade-in (opacity only —
+     transform/fixed breaking ka koi sawal hi nahi) */
+  @keyframes df-page-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  main > * {
+    animation: df-page-in 0.3s var(--df-ease) both;
+  }
+
+  /* Dialog/popover content — Selvar jaisa pop (scale 0.97 -> 1, tw-animate ke sath) */
+  [data-slot='dialog-content'] {
+    transition-timing-function: var(--df-ease);
+  }
+
+  /* Reduced motion — accessibility (Selvar bhi yahi karta hai) */
+  @media (prefers-reduced-motion: reduce) {
+    main > * {
+      animation: none;
+    }
+    [data-slot='card'],
+    [data-slot='card']:hover {
+      transition: none;
+      transform: none;
+    }
   }
 }

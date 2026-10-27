@@ -1,11 +1,15 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+// Task 90 — SELVAR THEME: font Urbanist (Selvar demo ka signature font). CSS variable
+// ka naam (--font-geist-sans) INTENTIONALLY wahi rakha gaya hai — @theme mapping aur
+// saari utilities bina kisi touch ke naye font par switch ho jati hain.
+import { Urbanist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 
-const geistSans = Geist({
+const geistSans = Urbanist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
+  display: "swap",
 });
 
 const geistMono = Geist_Mono({
