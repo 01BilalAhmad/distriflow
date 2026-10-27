@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import { jsonError, distributorTenant } from '@/lib/dms-scope'
+import { matchShopCategory, readShopCategories } from '@/lib/dms-settings'
 
 // Task 30 — BULK SHOPS IMPORT: Excel/CSV se ek sath saari shops import.
 // Rules:
@@ -9,7 +10,6 @@ import { jsonError, distributorTenant } from '@/lib/dms-scope'
 // - code generation single-add wale formula se (count-based), collision par +5 bump
 
 const DAY_CODES = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'] as const
-const CHANNELS = ['KIRYANA', 'SUPERMARKET', 'WHOLESALE', 'GENERAL'] as const
 
 /** "mon,wed,,xyz" -> "MON,WED" (invalid/empty codes drop) */
 function sanitizeVisitDays(raw: unknown): string {
@@ -42,6 +42,9 @@ export async function POST(req: Request) {
       where: { distributorId: tenantId },
       select: { name: true, code: true },
     })
+    // Task 92: channel validation ab tenant ki shop-categories list se (case/underscore-insensitive,
+    // "Kiryana"/"kiryana"/"KIRYANA" sab match) — list mein nahi to GENERAL fallback
+    const shopCats = await readShopCategories(tenantId)
     const allCodes = await db.outlet.findMany({ select: { code: true } })
     const seenNames = new Set(existing.map((o) => o.name.trim().toLowerCase()))
     const usedCodes = new Set(allCodes.map((o) => o.code))
@@ -84,9 +87,8 @@ export async function POST(req: Request) {
         else warnings.push({ row: rowNum, name, reason: `Salesman "${smRaw}" nahi mila — shop bina booker ke import hui` })
       }
 
-      // Channel normalize (Kiryana -> KIRYANA; unknown -> GENERAL)
-      const chRaw = get('channel').toUpperCase().replace(/[\s-]+/g, '_')
-      const channel = (CHANNELS as readonly string[]).includes(chRaw) ? chRaw : 'GENERAL'
+      // Channel normalize (Kiryana -> KIRYANA; list mein na mile to GENERAL)
+      const channel = matchShopCategory(shopCats, get('channel')) ?? 'GENERAL'
 
       const ntn = get('ntn')
       const fsRaw = get('filerStatus').toUpperCase()

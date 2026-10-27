@@ -1143,6 +1143,13 @@ function ShopLedgerDialog({ shop, userId, onClose }: {
 function NewShopDialog({ userId, onClose }: { userId: string; onClose: () => void }) {
   const [form, setForm] = useState({ name: '', ownerName: '', ownerPhone: '', address: '', city: 'Lahore', channel: 'KIRYANA', cnic: '', ntn: '' })
   const [saving, setSaving] = useState(false)
+  // Task 92: shop categories dynamic (distributor ki list — fetch fail par 4 defaults fallback)
+  const [channels, setChannels] = useState<string[]>(['KIRYANA', 'SUPERMARKET', 'WHOLESALE', 'GENERAL'])
+  useEffect(() => {
+    api<{ categories: { name: string }[] }>(`/api/shop-categories?userId=${userId}`)
+      .then((r) => setChannels(r.categories.map((c) => c.name)))
+      .catch(() => {})
+  }, [userId])
   // GPS shop tag ke liye LAZMI — dialog khulte hi auto capture (order sheet jaisa hi pattern)
   const [gps, setGps] = useState<{ lat: number; lng: number; accuracy?: number } | null>(null)
   const [gpsStatus, setGpsStatus] = useState<'capturing' | 'captured' | 'failed'>('capturing')
@@ -1224,7 +1231,8 @@ function NewShopDialog({ userId, onClose }: { userId: string; onClose: () => voi
             <div className="grid gap-1"><Label className="text-[11px]">City</Label><Input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} /></div>
             <div className="grid gap-1"><Label className="text-[11px]">Channel Type</Label>
               <select value={form.channel} onChange={(e) => setForm({ ...form, channel: e.target.value })} className="h-9 rounded-md border bg-white px-2 text-xs font-medium">
-                {['KIRYANA', 'SUPERMARKET', 'WHOLESALE', 'GENERAL'].map((c) => <option key={c} value={c}>{c}</option>)}
+                {/* Task 92: distributor ki shop categories + legacy value merge */}
+                {Array.from(new Set([...channels, form.channel].filter(Boolean))).map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
           </div>

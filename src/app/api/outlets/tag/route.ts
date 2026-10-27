@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
 import { getTenantIdForSalesman } from '@/lib/dms-pjp'
+import { resolveShopChannel } from '@/lib/dms-settings'
 
 /**
  * Task 85 — OFFLINE-FIRST NEW SHOP TAGGING (booker app / web booker portal)
@@ -52,7 +53,9 @@ export async function POST(req: Request) {
 
     const count = await db.outlet.count()
     const code = `OUT-${1005 + (count + 1) * 5}`
-    const CH_OK = ['KIRYANA', 'SUPERMARKET', 'WHOLESALE', 'GENERAL']
+    // Task 92: channel ab tenant ki shop-categories list se validate hota hai (case-insensitive) —
+    // list mein nahi to GENERAL fallback
+    const resolvedChannel = await resolveShopChannel(tenantId, channel)
 
     const outlet = await db.outlet.create({
       data: {
@@ -62,7 +65,7 @@ export async function POST(req: Request) {
         phone: String(ownerPhone).trim(),
         address: String(address).trim(),
         city: (city ?? '').trim() || 'Lahore',
-        channel: CH_OK.includes(String(channel)) ? String(channel) : 'GENERAL',
+        channel: resolvedChannel,
         lat: latN,
         lng: lngN,
         ntn: (ntn ?? '').trim() || null,

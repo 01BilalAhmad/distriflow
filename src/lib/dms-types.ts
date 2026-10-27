@@ -135,6 +135,13 @@ export interface CategoryDTO {
   productCount?: number
 }
 
+// Task 92: per-tenant shop categories (Outlet.channel ab editable list se aata hai)
+export interface ShopCategoryDTO {
+  name: string
+  outletCount?: number
+  schemeCount?: number
+}
+
 // ---- Procurement: companies + purchase invoices + payable ledger ----
 export interface CompanyFullDTO extends CompanyDTO {
   contactPerson: string | null

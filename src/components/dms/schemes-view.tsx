@@ -137,12 +137,21 @@ export function SchemesView() {
   )
 }
 
+/** Task 92: channel label — ALL-CAPS names (KIRYANA, PAN_SHOP) ko "Kiryana"/"Pan Shop" banata hai;
+ *  custom mixed-case names (jaise "Pan Shop Area") as-is dikhte hain */
+function prettyChannel(name: string): string {
+  if (name !== name.toUpperCase()) return name
+  return name.toLowerCase().replace(/(^|_)(\w)/g, (_, sep, ch) => (sep ? ' ' : '') + ch.toUpperCase())
+}
+
 /** Task 41: ek hi dialog CREATE + EDIT dono ke liye. Edit par sab fields prefill,
  * PATCH full-fields. IMPORTANT: scheme edit karne se PURANE bills nahi badalte —
  * order items booking waqt ka scheme snapshot store karte hain. */
 function SchemeDialog({ open, onOpenChange, onSaved, editScheme }: { open: boolean; onOpenChange: (v: boolean) => void; onSaved: () => void; editScheme: SchemeDTO | null }) {
   const [products, setProducts] = useState<ProductDTO[]>([])
   const [categories, setCategories] = useState<CategoryDTO[]>([])
+  // Task 92: shop categories — channel-target schemes ki list ab DB-backed (hardcoded 4 nahi)
+  const [shopChannels, setShopChannels] = useState<string[]>(['KIRYANA', 'SUPERMARKET', 'WHOLESALE', 'GENERAL'])
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [type, setType] = useState('PERCENT_DISCOUNT')
@@ -164,6 +173,7 @@ function SchemeDialog({ open, onOpenChange, onSaved, editScheme }: { open: boole
     const user = JSON.parse(localStorage.getItem('dms_session') ?? 'null')
     fetch(`/api/products?userId=${user?.id ?? ''}`).then((r) => r.json()).then((r) => setProducts(r.products ?? [])).catch(() => {})
     fetch(`/api/categories?userId=${user?.id ?? ''}`).then((r) => r.json()).then((r) => setCategories(r.categories ?? [])).catch(() => {})
+    fetch(`/api/shop-categories?userId=${user?.id ?? ''}`).then((r) => r.json()).then((r) => setShopChannels((r.categories ?? []).map((c: { name: string }) => c.name))).catch(() => {})
     // edit mode: scheme ke values prefill | create mode: defaults reset
     if (editScheme) {
       setName(editScheme.name)
@@ -248,11 +258,9 @@ function SchemeDialog({ open, onOpenChange, onSaved, editScheme }: { open: boole
               <Select value={channel} onValueChange={setChannel}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
+                  {/* Task 92: DB-backed shop categories (rename-safe — PATCH routes schemes bhi move karte hain) + legacy value merge */}
                   <SelectItem value="ALL">All Channels</SelectItem>
-                  <SelectItem value="KIRYANA">Kiryana</SelectItem>
-                  <SelectItem value="SUPERMARKET">Supermarket</SelectItem>
-                  <SelectItem value="WHOLESALE">Wholesale</SelectItem>
-                  <SelectItem value="GENERAL">General</SelectItem>
+                  {Array.from(new Set([...shopChannels, channel].filter((c) => c && c !== 'ALL'))).map((c) => <SelectItem key={c} value={c}>{prettyChannel(c)}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>

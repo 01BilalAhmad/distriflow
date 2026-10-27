@@ -1,8 +1,8 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
+import { matchShopCategory, readShopCategories } from '@/lib/dms-settings'
 
 const DAY_CODES = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'] as const
-const CH_OK = ['KIRYANA', 'SUPERMARKET', 'WHOLESALE', 'GENERAL']
 
 function sanitizeVisitDays(raw: unknown): string | undefined {
   if (typeof raw !== 'string') return undefined
@@ -53,7 +53,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (typeof phone === 'string') data.phone = phone.trim() || null
     if (typeof b.address === 'string') data.address = b.address.trim() || null
     if (typeof b.city === 'string' && b.city.trim()) data.city = b.city.trim()
-    if (typeof b.channel === 'string' && CH_OK.includes(b.channel)) data.channel = b.channel
+    // Task 92: channel tenant ki shop-categories list se validate — match to canonical naam,
+    // unchanged legacy value (shop ka apna channel) to keep, warna GENERAL fallback
+    if (typeof b.channel === 'string' && b.channel.trim()) {
+      const list = await readShopCategories(user.profile.id)
+      const matched = matchShopCategory(list, b.channel)
+      if (matched) data.channel = matched
+      else if (b.channel.trim() === outlet.channel) { /* legacy unchanged — chhoro */ }
+      else data.channel = 'GENERAL'
+    }
     if (typeof b.cnic === 'string') data.cnic = b.cnic.trim() || null
     if (typeof b.ntn === 'string') {
       const ntn = b.ntn.trim() || null

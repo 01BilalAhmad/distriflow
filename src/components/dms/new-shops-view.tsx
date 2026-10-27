@@ -211,6 +211,14 @@ export function NewShopsView() {
 function EditNewShopDialog({ shop, onClose, onSaved }: { shop: NewShopDTO; onClose: () => void; onSaved: () => void }) {
   const user = useDMS((s) => s.user)
   const [saving, setSaving] = useState(false)
+  // Task 92: shop categories dynamic list (fetch fail par hardcoded CHANNELS fallback)
+  const [channels, setChannels] = useState<string[]>(CHANNELS)
+  useEffect(() => {
+    if (!user) return
+    api<{ categories: { name: string }[] }>(`/api/shop-categories?userId=${user.id}`)
+      .then((r) => setChannels(Array.from(new Set([...r.categories.map((c) => c.name), shop.channel].filter(Boolean)))))
+      .catch(() => {})
+  }, [user, shop.channel])
   const [form, setForm] = useState({
     name: shop.name, ownerName: shop.ownerName ?? '', ownerPhone: shop.phone ?? '', address: shop.address ?? '',
     city: shop.city, channel: shop.channel, cnic: shop.cnic ?? '', ntn: shop.ntn ?? '',
@@ -263,7 +271,8 @@ function EditNewShopDialog({ shop, onClose, onSaved }: { shop: NewShopDTO; onClo
               <Select value={form.channel} onValueChange={(v) => setForm({ ...form, channel: v })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {CHANNELS.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  {/* Task 92: DB-backed shop categories + legacy value merge */}
+                  {channels.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>

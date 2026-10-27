@@ -12,9 +12,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR } from '@/lib/dms-api'
-import type { OutletDTO, SalesmanPerfDTO } from '@/lib/dms-types'
+import type { OutletDTO, SalesmanPerfDTO, ShopCategoryDTO } from '@/lib/dms-types'
 import { BulkImportDialog, type BulkColumn, type ParseOutcome } from '@/components/dms/bulk-import-dialog'
-import { Plus, Search, MapPin, Loader2, Phone, Store, Pencil, Settings2, FileText, CalendarDays, Upload, ShoppingCart, UserCheck } from 'lucide-react'
+import { Plus, Search, MapPin, Loader2, Phone, Store, Pencil, Settings2, FileText, CalendarDays, Upload, ShoppingCart, UserCheck, Tags, Check, X, Trash2 } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
 export const DAY_LIST = [
@@ -47,7 +47,7 @@ export const OUTLET_IMPORT_COLUMNS: BulkColumn[] = [
   { key: 'phone', label: 'Phone' },
   { key: 'address', label: 'Address' },
   { key: 'city', label: 'City', hint: 'Khali chhora to Lahore default' },
-  { key: 'channel', label: 'Channel', hint: 'KIRYANA / SUPERMARKET / WHOLESALE / GENERAL' },
+  { key: 'channel', label: 'Channel', hint: 'Shop category — Categories mein bani honi chahiye (warna GENERAL par jayegi)' },
   { key: 'creditDays', label: 'Credit Days', hint: 'Default 7' },
   { key: 'ntn', label: 'NTN', hint: 'NTN likha to FILER ban jayegi' },
   { key: 'cnic', label: 'CNIC' },
@@ -74,6 +74,9 @@ export function OutletsView() {
   const [editOutlet, setEditOutlet] = useState<OutletDTO | null>(null)
   const [taxOpen, setTaxOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  // Task 92: per-tenant shop categories — manager dialog + form selects isi list se
+  const [shopCats, setShopCats] = useState<ShopCategoryDTO[]>([])
+  const [catsOpen, setCatsOpen] = useState(false)
 
   // Task 67: is shop ka foran order book karo — /orders par New Order dialog isi shop ke sath khulega
   function bookOrderFor(outletId: string) {
@@ -87,6 +90,10 @@ export function OutletsView() {
     try {
       const r = await api<{ outlets: OutletDTO[] }>(`/api/outlets?userId=${user.id}`)
       setOutlets(r.outlets)
+      // Task 92: shop categories (fail par chup-chaap skip — UI kabhi break na ho)
+      api<{ categories: ShopCategoryDTO[] }>(`/api/shop-categories?userId=${user.id}`)
+        .then((c) => setShopCats(c.categories ?? []))
+        .catch(() => {})
     } finally { setLoading(false) }
   }
   useEffect(() => { load() }, [user])
@@ -112,6 +119,9 @@ export function OutletsView() {
             </Button>
             <Button variant="outline" onClick={() => setImportOpen(true)} className="border-emerald-300 text-emerald-700 hover:bg-emerald-50">
               <Upload className="h-4 w-4 mr-1.5" /> Bulk Import
+            </Button>
+            <Button variant="outline" onClick={() => setCatsOpen(true)} className="border-emerald-300 text-emerald-700 hover:bg-emerald-50" title="Shop categories add / rename / delete karein">
+              <Tags className="h-4 w-4 mr-1.5" /> Categories
             </Button>
             <Button onClick={() => { setEditOutlet(null); setFormOpen(true) }} className="bg-emerald-600 hover:bg-emerald-700"><Plus className="h-4 w-4 mr-1.5" /> Register Outlet</Button>
           </div>
@@ -201,6 +211,7 @@ export function OutletsView() {
       )}
 
       <OutletFormDialog open={formOpen} onOpenChange={setFormOpen} onSaved={load} outlet={editOutlet} />
+      <ShopCategoriesDialog open={catsOpen} onOpenChange={setCatsOpen} categories={shopCats} onChanged={load} />
       <TaxSettingsDialog open={taxOpen} onOpenChange={setTaxOpen} />
       <BulkImportDialog
         open={importOpen}
@@ -252,6 +263,8 @@ function OutletFormDialog({ open, onOpenChange, onCreated, onSaved, outlet }: {
   const [saving, setSaving] = useState(false)
   // Task 68: route booker assignment — shop jis booker ko assign hogi, order booking mein sirf usi ko dikhegi
   const [salesmen, setSalesmen] = useState<SalesmanPerfDTO[]>([])
+  // Task 92: shop categories — dynamic list (fetch fail ho to hardcoded defaults fallback)
+  const [shopCats, setShopCats] = useState<string[]>([])
 
   useEffect(() => {
     if (open) {
@@ -263,7 +276,12 @@ function OutletFormDialog({ open, onOpenChange, onCreated, onSaved, outlet }: {
         salesmanId: outlet.salesmanId ?? '',
       } : { name: '', ownerName: '', phone: '', address: '', city: 'Lahore', channel: 'KIRYANA', creditDays: '7', ntn: '', cnic: '', filerStatus: 'NON_FILER', visitDays: [], salesmanId: '' })
       setCoords(null)
-      if (user) api<{ salesmen: SalesmanPerfDTO[] }>(`/api/field-force?userId=${user.id}`).then((r) => setSalesmen(r.salesmen)).catch(() => {})
+      if (user) {
+        api<{ salesmen: SalesmanPerfDTO[] }>(`/api/field-force?userId=${user.id}`).then((r) => setSalesmen(r.salesmen)).catch(() => {})
+        api<{ categories: ShopCategoryDTO[] }>(`/api/shop-categories?userId=${user.id}`)
+          .then((r) => setShopCats(r.categories.map((c) => c.name)))
+          .catch(() => {})
+      }
     }
   }, [open, outlet, user])
 
@@ -381,7 +399,8 @@ function OutletFormDialog({ open, onOpenChange, onCreated, onSaved, outlet }: {
               <Select value={form.channel} onValueChange={(v) => setForm({ ...form, channel: v })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {['KIRYANA', 'SUPERMARKET', 'WHOLESALE', 'GENERAL'].map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  {/* Task 92: DB-backed shop categories + legacy value (purani shop agar list se bahar channel par ho) */}
+                  {Array.from(new Set([...shopCats, form.channel].filter(Boolean))).map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -496,6 +515,154 @@ function TaxSettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange
             {saving && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />} Save Tax Settings
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** Task 92: Shop categories manager — add / rename (shops + channel-schemes naye naam par move) /
+ *  delete (shops "GENERAL" par move; scheme isi channel par ho to BLOCK). Inline edit + 2-step delete.
+ *  Products ke CategoriesDialog (Task 53b) jaisa hi UX — consistency. */
+function ShopCategoriesDialog({ open, onOpenChange, categories, onChanged }: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  categories: ShopCategoryDTO[]
+  onChanged: () => void
+}) {
+  const user = useDMS((s) => s.user)
+  const [name, setName] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [editingName, setEditingName] = useState<string | null>(null)
+  const [editName, setEditName] = useState('')
+  const [busyName, setBusyName] = useState<string | null>(null)
+  const [confirmName, setConfirmName] = useState<string | null>(null)
+
+  useEffect(() => { if (open) { setName(''); setEditingName(null); setConfirmName(null) } }, [open])
+
+  async function add() {
+    if (!name.trim()) { toast({ title: 'Category ka naam likhein', variant: 'destructive' }); return }
+    setSaving(true)
+    try {
+      await api('/api/shop-categories', { method: 'POST', body: JSON.stringify({ userId: user?.id, name: name.trim() }) })
+      toast({ title: 'Category Added ✓', description: name.trim() })
+      setName('')
+      onChanged()
+    } catch (e) {
+      toast({ title: 'Failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' })
+    } finally { setSaving(false) }
+  }
+
+  async function rename(catName: string) {
+    if (!editName.trim()) { toast({ title: 'Category ka naam likhein', variant: 'destructive' }); return }
+    setBusyName(catName)
+    try {
+      const r = await api<{ moved: number; schemes: number; merged?: boolean }>('/api/shop-categories', {
+        method: 'PATCH',
+        body: JSON.stringify({ userId: user?.id, from: catName, to: editName.trim() }),
+      })
+      const moveDesc = [r.moved > 0 ? `${r.moved} shops` : '', r.schemes > 0 ? `${r.schemes} schemes` : ''].filter(Boolean).join(' + ')
+      toast({
+        title: 'Category Renamed ✓',
+        description: r.merged ? `Same naam ki category thi — ${moveDesc || 'sab'} merge ho gaye`
+          : moveDesc ? `${moveDesc} naye naam par update ho gaye` : 'Save ho gaya',
+      })
+      setEditingName(null)
+      onChanged()
+    } catch (e) {
+      toast({ title: 'Failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' })
+    } finally { setBusyName(null) }
+  }
+
+  async function remove(cat: ShopCategoryDTO) {
+    // 2-step: pehla click confirm arm karta hai, dobara click delete
+    if (confirmName !== cat.name) { setConfirmName(cat.name); return }
+    setBusyName(cat.name)
+    try {
+      const r = await api<{ moved: number; moveTo: string }>(`/api/shop-categories?userId=${user?.id}&name=${encodeURIComponent(cat.name)}&moveTo=GENERAL`, { method: 'DELETE' })
+      toast({
+        title: 'Category Deleted ✓',
+        description: r.moved > 0 ? `${r.moved} shops "${r.moveTo}" category par move ho gaye` : cat.name,
+      })
+      setConfirmName(null)
+      onChanged()
+    } catch (e) {
+      toast({ title: 'Failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' })
+    } finally { setBusyName(null) }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><Tags className="h-5 w-5 text-emerald-600" /> Shop Categories</DialogTitle>
+          <DialogDescription>Add, rename ya delete karein — rename par shops aur channel schemes bhi naye naam par chale jate hain</DialogDescription>
+        </DialogHeader>
+        <div className="flex gap-2">
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add() } }}
+            placeholder="Nayi category ka naam (misal: Pan Shop)"
+          />
+          <Button onClick={add} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 shrink-0">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4 mr-1" />} Add
+          </Button>
+        </div>
+        <div className="rounded-lg border">
+          {categories.length === 0 ? (
+            <p className="py-8 text-center text-sm text-slate-400">Abhi koi category nahi</p>
+          ) : categories.map((c) => (
+            <div key={c.name} className="flex items-center justify-between gap-2 px-3 py-2 border-b last:border-0">
+              {editingName === c.name ? (
+                <>
+                  <Input
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); rename(c.name) } }}
+                    className="h-8 flex-1"
+                    autoFocus
+                  />
+                  <div className="flex gap-1 shrink-0">
+                    <Button size="icon" className="h-8 w-8 bg-emerald-600 hover:bg-emerald-700" onClick={() => rename(c.name)} disabled={busyName === c.name} title="Save">
+                      {busyName === c.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                    </Button>
+                    <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => setEditingName(null)} title="Cancel">
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-slate-800 truncate">{c.name}</p>
+                    <p className="text-[11px] text-slate-400">
+                      {c.outletCount ?? 0} shops
+                      {(c.schemeCount ?? 0) > 0 && <span className="text-amber-600"> • {c.schemeCount} scheme use karti hain</span>}
+                    </p>
+                  </div>
+                  <div className="flex gap-1 shrink-0">
+                    <Button size="icon" variant="ghost" className="h-8 w-8 text-slate-500 hover:bg-slate-100" onClick={() => { setEditingName(c.name); setEditName(c.name); setConfirmName(null) }} title="Rename">
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    {confirmName === c.name ? (
+                      <Button size="sm" variant="destructive" className="h-8" onClick={() => remove(c)} disabled={busyName === c.name}>
+                        {busyName === c.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          : (c.outletCount ?? 0) > 0 ? `${c.outletCount} shops move?` : 'Sure delete?'}
+                      </Button>
+                    ) : (
+                      <Button size="icon" variant="ghost" className="h-8 w-8 text-slate-400 hover:text-red-600" onClick={() => { setConfirmName(c.name); setEditingName(null) }} title="Delete">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+        <p className="text-[11px] text-slate-500 rounded-lg bg-slate-50 border border-slate-100 p-2.5">
+          Delete par us category ki shops <b>GENERAL</b> par move ho jati hain. Agar koi scheme isi channel par chal rahi ho to pehle us scheme ka channel badalna hoga.
+        </p>
       </DialogContent>
     </Dialog>
   )
