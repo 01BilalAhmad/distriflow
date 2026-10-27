@@ -509,7 +509,7 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
           onClick={toggleCollapsed}
           title={collapsed ? 'Sidebar barhayein (Ctrl+B)' : 'Sidebar collapse karein (Ctrl+B)'}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          className="absolute -right-3.5 top-4 z-30 hidden h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 shadow-md transition-all hover:scale-110 hover:border-emerald-300 hover:text-emerald-600 lg:flex"
+          className="absolute -right-3.5 top-4 z-30 hidden h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 shadow-md transition-all hover:scale-110 hover:border-emerald-300 hover:text-emerald-600 dark:border-white/15 dark:bg-[#1d2740] dark:text-slate-300 dark:hover:border-emerald-400/50 dark:hover:text-[#8ea6ff] lg:flex"
         >
           {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
         </button>

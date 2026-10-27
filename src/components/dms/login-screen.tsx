@@ -41,7 +41,7 @@ export function LoginScreen({ nextPath }: { nextPath?: string }) {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-emerald-50/50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-emerald-50/50 dark:from-[#141c30] dark:via-[#0c0f14] dark:to-[#141c30] flex items-center justify-center p-4">
       <div className="w-full max-w-5xl grid lg:grid-cols-2 gap-8 items-center">
         {/* Branding side */}
         <div className="hidden lg:block space-y-6">
@@ -71,7 +71,7 @@ export function LoginScreen({ nextPath }: { nextPath?: string }) {
               { icon: Package, t: 'FEFO Inventory', d: 'Batch-wise stock' },
               { icon: Boxes, t: 'Mega Admin Model', d: 'Dist → Order Bookers' },
             ].map((f) => (
-              <div key={f.t} className="flex items-start gap-3 rounded-lg border bg-white/70 p-3">
+              <div key={f.t} className="flex items-start gap-3 rounded-lg border bg-white/70 dark:bg-white/5 dark:border-white/10 p-3">
                 <f.icon className="h-5 w-5 text-emerald-600 mt-0.5 shrink-0" />
                 <div>
                   <p className="text-sm font-semibold text-slate-800">{f.t}</p>

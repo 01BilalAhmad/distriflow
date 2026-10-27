@@ -621,6 +621,35 @@
     background-color: #26334f;
   }
 
+  /* ---- 3b) Task 93 — bg-white/<opacity> frosted surfaces ka dark remap ----
+     .dark .bg-white sirf EXACT class pakarta hai — bg-white/70, /80, /95 (frosted
+     panels: reports FilterBar, ReportEmptyGate, login feature cards, purchase-entry
+     sticky bar, visit-map legend) light hi reh jati thin -> light surface par
+     remapped light text invisible ho jata tha (user: "text sai sy visible nai").
+     Ab card-translucent dark surfaces par le aao (opacity hierarchy preserve:
+     /95 sabse zyada opaque). NOTE: bg-white/50 (salesman toggle knob) jaan boojh
+     ke chhoda — wo blue gradient par WHITE knob hai, dark karna usay gayab kar deta. */
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='bg-white/95'] {
+    background-color: color-mix(in srgb, var(--card) 88%, transparent);
+  }
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='bg-white/80'],
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) [class*='bg-white/70'] {
+    background-color: color-mix(in srgb, var(--card) 72%, transparent);
+  }
+
+  /* ---- 3c) Task 93 — NATIVE <select> dropdown (popup list) colors ----
+     Closed select chip vars se dark ho jata tha, magar khulta waqt option list
+     OS/browser default par render hoti thi (kuch jagah white bg + light text =
+     "select bar main text visible nai"). Explicit option colors se popup bhi
+     dark surface + readable text — sab native selects (reports, products,
+     field-force, salesman) par consistent. CBL print docs mein select nahi hai
+     — magar print subtree guard phir bhi laga (safety). */
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) select option,
+  .dark :not(:is(.cbl-print-root, .cbl-print-root *)) select optgroup {
+    background-color: var(--card);
+    color: var(--foreground);
+  }
+
   /* ---- 4) Selvar dark card surface (soft inset line + deep diffuse) ---- */
   .dark [data-slot='card'] {
     border-color: rgba(255, 255, 255, 0.08);
