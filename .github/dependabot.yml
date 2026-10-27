@@ -1,0 +1,17 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    # npm is the canonical lockfile (audit Finding: dual bun.lock + package-lock.json
+    # must be resolved — see docs/adr/0003-single-package-manager-npm.md)
+    versioning-strategy: auto
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
