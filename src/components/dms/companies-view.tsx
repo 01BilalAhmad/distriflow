@@ -25,6 +25,7 @@ import type {
 } from '@/lib/dms-types'
 import { useDMS } from '@/lib/dms-store'
 import { CompanyStatementDoc } from './company-print'
+import { PurchaseInvoicePrint } from './purchase-print'
 import { SupplierAgingCard } from './supplier-aging'
 import { keepDialogBehind } from './cbl-print'
 import { toast } from '@/hooks/use-toast'
@@ -572,6 +573,8 @@ function CompanyDetailDialog({ company, products, onClose, onEdit, onDataChanged
 // ==================== INVOICE ITEMS VIEWER ====================
 
 function InvoiceItemsDialog({ invoice, onClose }: { invoice: PurchaseInvoiceDTO; onClose: () => void }) {
+  // Task 89: print preview — supplier header + distributor M/S (bill format)
+  const [printOpen, setPrintOpen] = useState(false)
   // Task 50: upar Net column ka total — neeche summary ke Net Amount se EXACT match (company invoice jaisa)
   const sum2 = (f: (it: PurchaseInvoiceDTO['items'][number]) => number) =>
     Math.round(invoice.items.reduce((s, it) => s + f(it), 0) * 100) / 100
@@ -587,11 +590,14 @@ function InvoiceItemsDialog({ invoice, onClose }: { invoice: PurchaseInvoiceDTO;
   const billDisc = Math.round((invoice.discount - sumPassOn - invoice.tradeOfferTotal) * 100) / 100
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-[calc(100%-2rem)] sm:max-w-4xl max-h-[92vh] overflow-y-auto">
+      <DialogContent className="max-w-[calc(100%-2rem)] sm:max-w-4xl max-h-[92vh] overflow-y-auto" {...keepDialogBehind}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {invoice.invoiceNo}
             <Badge variant="outline" className={`text-[9px] ${invoice.status === 'PAID' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : invoice.status === 'PARTIAL' ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-red-200 bg-red-50 text-red-700'}`}>{invoice.status}</Badge>
+            <Button size="sm" className="ml-auto h-7 bg-emerald-600 hover:bg-emerald-700" onClick={() => setPrintOpen(true)}>
+              <Printer className="h-3.5 w-3.5 mr-1" /> Print
+            </Button>
           </DialogTitle>
           <DialogDescription>
             {invoice.companyName} • {fmtDate(invoice.date)} {invoice.supplierInvoiceNo ? `• Supplier Bill ${invoice.supplierInvoiceNo}` : ''}
@@ -670,6 +676,8 @@ function InvoiceItemsDialog({ invoice, onClose }: { invoice: PurchaseInvoiceDTO;
           <p className="text-[10px] text-slate-400 pt-0.5 leading-snug">Net Amount = upar Net column ka yahi total (Gross − Pass On). Iske baad − TO − Bill Disc + GST + Adv 236H = Net Invoice (payable).</p>
         </div>
         {invoice.notes && <p className="text-xs text-slate-400 border-l-2 border-slate-200 pl-2">{invoice.notes}</p>}
+        {/* Task 89: A4 print preview — supplier header, distributor M/S (portal, dialog ke upar khulta hai) */}
+        {printOpen && <PurchaseInvoicePrint invoice={invoice} onClose={() => setPrintOpen(false)} />}
       </DialogContent>
     </Dialog>
   )
