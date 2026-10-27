@@ -19,6 +19,24 @@ import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
 const round2 = (n: number) => Math.round(n * 100) / 100
 
 /**
+ * FIFO aging — ledger credits ko purane debits par FIFO apply karke sab se purana
+ * unpaid debit ki date nikalta hai (recovery sheet ka 30/60/90+ aging badge).
+ * null = koi pending udhaar nahi.
+ */
+function fifoOldestDue(entries: Array<{ type: string; amount: number; date: Date }>): string | null {
+  const debits = entries
+    .filter((e) => e.type === 'DEBIT')
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+  if (debits.length === 0) return null
+  let credits = entries.filter((e) => e.type === 'CREDIT').reduce((s, e) => s + e.amount, 0)
+  for (const d of debits) {
+    if (credits >= d.amount - 0.005) { credits -= d.amount; continue }
+    return new Date(d.date).toISOString()
+  }
+  return null
+}
+
+/**
  * Role ke hisaab se RECOVERY scope — outlet-centric (route-centric):
  * kaunse outlets + unke bookers nazar aa rahe hain. Hierarchy parent nahi,
  * balki US user ki shops jo dekh sakte hain (distributor ki sab shops aur
@@ -60,7 +78,7 @@ export async function GET(req: Request) {
       where: scope.outletWhere,
       select: {
         id: true, name: true, code: true, city: true, channel: true, salesmanId: true, visitDays: true,
-        ledgerEntries: { select: { type: true, amount: true } },
+        ledgerEntries: { select: { type: true, amount: true, date: true } },
       },
     })
 
@@ -72,8 +90,15 @@ export async function GET(req: Request) {
 
     const recoveries = await db.recovery.findMany({
       where: { outlet: scope.outletWhere, status: { not: 'REJECTED' } },
-      select: { bookerId: true, amount: true, recoveredAt: true, status: true },
+      select: { outletId: true, bookerId: true, amount: true, recoveredAt: true, status: true },
     })
+
+    // Aaj ki APPROVED wasooli per shop — sheet mein "Aaj wasooli" badge ke liye
+    const collectedTodayByOutlet = new Map<string, number>()
+    for (const r of recoveries) {
+      if (r.status !== 'APPROVED' || r.recoveredAt < todayStart) continue
+      collectedTodayByOutlet.set(r.outletId, round2((collectedTodayByOutlet.get(r.outletId) ?? 0) + r.amount))
+    }
 
     const bookerStats: Array<{ id: string | null; name: string; phone: string | null; allRoutesOpen: boolean }> = [
       ...bookerUsers.map((b) => ({ id: b.id as string | null, name: b.name, phone: b.phone, allRoutesOpen: b.allRoutesOpen })),
@@ -163,6 +188,8 @@ export async function GET(req: Request) {
             o.ledgerEntries.filter((e) => e.type === 'DEBIT').reduce((s, e) => s + e.amount, 0)
             - o.ledgerEntries.filter((e) => e.type === 'CREDIT').reduce((s, e) => s + e.amount, 0),
           ),
+          collectedToday: round2(collectedTodayByOutlet.get(o.id) ?? 0),
+          oldestDueDate: fifoOldestDue(o.ledgerEntries),
         }))
         .sort((a, b) => b.balance - a.balance)
     }

@@ -21,7 +21,7 @@ import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR, fmtDate } from '@/lib/dms-api'
 import type { RecoveryData, RecoveryRowDTO, RecoveryShopDTO } from '@/lib/dms-types'
 import { RouteSheetPrint, RecoveryReportPrint } from '@/components/dms/recovery-print'
-import { HandCoins, Loader2, Printer, ReceiptText, CheckCircle2, Users, AlertTriangle, History, ClipboardCheck, XCircle, Save, Clock3, ShieldCheck, Eye, Lock } from 'lucide-react'
+import { HandCoins, Loader2, Printer, ReceiptText, CheckCircle2, Users, AlertTriangle, History, ClipboardCheck, XCircle, Save, Clock3, ShieldCheck, Eye, Lock, Search, ArrowUpDown, FileSpreadsheet } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
 const METHOD_LABELS: Record<string, string> = { CASH: 'Cash', CHEQUE: 'Cheque', BANK: 'Bank Transfer' }
@@ -33,6 +33,20 @@ const STATUS_BADGE: Record<string, string> = {
   REJECTED: 'border-red-300 bg-red-50 text-red-700',
 }
 const STATUS_TEXT: Record<string, string> = { PENDING: 'Approval Pending', APPROVED: 'Approved', REJECTED: 'Rejected' }
+
+/** Aging badge — FIFO oldest unpaid debit se din nikal kar 30/60/90+ color coding */
+function AgingBadge({ oldestDueDate }: { oldestDueDate?: string | null }) {
+  if (!oldestDueDate) return <span className="text-xs text-slate-300">—</span>
+  const days = Math.max(0, Math.floor((Date.now() - new Date(oldestDueDate).getTime()) / 86400000))
+  const cls = days >= 90
+    ? 'border-red-300 bg-red-50 text-red-700 font-bold'
+    : days >= 60
+      ? 'border-orange-300 bg-orange-50 text-orange-700'
+      : days >= 30
+        ? 'border-amber-300 bg-amber-50 text-amber-700'
+        : 'border-slate-200 bg-slate-50 text-slate-500'
+  return <Badge variant="outline" className={`text-[10px] whitespace-nowrap ${cls}`}>{days} din{days >= 90 ? ' (90+)' : ''}</Badge>
+}
 
 interface Draft { amount: string; method: string; reference: string }
 const emptyDraft = (): Draft => ({ amount: '', method: 'CASH', reference: '' })
@@ -59,6 +73,15 @@ export function RecoveryView() {
   const [rejecting, setRejecting] = useState<RecoveryRowDTO | null>(null)
   const [rejectNote, setRejectNote] = useState('')
   const [togglingRoutes, setTogglingRoutes] = useState(false)
+  // Phase A/B UX — tab control, search/sort, confirm dialog, bulk approve, history date filters
+  const [tab, setTab] = useState('route')
+  const [search, setSearch] = useState('')
+  const [sortMode, setSortMode] = useState<'amount' | 'name'>('amount')
+  const [confirmPost, setConfirmPost] = useState(false)
+  const [selPending, setSelPending] = useState<Set<string>>(new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [histFrom, setHistFrom] = useState('')
+  const [histTo, setHistTo] = useState('')
 
   const load = useCallback(async (uid: string) => {
     try {
@@ -114,6 +137,36 @@ export function RecoveryView() {
   const enteredTotal = round2(validRows.reduce((a, r) => a + r.amt, 0))
   const hasInvalid = rows.some((r) => (r.amt > 0 && r.over) || r.needRef)
 
+  // Search + sort — sirf display/Enter-nav ke liye; post hamesha SAB entered rows par (search se mask na ho)
+  const visibleRows = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    const list = q ? rows.filter((r) => `${r.shop.name} ${r.shop.code} ${r.shop.city}`.toLowerCase().includes(q)) : rows
+    return sortMode === 'name' ? [...list].sort((a, b) => a.shop.name.localeCompare(b.shop.name)) : list
+  }, [rows, search, sortMode])
+
+  // Aaj is route par already wasooli (zero-balance shops bhi shamil)
+  const todayCollected = useMemo(() => {
+    let total = 0
+    let count = 0
+    for (const s of shops) {
+      const c = s.collectedToday ?? 0
+      if (c > 0.005) { total += c; count += 1 }
+    }
+    return { total: round2(total), count }
+  }, [shops])
+
+  // Enter dabao → agli shop ka amount input focus; aakhri row par seedha confirm dialog
+  const focusNextAmount = (outletId: string) => {
+    const idx = visibleRows.findIndex((r) => r.shop.outletId === outletId)
+    const next = visibleRows[idx + 1]
+    if (next) {
+      const el = document.getElementById(`amt-${next.shop.outletId}`) as HTMLInputElement | null
+      if (el) { el.focus(); el.select() }
+    } else if (validRows.length > 0) {
+      setConfirmPost(true)
+    }
+  }
+
   const setDraft = (outletId: string, patch: Partial<Draft>) => {
     setDrafts((prev) => ({ ...prev, [outletId]: { ...(prev[outletId] ?? emptyDraft()), ...patch } }))
   }
@@ -124,6 +177,17 @@ export function RecoveryView() {
     for (const s of pendingShops) next[s.outletId] = { ...(drafts[s.outletId] ?? emptyDraft()), amount: s.balance.toFixed(2) }
     setDrafts(next)
   }
+
+  // Quick chips — partial wasooli allowed hai: +1000/+5000 ADD karte hain, Full/Round-100 SET karte hain
+  const addAmount = (outletId: string, inc: number) => {
+    const cur = parseFloat(drafts[outletId]?.amount ?? '') || 0
+    setDraft(outletId, { amount: String(round2(cur + inc)) })
+  }
+  const fillRound100 = (outletId: string, balance: number) => {
+    const v = Math.floor(balance / 100) * 100
+    if (v > 0) setDraft(outletId, { amount: v.toFixed(2) })
+  }
+  const clearRow = (outletId: string) => setDraft(outletId, { amount: '', reference: '' })
 
   /* ---------- Approvals: approve / reject / edit amount ---------- */
   const pendingRows: RecoveryRowDTO[] = data?.pending ?? []
@@ -142,6 +206,7 @@ export function RecoveryView() {
       })
       if (action === 'REJECT') { setRejecting(null); setRejectNote('') }
       setAmountDrafts((prev) => { const n = { ...prev }; delete n[row.id]; return n })
+      setSelPending((prev) => { if (!prev.has(row.id)) return prev; const n = new Set(prev); n.delete(row.id); return n })
       await load(userId)
     } catch (e) {
       toast({ title: 'Review action failed', description: e instanceof Error ? e.message : '', variant: 'destructive' })
@@ -168,6 +233,45 @@ export function RecoveryView() {
     }
   }
 
+  /* ---------- Approvals: BULK approve — booker app ki pending entries ek sath approve ---------- */
+  const selTargets = pendingRows.filter((r) => selPending.has(r.id))
+  const selTotal = round2(selTargets.reduce((s, r) => {
+    const draftVal = parseFloat(amountDrafts[r.id] ?? '')
+    return s + (draftVal > 0 ? draftVal : r.amount)
+  }, 0))
+
+  const toggleSelAll = () => {
+    setSelPending((prev) => (prev.size === pendingRows.length ? new Set() : new Set(pendingRows.map((r) => r.id))))
+  }
+
+  const bulkApprove = async () => {
+    if (!userId || bulkBusy || selTargets.length === 0) return
+    setBulkBusy(true)
+    let ok = 0
+    const failed: string[] = []
+    for (const r of selTargets) {
+      const draftVal = parseFloat(amountDrafts[r.id] ?? '')
+      const amt = draftVal > 0 ? draftVal : r.amount
+      try {
+        await api<{ message: string }>('/api/recovery/review', {
+          method: 'POST',
+          body: JSON.stringify({ userId, id: r.id, action: 'APPROVE', amount: Math.abs(amt - r.amount) > 0.004 ? amt : undefined }),
+        })
+        ok += 1
+      } catch (e) {
+        failed.push(`${r.recoveryNo}: ${e instanceof Error ? e.message : 'action fail'}`)
+      }
+    }
+    toast({
+      title: `Bulk approve: ${ok}/${selTargets.length} approve ho gayi ✓`,
+      description: failed.length ? failed.join(' | ') : 'Sab shop ledgers CREDIT + receipts ban gaye',
+      variant: failed.length ? 'destructive' : 'default',
+    })
+    setSelPending(new Set())
+    setBulkBusy(false)
+    await load(userId)
+  }
+
   async function post() {
     if (!userId || validRows.length === 0 || posting) return
     setPosting(true)
@@ -186,6 +290,7 @@ export function RecoveryView() {
           })),
         }),
       })
+      setConfirmPost(false)
       setSuccess({ count: res.count, total: res.total, nos: res.posted.map((p) => p.recoveryNo) })
       toast({ title: `Recovery post ho gayi ✓ — ${fmtPKR(res.total)}`, description: `${res.count} shop(s) — ledgers update ho gaye` })
       await load(userId)
@@ -210,19 +315,63 @@ export function RecoveryView() {
   }
 
   const bookerName = selectedBooker?.id ? selectedBooker.name : 'Unassigned Shops'
-  const historyRows: RecoveryRowDTO[] = (data?.history ?? []).filter((r) => historyFilter === 'all' || (r.bookerId ?? 'none') === historyFilter)
+  const historyRows: RecoveryRowDTO[] = (data?.history ?? []).filter((r) => {
+    if (historyFilter !== 'all' && (r.bookerId ?? 'none') !== historyFilter) return false
+    if (histFrom && new Date(r.date) < new Date(`${histFrom}T00:00:00`)) return false
+    if (histTo && new Date(r.date) > new Date(`${histTo}T23:59:59.999`)) return false
+    return true
+  })
+
+  // Excel (CSV) export — UTF-8 BOM ke sath taake Excel mein Urdu/symbols sahi khulen
+  const exportHistoryCsv = () => {
+    const esc = (v: unknown) => {
+      const s = String(v ?? '')
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    }
+    const head = ['Voucher #', 'Date', 'Booker', 'Shop', 'Code', 'Method', 'Reference', 'Amount', 'Status', 'Posted By', 'Note']
+    const lines = [
+      head.join(','),
+      ...historyRows.map((r) => [
+        r.recoveryNo,
+        new Date(r.date).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' }),
+        r.bookerName,
+        r.outletName,
+        r.outletCode,
+        METHOD_LABELS[r.method] ?? r.method,
+        r.reference ?? '',
+        r.amount.toFixed(2),
+        r.status,
+        r.postedByName ?? '',
+        r.note ?? '',
+      ].map(esc).join(',')),
+    ]
+    const blob = new Blob([`\uFEFF${lines.join('\r\n')}`], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `recovery-history-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    toast({ title: `Excel export: ${historyRows.length} vouchers ✓`, description: 'CSV file download ho gayi — Excel mein khul jayegi' })
+  }
 
   return (
     <div className="h-full min-h-0 flex flex-col gap-3">
       {/* KPI header */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
         {[
-          { label: 'Total Pending Udhaar (Sab Routes)', value: data?.totals.outstanding ?? 0, cls: 'text-red-600', icon: AlertTriangle },
-          { label: 'Recovered Today (Sab Bookers)', value: data?.totals.recoveredToday ?? 0, cls: 'text-emerald-600', icon: HandCoins },
-          { label: 'Recovered This Month', value: data?.totals.recoveredMonth ?? 0, cls: 'text-blue-600', icon: History },
-          { label: `Pending Approvals (${data?.totals.pendingCount ?? 0} entries)`, value: data?.totals.pendingAmount ?? 0, cls: 'text-amber-600', icon: Clock3 },
+          { label: 'Total Pending Udhaar (Sab Routes)', value: data?.totals.outstanding ?? 0, cls: 'text-red-600', icon: AlertTriangle, tab: 'route' },
+          { label: 'Recovered Today (Sab Bookers)', value: data?.totals.recoveredToday ?? 0, cls: 'text-emerald-600', icon: HandCoins, tab: 'report' },
+          { label: 'Recovered This Month', value: data?.totals.recoveredMonth ?? 0, cls: 'text-blue-600', icon: History, tab: 'report' },
+          { label: `Pending Approvals (${data?.totals.pendingCount ?? 0} entries)`, value: data?.totals.pendingAmount ?? 0, cls: 'text-amber-600', icon: Clock3, tab: 'approvals' },
         ].map((k) => (
-          <Card key={k.label} className={`border-slate-200 ${k.cls === 'text-amber-600' ? 'border-amber-200' : ''}`}>
+          <Card
+            key={k.label}
+            role="button" tabIndex={0}
+            onClick={() => setTab(k.tab)} onKeyDown={(e) => { if (e.key === 'Enter') setTab(k.tab) }}
+            title="Click — mutaliqa tab khulega"
+            className={`border-slate-200 cursor-pointer transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 ${k.cls === 'text-amber-600' ? 'border-amber-200' : ''}`}
+          >
             <CardContent className="px-4 py-3 flex items-center gap-3">
               <div className={`h-9 w-9 rounded-lg flex items-center justify-center shrink-0 ${k.cls === 'text-amber-600' ? 'bg-amber-100' : 'bg-slate-100'}`}><k.icon className={`h-4.5 w-4.5 ${k.cls === 'text-amber-600' ? 'text-amber-500' : 'text-slate-500'}`} /></div>
               <div className="min-w-0">
@@ -234,7 +383,7 @@ export function RecoveryView() {
         ))}
       </div>
 
-      <Tabs defaultValue="route" className="flex-1 min-h-0 flex flex-col">
+      <Tabs value={tab} onValueChange={setTab} className="flex-1 min-h-0 flex flex-col">
         <TabsList className="bg-slate-100 shrink-0 w-fit">
           <TabsTrigger value="route" className="data-[state=active]:bg-white data-[state=active]:text-emerald-700">
             <HandCoins className="h-3.5 w-3.5 mr-1.5" /> Route Recovery
@@ -251,7 +400,7 @@ export function RecoveryView() {
         </TabsList>
 
         {/* ==================== TAB 1: ROUTE RECOVERY ==================== */}
-        <TabsContent value="route" className="flex-1 min-h-0 mt-3 flex flex-col gap-3 overflow-y-auto pr-0.5">
+        <TabsContent value="route" className="flex-1 min-h-0 mt-3 flex flex-col gap-3">
           {success && (
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 flex items-start gap-2.5 shrink-0">
               <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
@@ -305,8 +454,39 @@ export function RecoveryView() {
             </div>
           </div>
 
-          {/* Shops sheet */}
-          <Card className="border-slate-200 shrink-0">
+          {/* Aaj ki wasooli strip — already-collected shops ka badge/summary */}
+          {todayCollected.total > 0 && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 flex items-center gap-2 shrink-0">
+              <HandCoins className="h-4 w-4 text-emerald-600 shrink-0" />
+              <p className="text-xs font-semibold text-emerald-800">
+                Aaj wasooli: {fmtPKR(todayCollected.total)} — {todayCollected.count} shop{todayCollected.count > 1 ? 's' : ''} mein collected (sheet mein bhi badge nazar aata hai)
+              </p>
+            </div>
+          )}
+
+          {/* Search + sort toolbar */}
+          {pendingShops.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <div className="relative flex-1 min-w-44 max-w-xs">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Shop search: naam / code / city" className="h-9 pl-8 text-sm" />
+              </div>
+              <button
+                type="button"
+                onClick={() => setSortMode((m) => (m === 'amount' ? 'name' : 'amount'))}
+                className="h-9 flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 hover:border-emerald-300 hover:text-emerald-700 transition-colors"
+                title="Sort toggle — bara udhaar pehle ya naam A-Z"
+              >
+                <ArrowUpDown className="h-3.5 w-3.5" />
+                Sort: {sortMode === 'amount' ? 'Amount (bara pehle)' : 'Name (A-Z)'}
+              </button>
+              {search && <span className="text-[11px] text-slate-400">{visibleRows.length}/{pendingShops.length} shops nazar aa rahi</span>}
+            </div>
+          )}
+
+          {/* Shops sheet — scroll area (footer neeche pinned hai) */}
+          <div className="flex-1 min-h-0 overflow-y-auto pr-0.5">
+          <Card className="border-slate-200">
             <CardContent className="p-0">
               {shopsLoading ? (
                 <div className="p-6 space-y-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-10 rounded-lg" />)}</div>
@@ -319,38 +499,51 @@ export function RecoveryView() {
               ) : (
                 <>
                   <div className="overflow-x-auto">
-                    <Table className="min-w-[780px]">
+                    <Table className="min-w-[900px]">
                       <TableHeader>
                         <TableRow className="bg-slate-50/70">
                           <TableHead>Shop</TableHead>
                           <TableHead>City</TableHead>
                           <TableHead className="text-right">Pending Udhaar</TableHead>
-                          <TableHead className="text-center" style={{ width: 150 }}>Wasooli Amount</TableHead>
+                          <TableHead className="text-center" style={{ width: 84 }}>Aging</TableHead>
+                          <TableHead className="text-center" style={{ width: 170 }}>Wasooli Amount</TableHead>
                           <TableHead className="text-center" style={{ width: 130 }}>Method</TableHead>
                           <TableHead className="text-center" style={{ width: 150 }}>Reference</TableHead>
                           <TableHead className="text-center" style={{ width: 64 }}></TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {rows.map((r) => (
+                        {visibleRows.map((r) => (
                           <TableRow key={r.shop.outletId} className={r.amt > 0 && !r.over ? 'bg-emerald-50/40' : undefined}>
                             <TableCell>
                               <p className="text-sm font-medium text-slate-800">{r.shop.name}</p>
                               <p className="text-[10px] text-slate-400">{r.shop.code} • {r.shop.channel}</p>
+                              {(r.shop.collectedToday ?? 0) > 0.005 && (
+                                <Badge variant="outline" className="mt-1 border-emerald-300 bg-emerald-50 text-emerald-700 text-[9px]">Aaj: {fmtPKR(r.shop.collectedToday ?? 0)} wasooli</Badge>
+                              )}
                             </TableCell>
                             <TableCell className="text-xs text-slate-500">{r.shop.city}</TableCell>
                             <TableCell className="text-right">
                               <span className="text-sm font-bold text-red-600 whitespace-nowrap">{fmtPKR(r.shop.balance)}</span>
                             </TableCell>
+                            <TableCell className="text-center"><AgingBadge oldestDueDate={r.shop.oldestDueDate} /></TableCell>
                             <TableCell>
                               <Input
+                                id={`amt-${r.shop.outletId}`}
                                 type="number" min={0} step={0.01} inputMode="decimal"
                                 value={r.draft.amount}
                                 onChange={(e) => setDraft(r.shop.outletId, { amount: e.target.value })}
+                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); focusNextAmount(r.shop.outletId) } }}
                                 placeholder="0"
                                 className={`h-8 text-right text-sm ${r.over ? 'border-red-400 ring-1 ring-red-200' : ''}`}
                               />
                               {r.over && <p className="text-[10px] text-red-500 mt-0.5">Udhaar sirf {fmtPKR(r.shop.balance)} hai</p>}
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                <button type="button" onClick={() => fillFull(r.shop.outletId, r.shop.balance)} className="h-5 rounded border border-slate-200 bg-white px-1.5 text-[9px] font-bold text-slate-600 hover:border-emerald-400 hover:text-emerald-700 transition-colors" title="Poora udhaar">Full</button>
+                                <button type="button" onClick={() => addAmount(r.shop.outletId, 1000)} className="h-5 rounded border border-slate-200 bg-white px-1.5 text-[9px] font-bold text-slate-600 hover:border-emerald-400 hover:text-emerald-700 transition-colors" title="Rs 1000 add (partial allowed)">+1000</button>
+                                <button type="button" onClick={() => addAmount(r.shop.outletId, 5000)} className="h-5 rounded border border-slate-200 bg-white px-1.5 text-[9px] font-bold text-slate-600 hover:border-emerald-400 hover:text-emerald-700 transition-colors" title="Rs 5000 add (partial allowed)">+5000</button>
+                                <button type="button" onClick={() => fillRound100(r.shop.outletId, r.shop.balance)} className="h-5 rounded border border-slate-200 bg-white px-1.5 text-[9px] font-bold text-slate-600 hover:border-emerald-400 hover:text-emerald-700 transition-colors" title="100 ke round mein (neeche wala)">Round-100</button>
+                              </div>
                             </TableCell>
                             <TableCell>
                               <Select value={r.draft.method} onValueChange={(v) => setDraft(r.shop.outletId, { method: v })}>
@@ -371,35 +564,40 @@ export function RecoveryView() {
                               {r.needRef && <p className="text-[10px] text-red-500 mt-0.5">Reference zaroori</p>}
                             </TableCell>
                             <TableCell className="text-center">
-                              <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => fillFull(r.shop.outletId, r.shop.balance)} title="Poora pending udhaar bhar dein">Full</Button>
+                              <Button size="sm" variant="outline" className="h-7 px-2 text-[11px] text-slate-400 hover:text-red-600 hover:border-red-300" onClick={() => clearRow(r.shop.outletId)} title="Row clear karein">Clear</Button>
                             </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
                     </Table>
                   </div>
-                  <div className="border-t border-slate-100 px-4 py-3 flex flex-wrap items-center gap-2 bg-slate-50/50 rounded-b-xl">
-                    <div className="min-w-0">
-                      <p className="text-sm font-bold text-slate-800">
-                        {validRows.length > 0 ? `${validRows.length} shop${validRows.length > 1 ? 's' : ''} — ${fmtPKR(enteredTotal)} wasooli` : 'Amount enter karein'}
-                      </p>
-                      <p className="text-[11px] text-slate-400">Post par: RCV voucher + shop ledger CREDIT + RCP receipt (ek transaction)</p>
-                    </div>
-                    {hasInvalid && (
-                      <Badge variant="outline" className="border-red-300 text-red-600 text-[11px]"><AlertTriangle className="h-3 w-3 mr-1" />Ghalat entries check karein</Badge>
-                    )}
-                    <div className="ml-auto flex gap-2">
-                      <Button size="sm" variant="outline" className="h-9" onClick={fillAllFull} disabled={posting}>Sab Full</Button>
-                      <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 h-9" onClick={post} disabled={posting || validRows.length === 0}>
-                        {posting ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <HandCoins className="h-4 w-4 mr-1.5" />}
-                        Post Recovery{validRows.length > 0 ? ` (${fmtPKR(enteredTotal)})` : ''}
-                      </Button>
-                    </div>
-                  </div>
                 </>
               )}
             </CardContent>
           </Card>
+          </div>
+
+          {/* Pinned footer — hamesha nazar (scroll ke sath nahi jata) */}
+          {pendingShops.length > 0 && !shopsLoading && (
+            <div className="shrink-0 border border-slate-200 bg-white rounded-xl px-4 py-3 flex flex-wrap items-center gap-2 shadow-sm">
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-slate-800">
+                  {validRows.length > 0 ? `${validRows.length} shop${validRows.length > 1 ? 's' : ''} — ${fmtPKR(enteredTotal)} wasooli` : 'Amount enter karein'}
+                </p>
+                <p className="text-[11px] text-slate-400">Post par: RCV voucher + shop ledger CREDIT + RCP receipt (ek transaction)</p>
+              </div>
+              {hasInvalid && (
+                <Badge variant="outline" className="border-red-300 text-red-600 text-[11px]"><AlertTriangle className="h-3 w-3 mr-1" />Ghalat entries check karein</Badge>
+              )}
+              <div className="ml-auto flex gap-2">
+                <Button size="sm" variant="outline" className="h-9" onClick={fillAllFull} disabled={posting}>Sab Full</Button>
+                <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 h-9" onClick={() => setConfirmPost(true)} disabled={posting || validRows.length === 0}>
+                  {posting ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <HandCoins className="h-4 w-4 mr-1.5" />}
+                  Post Recovery{validRows.length > 0 ? ` (${fmtPKR(enteredTotal)})` : ''}
+                </Button>
+              </div>
+            </div>
+          )}
         </TabsContent>
 
         {/* ==================== TAB 2: RECOVERY APPROVALS ==================== */}
@@ -426,10 +624,23 @@ export function RecoveryView() {
                     <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mr-auto">Pending Recovery Approvals ({pendingRows.length})</p>
                     <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50 text-[11px]">Total: {fmtPKR(pendingRows.reduce((s, r) => s + r.amount, 0))}</Badge>
                   </div>
+                  {selPending.size > 0 && (
+                    <div className="px-4 py-2 bg-emerald-50/70 border-b border-emerald-100 flex items-center gap-2 flex-wrap">
+                      <p className="text-xs font-bold text-emerald-800 mr-auto">{selPending.size} selected — {fmtPKR(selTotal)}</p>
+                      <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => setSelPending(new Set())} disabled={bulkBusy}>Clear</Button>
+                      <Button size="sm" className="h-7 bg-emerald-600 hover:bg-emerald-700 text-[11px]" onClick={bulkApprove} disabled={bulkBusy}>
+                        {bulkBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <CheckCircle2 className="h-3.5 w-3.5 mr-1" />}
+                        Approve Selected ({selPending.size})
+                      </Button>
+                    </div>
+                  )}
                   <div className="overflow-x-auto">
-                    <Table className="min-w-[900px]">
+                    <Table className="min-w-[940px]">
                       <TableHeader>
                         <TableRow className="bg-slate-50/70">
+                          <TableHead className="text-center" style={{ width: 40 }}>
+                            <input type="checkbox" checked={pendingRows.length > 0 && selPending.size === pendingRows.length} onChange={toggleSelAll} className="h-3.5 w-3.5 accent-emerald-600 cursor-pointer" title="Sab select / clear" />
+                          </TableHead>
                           <TableHead>Voucher #</TableHead>
                           <TableHead>Booker</TableHead>
                           <TableHead>Shop</TableHead>
@@ -446,7 +657,15 @@ export function RecoveryView() {
                           const changed = Math.abs((parseFloat(draftVal) || 0) - r.amount) > 0.004
                           const editedAmt = parseFloat(draftVal) || 0
                           return (
-                            <TableRow key={r.id} className="bg-amber-50/20">
+                            <TableRow key={r.id} className={`bg-amber-50/20 ${selPending.has(r.id) ? 'ring-1 ring-inset ring-emerald-200' : ''}`}>
+                              <TableCell className="text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={selPending.has(r.id)}
+                                  onChange={() => setSelPending((prev) => { const n = new Set(prev); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n })}
+                                  className="h-3.5 w-3.5 accent-emerald-600 cursor-pointer"
+                                />
+                              </TableCell>
                               <TableCell className="text-xs font-bold text-emerald-700 whitespace-nowrap">
                                 {r.recoveryNo}
                                 {r.editedAmount && r.originalAmount != null && (
@@ -581,14 +800,24 @@ export function RecoveryView() {
           <Card className="border-slate-200 shrink-0">
             <CardContent className="p-0">
               <div className="px-4 py-2.5 border-b border-slate-100 flex items-center gap-2 flex-wrap">
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mr-auto">B) Recovery Voucher History (Latest {historyRows.length})</p>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mr-auto">B) Recovery Voucher History ({historyRows.length})</p>
+                <Input type="date" value={histFrom} onChange={(e) => setHistFrom(e.target.value)} className="h-7 w-36 text-xs" title="From date" />
+                <span className="text-xs text-slate-400">se</span>
+                <Input type="date" value={histTo} onChange={(e) => setHistTo(e.target.value)} className="h-7 w-36 text-xs" title="To date" />
+                <span className="text-xs text-slate-400">tak</span>
+                {(histFrom || histTo) && (
+                  <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px] text-slate-500" onClick={() => { setHistFrom(''); setHistTo('') }}>Clear</Button>
+                )}
                 <Select value={historyFilter} onValueChange={setHistoryFilter}>
-                  <SelectTrigger className="h-7 w-52 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-7 w-44 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Sab bookers</SelectItem>
                     {data?.bookers.map((b) => <SelectItem key={b.id ?? 'none'} value={b.id ?? 'none'}>{b.id ? b.name : 'Unassigned'}</SelectItem>)}
                   </SelectContent>
                 </Select>
+                <Button size="sm" variant="outline" className="h-7 border-emerald-300 text-emerald-700 hover:bg-emerald-50 text-[11px]" onClick={exportHistoryCsv} disabled={historyRows.length === 0}>
+                  <FileSpreadsheet className="h-3.5 w-3.5 mr-1" /> Excel
+                </Button>
               </div>
               <div className="overflow-x-auto">
                 <Table className="min-w-[860px]">
@@ -668,6 +897,35 @@ export function RecoveryView() {
           onClose={() => setPrintReport(false)}
         />
       )}
+
+      {/* Post confirm dialog — ghalat post se bachne ke liye */}
+      <Dialog open={confirmPost} onOpenChange={setConfirmPost}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-1.5"><HandCoins className="h-4.5 w-4.5 text-emerald-600" /> Recovery post karein?</DialogTitle>
+            <DialogDescription>
+              {validRows.length} shop{validRows.length > 1 ? 's' : ''} — <b className="text-emerald-700">{fmtPKR(enteredTotal)}</b>
+              {recDate ? ` — date ${recDate}` : ''}. Post ke baad RCV vouchers + shop ledgers + receipts foran ban jayenge.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-100 divide-y divide-slate-50">
+            {validRows.map((r) => (
+              <div key={r.shop.outletId} className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs">
+                <span className="min-w-0 truncate text-slate-700">{r.shop.name} <span className="text-slate-400">({r.shop.code})</span></span>
+                <span className="font-bold text-slate-800 whitespace-nowrap">{fmtPKR(r.amt)} <span className="font-normal text-slate-400">• {METHOD_LABELS[r.draft.method]}</span></span>
+              </div>
+            ))}
+          </div>
+          {hasInvalid && <p className="text-[11px] text-amber-600 -mt-1">Ghalat entries post mein shamil nahi hongi — unhe theek karein ya row clear karein.</p>}
+          <DialogFooter className="flex gap-2">
+            <Button variant="outline" className="flex-1" onClick={() => setConfirmPost(false)} disabled={posting}>Wapas</Button>
+            <Button className="flex-1 bg-emerald-600 hover:bg-emerald-700" disabled={posting || validRows.length === 0} onClick={post}>
+              {posting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <HandCoins className="h-4 w-4 mr-1.5" />}
+              Confirm — {fmtPKR(enteredTotal)}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Reject dialog — wajah booker ko nazar aayegi */}
       <Dialog open={!!rejecting} onOpenChange={(v) => { if (!v) { setRejecting(null); setRejectNote('') } }}>

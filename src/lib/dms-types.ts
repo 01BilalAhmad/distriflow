@@ -680,6 +680,10 @@ export interface RecoveryShopDTO {
   balance: number
   /** Visit schedule — "MON,WED,SAT" | empty = roz visit */
   visitDays: string
+  /** Aaj is shop par APPROVED wasooli — "aaj wasooli" badge ke liye */
+  collectedToday?: number
+  /** FIFO aging — sab se purana unpaid debit ki ISO date (null = koi pending udhaar nahi) */
+  oldestDueDate?: string | null
 }
 
 export interface RecoveryRowDTO {
