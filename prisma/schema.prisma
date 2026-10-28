@@ -264,7 +264,8 @@ model Outlet {
   // Task 100: unique 4-digit shop code ("1001".."9999") — wasooli list / route sheet /
   // OB recovery report par asaan reference. Sequential auto-assign (dms-code4.ts),
   // nullable = legacy outlet jab tak backfill script na chale (unique NULLs allow karta hai)
-  code4         String?             @unique
+  // NOTE: @unique temporarily removed — Vercel db push isolation test (56c06da red)
+  code4         String?
   name          String
   ownerName     String?
   phone         String?
