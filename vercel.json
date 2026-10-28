@@ -1,4 +1,4 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "prisma generate && next build"
+  "buildCommand": "prisma db push && prisma generate && next build"
 }
