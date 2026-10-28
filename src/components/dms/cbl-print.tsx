@@ -506,6 +506,12 @@ export interface InvoiceData {
   summaryDeliveryDate?: string | null
   /** Task 51: booked grand payable (= total − TO + GST + Adv) — print ke Net Invoice se match */
   payable?: number
+  /** Task 102: booking waqt shop ka purana udhaar (print par Previous Balance row) */
+  prevBalance?: number
+  /** Task 102: is bill par lagne wala return advance (print par Advance Adjust row) */
+  advanceApplied?: number
+  /** Task 102: chhoti detail — "RET-12 (ORD-45) Rs 2,000.00 • ..." (kis return ka deduction) */
+  advanceAppliedNote?: string | null
   items: InvoiceItemData[]
 }
 
@@ -582,6 +588,18 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
   //  - naye orders: Σ Amount Inclusive (manual andar hi merged) = booked payable
   //  - legacy: Σ Amount Inclusive − manual discount (purana chain, snapshot frozen)
   const netInvoice = manualInside ? Math.round(S.incl * 100) / 100 : Math.round((S.incl - manual) * 100) / 100
+
+  // ---- Task 102: ACCOUNT ROWS (shop ka khata invoice par) ----
+  // Previous Balance = booking waqt shop ka purana udhaar (Order.prevBalance snapshot)
+  // Advance Adjust   = is bill par lagne wala return advance (Order.advanceApplied) —
+  //                    settlement par ledger CREDIT ADVANCE isi raqam ka hota hai.
+  // Grand Net Total  = Net Invoice + Previous Balance − Advance Adjust — EXACTLY wohi
+  //                    jis par shop hisaab karegi (print == ledger truth).
+  const prevBal = Math.max(0, Math.round((inv.prevBalance ?? 0) * 100) / 100)
+  // cap: advance kabhi bill se zyada nahi lagta (settlement consumption bhi net payable par capped)
+  const advAdjust = Math.min(Math.max(0, Math.round((inv.advanceApplied ?? 0) * 100) / 100), netInvoice)
+  const hasAccountRows = prevBal > 0.005 || advAdjust > 0.005
+  const grandNet = Math.round((netInvoice + prevBal - advAdjust) * 100) / 100
 
   // ---- Task 34: DATA-AWARE column widths (water-filling) — Task 59: portrait TABLE_W par ----
   const colSpecs: { key?: string; hw: number; vl: number; min: number; d: number; need: number }[] = []
@@ -776,8 +794,24 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
                 <tr><td style={{ textAlign: 'center' }}>Advance Tax 236H:</td><td className="num">{fmt2(S.adv)}</td></tr>
                 {S.to > 0 && <tr><td style={{ textAlign: 'center' }}>Trade Offer:</td><td className="num">- {fmt2(S.to)}</td></tr>}
                 <tr><td style={{ textAlign: 'right', fontWeight: 'bold' }}>Net Invoice Amount:</td><td className="num" style={{ fontWeight: 'bold' }}>{fmtI(Math.round(netInvoice))}</td></tr>
+                {/* Task 102: shop ka khata — purana udhaar + return advance auto-adjust */}
+                {prevBal > 0.005 && (
+                  <tr><td style={{ textAlign: 'center' }}>Previous Balance:</td><td className="num">{fmt2(prevBal)}</td></tr>
+                )}
+                {advAdjust > 0.005 && (
+                  <tr><td style={{ textAlign: 'center' }}>Advance Adjust:</td><td className="num">- {fmt2(advAdjust)}</td></tr>
+                )}
+                {hasAccountRows && (
+                  <tr><td style={{ textAlign: 'right', fontWeight: 'bold', borderTop: '1.5px solid #000' }}>Grand Net Total:</td><td className="num" style={{ fontWeight: 'bold', borderTop: '1.5px solid #000' }}>{fmtI(Math.round(grandNet))}</td></tr>
+                )}
               </tbody>
             </table>
+            {/* Task 102: user ki "chhoti detail" — deduction kis return ki hai (RET-xxx (ORD-yyy) Rs z) */}
+            {advAdjust > 0.005 && inv.advanceAppliedNote ? (
+              <p className="mt-1 text-[8.5px] leading-snug" style={{ textAlign: 'right', color: '#333' }}>
+                Advance adjust: {inv.advanceAppliedNote}
+              </p>
+            ) : null}
           </div>
         </div>
 

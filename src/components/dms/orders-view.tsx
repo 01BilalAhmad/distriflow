@@ -336,6 +336,32 @@ function OrderDetailDialog({ order, items, onClose }: { order: OrderDTO | null; 
                   <span className="whitespace-nowrap tabular-nums">{fmtPKR(Math.round((order.total + (order.advanceTax ?? 0)) * 100) / 100)}</span>
                 </div>
               )}
+              {/* Task 102: shop ka khata bill par — purana udhaar + return advance auto-adjust */}
+              {invData && (invData.prevBalance ?? 0) > 0.005 && (
+                <div className="flex justify-between gap-3 text-sm text-orange-600">
+                  <span>Previous Balance (shop ka purana udhaar)</span>
+                  <span className="whitespace-nowrap tabular-nums">+ {fmtPKR(invData.prevBalance ?? 0)}</span>
+                </div>
+              )}
+              {invData && (invData.advanceApplied ?? 0) > 0.005 && (
+                <div className="text-sm text-emerald-600">
+                  <div className="flex justify-between gap-3">
+                    <span>Advance Adjust (return ka advance is bill se)</span>
+                    <span className="whitespace-nowrap tabular-nums">- {fmtPKR(invData.advanceApplied ?? 0)}</span>
+                  </div>
+                  {invData.advanceAppliedNote && (
+                    <p className="text-[10px] text-emerald-500 text-right">{invData.advanceAppliedNote}</p>
+                  )}
+                </div>
+              )}
+              {invData && ((invData.prevBalance ?? 0) > 0.005 || (invData.advanceApplied ?? 0) > 0.005) && (
+                <div className="flex justify-between gap-3 font-bold text-slate-900 border-t pt-1.5">
+                  <span>Grand Net Total (bill + purana balance − advance)</span>
+                  <span className="whitespace-nowrap tabular-nums">
+                    {fmtPKR(Math.round((orderGrandPayable(order) + (invData.prevBalance ?? 0) - Math.min(invData.advanceApplied ?? 0, orderGrandPayable(order))) * 100) / 100)}
+                  </span>
+                </div>
+              )}
             </div>
             <div className="flex justify-end border-t pt-3 shrink-0">
               <Button disabled={!invData} className="bg-slate-800 hover:bg-slate-900 text-white" onClick={() => setPrinting(true)}>
@@ -605,7 +631,7 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
         const s = splitPcs(l.qtyPcs, upc, ppb)
         return { productId: l.productId, ctn: s.ctn, box: s.box, pcs: s.pcs, tradeOffer: Math.max(0, parseFloat(l.tradeOffer) || 0) }
       })
-      const res = await api<{ order: { orderNo: string; total: number; payable?: number; creditWarning?: { status: string; message: string } | null } }>('/api/orders', {
+      const res = await api<{ order: { orderNo: string; total: number; payable?: number; prevBalance?: number; advanceApplied?: number; advanceAppliedNote?: string | null; creditWarning?: { status: string; message: string } | null } }>('/api/orders', {
         method: 'POST',
         body: JSON.stringify({
           outletId, salesmanId: bookerId, items, notes,
@@ -614,9 +640,13 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
       })
       // Task 98: credit limit warning (Finexa convention — order block nahi hota, sirf WARNING)
       const cw = res.order.creditWarning
+      // Task 102: booking par return advance auto-adjust foran dikhao (amount + kis return ki)
+      const advMsg = (res.order.advanceApplied ?? 0) > 0.005
+        ? ` • Advance −${fmtPKR(res.order.advanceApplied!)} (return)${res.order.advanceAppliedNote ? ` — ${res.order.advanceAppliedNote}` : ''}`
+        : ''
       toast({
         title: `Order ${res.order.orderNo} Booked ✓${cw ? ' — Credit Warning!' : ''}`,
-        description: `Booker: ${booker?.name ?? ''} • Payable: ${fmtPKR(res.order.payable ?? res.order.total)}${manualDiscount > 0 ? ` (manual disc ${fmtPKR(manualDiscount)})` : ''}${computed.toTotal > 0 ? ` • TO ${fmtPKR(computed.toTotal)}` : ''}${cw ? ` • ⚠ ${cw.message}` : ''}`,
+        description: `Booker: ${booker?.name ?? ''} • Payable: ${fmtPKR(res.order.payable ?? res.order.total)}${manualDiscount > 0 ? ` (manual disc ${fmtPKR(manualDiscount)})` : ''}${computed.toTotal > 0 ? ` • TO ${fmtPKR(computed.toTotal)}` : ''}${advMsg}${cw ? ` • ⚠ ${cw.message}` : ''}`,
         variant: cw?.status === 'OVER' ? 'destructive' : undefined,
       })
       onOpenChange(false)

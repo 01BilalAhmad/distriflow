@@ -461,6 +461,10 @@ model Order {
   // Grand Payable = total − tradeOfferTotal + gstTotal + advanceTax
   tradeOfferTotal Float               @default(0) // Σ line trade offer (per-SKU Rs snapshot)
   gstTotal        Float               @default(0) // Σ line GST (product gstRate × line net)
+  // Task 102 — INVOICE ACCOUNT SNAPSHOT (print par Previous Balance + Advance Adjust + Grand Net Total)
+  prevBalance     Float               @default(0) // booking waqt shop ka purana udhaar (outlet.balance snapshot — is bill se pehle ka)
+  advanceApplied  Float               @default(0) // is bill par lagne wala return advance (projection — settlement par live consume hota hai)
+  advanceAppliedNote String?          // "chhoti detail": RET-xxx (ORD-yyy) Rs z • ... (kis return ka kitna deduction)
   // Task 82: PJP auto-route — booker order GPS evidence (lazmi) + out-of-route flag
   orderLat        Float? // GPS latitude (order booking waqt ka — booker app se)
   orderLng        Float? // GPS longitude

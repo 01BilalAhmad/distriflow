@@ -76,6 +76,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       // Task 51: real-invoice format — Delivery Date/Day summary se, payable booked chain se
       summaryDeliveryDate: new Date(summary.deliveryDate).toISOString(),
       payable: orderGrandPayable(o),
+      // Task 102: invoice account snapshot — print par Previous Balance + Advance
+      // Adjust (chhoti detail) + Grand Net Total
+      prevBalance: o.prevBalance,
+      advanceApplied: o.advanceApplied,
+      advanceAppliedNote: o.advanceAppliedNote,
       items: o.items.map((it) => ({
         id: it.id,
         productName: it.product.name,

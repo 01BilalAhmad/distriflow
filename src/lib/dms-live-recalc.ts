@@ -4,6 +4,7 @@ import {
   type CalcIncomingItem, type CalcProduct, type CalcScheme, type CalcLine, type CalcSchemeSnapshot,
 } from '@/lib/dms-order-calc'
 import { advanceTaxFor, getTaxRates } from '@/lib/dms-settings'
+import { ensureOutletBalance, computeAdvanceProjection } from '@/lib/dms-credit'
 
 /**
  * Task 86 — LIVE SCHEME RECALC (unprocessed bills):
@@ -214,6 +215,18 @@ export async function persistLiveRecalc(
 ): Promise<boolean> {
   const live = await liveRecalcOrder(o.id)
   if (!live) return false
+  // Task 102: process-time refresh par invoice account snapshot bhi naye payable par
+  // re-freeze (prevBalance current outstanding, advance projection FIFO dobara)
+  const own = await db.order.findUnique({ where: { id: o.id }, select: { outletId: true } })
+  let prevBalance = 0
+  let advanceApplied = 0
+  let advanceAppliedNote: string | null = null
+  if (own) {
+    prevBalance = Math.max(0, await ensureOutletBalance(own.outletId))
+    const proj = await computeAdvanceProjection(own.outletId, live.payable, o.id)
+    advanceApplied = proj.applied
+    advanceAppliedNote = proj.note
+  }
   await db.order.update({
     where: { id: o.id },
     data: {
@@ -226,6 +239,9 @@ export async function persistLiveRecalc(
       filerStatus: live.filerStatus,
       advanceTaxRate: live.advanceTaxRate,
       advanceTax: live.advanceTax,
+      prevBalance,
+      advanceApplied,
+      advanceAppliedNote,
     },
   })
   for (const it of live.items) {

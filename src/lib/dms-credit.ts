@@ -305,3 +305,54 @@ export async function consumeOutletAdvance(
   })
   return { used: plan.used, note }
 }
+
+// ============================================================
+// Task 102 — ADVANCE PROJECTION (bill bante hi "auto detect")
+// User test feedback: Task 101 advance sirf SETTLEMENT par consume karta tha —
+// naya bill bante waqt print par kuch nahi dikhta tha. Ab booking par hi
+// projection freeze hoti hai (Order.advanceApplied + note) — invoice print
+// par "Advance Adjust" row + chhoti detail + Grand Net Total foran nazar aata hai.
+//
+// Ledger SAFETY: projection sirf LIKHI jati hai, advanceBalance NAHI katata.
+// Actual consumption wahi settlement-par consumeOutletAdvance (FIFO) karta hai —
+// no-minus invariant (balance kabhi negative nahi) bilkul waisa hi rehta hai.
+// Double-claim band: available = advanceBalance − dusri UNSETTLED bills ki
+// projections (CONFIRMED/PROCESSING) — do bills advance par claim nahi kar sakte.
+// ============================================================
+
+/**
+ * Is bill par lagne wala return advance (projection, ledger-safe):
+ *   available = advanceBalance − Σ(dusri unsettled bills ki advanceApplied)
+ *   applied   = min(available, payable)   — FIFO purana return pehle
+ * @param excludeOrderId edit/recompute par KHUD ko exclude karne ke liye
+ * @returns applied (Rs) + note — "RET-12 (ORD-45) Rs 2,000.00 • ..." (chhoti detail)
+ */
+export async function computeAdvanceProjection(
+  outletId: string,
+  payable: number,
+  excludeOrderId?: string,
+): Promise<{ applied: number; note: string | null }> {
+  const outlet = await db.outlet.findUnique({ where: { id: outletId }, select: { advanceBalance: true } })
+  const advanceBalance = Math.max(0, r2(outlet?.advanceBalance ?? 0))
+  if (advanceBalance <= 0.005) return { applied: 0, note: null }
+  const claimed = await db.order.aggregate({
+    where: {
+      outletId,
+      advanceApplied: { gt: 0.005 },
+      status: { in: ['CONFIRMED', 'PROCESSING'] }, // DELIVERED/CANCELLED ka claim khatam
+      ...(excludeOrderId ? { id: { not: excludeOrderId } } : {}),
+    },
+    _sum: { advanceApplied: true },
+  })
+  const available = Math.max(0, r2(advanceBalance - r2(claimed._sum.advanceApplied ?? 0)))
+  if (available <= 0.005) return { applied: 0, note: null }
+  const sources = await advanceSources(db, outletId)
+  if (sources.length === 0) return { applied: 0, note: null }
+  const plan = planAdvanceConsumption(sources, Math.min(available, Math.max(0, r2(payable))))
+  if (plan.used <= 0.005) return { applied: 0, note: null }
+  // Chhoti detail — bill/invoice par wahi dikhegi jo settlement ledger mein likhi jayegi
+  const note = plan.allocations
+    .map((a) => `${a.returnNo}${a.orderNo ? ` (${a.orderNo})` : ''} Rs ${a.amount.toFixed(2)}`)
+    .join(' • ')
+  return { applied: plan.used, note }
+}

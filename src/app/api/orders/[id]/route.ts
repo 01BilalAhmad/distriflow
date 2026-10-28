@@ -6,6 +6,7 @@ import { computeOrderLines, recalcManualDiscount, applyManualMerge, orderGrandPa
 import { advanceTaxFor, getTaxRates, getDistributorAddress } from '@/lib/dms-settings'
 import { getAvailableToPromise, groupQtyByProduct, oversellMessage } from '@/lib/dms-inventory'
 import { liveRecalcOrder } from '@/lib/dms-live-recalc'
+import { ensureOutletBalance, computeAdvanceProjection } from '@/lib/dms-credit'
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -67,6 +68,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         advanceTaxRate: live?.advanceTaxRate ?? order.advanceTaxRate,
         advanceTax: live?.advanceTax ?? order.advanceTax,
         payable: live?.payable ?? orderGrandPayable(order),
+        // Task 102: invoice account snapshot — print/dialog par Previous Balance +
+        // Advance Adjust (chhoti detail ke sath) + Grand Net Total isi se aata hai
+        prevBalance: order.prevBalance,
+        advanceApplied: order.advanceApplied,
+        advanceAppliedNote: order.advanceAppliedNote,
         notes: order.notes,
         orderDate: new Date(order.orderDate).toISOString(),
         items: order.items.map((it) => {
@@ -287,6 +293,20 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         })
       })
 
+      // Task 102: bill EDIT par account snapshot bhi refresh — naya payable par advance
+      // projection dobara (purana claim khud exclude, dusri unsettled bills ka claim minus)
+      const newPayable = orderGrandPayable({ total, tradeOfferTotal, gstTotal, advanceTax: tax.amount })
+      const prevBalanceNow = Math.max(0, await ensureOutletBalance(order.outletId))
+      const projection2 = await computeAdvanceProjection(order.outletId, newPayable, id)
+      await db.order.update({
+        where: { id },
+        data: {
+          prevBalance: prevBalanceNow,
+          advanceApplied: projection2.applied,
+          advanceAppliedNote: projection2.note,
+        },
+      })
+
       const fresh = await db.order.findUnique({
         where: { id },
         include: {
@@ -308,6 +328,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
           advanceTax: tax.amount,
           advanceTaxRate: tax.rate,
           filerStatus: taxStatus,
+          prevBalance: prevBalanceNow,
+          advanceApplied: projection2.applied,
+          advanceAppliedNote: projection2.note,
+          grandNetTotal: Math.max(0, Math.round((newPayable + prevBalanceNow - projection2.applied) * 100) / 100),
           itemCount: items2.length,
           totalCases: Math.round(items2.reduce((s, it) => s + (it.qty / Math.max(1, it.product.unitsPerCarton)), 0) * 10000) / 10000,
           totalFreePcs: items2.reduce((s, it) => s + it.freeQty, 0),

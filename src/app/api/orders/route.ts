@@ -3,10 +3,10 @@ import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
 import { requireUser, tenantMismatch } from '@/lib/api-auth'
 import { computeOrderLines, recalcManualDiscount, applyManualMerge, orderGrandPayable, type CalcIncomingItem } from '@/lib/dms-order-calc'
 import { advanceTaxFor, getTaxRates } from '@/lib/dms-settings'
+import { ensureOutletBalance, computeAdvanceProjection, creditStatus } from '@/lib/dms-credit'
 import { getAvailableToPromise, groupQtyByProduct, oversellMessage } from '@/lib/dms-inventory'
 import { getPjpSettings, karachiDayCode, karachiDayBounds, outletInTodayRoute } from '@/lib/dms-pjp'
 import { loadActiveSchemes, liveRecalcFromParts, type LiveRecalcOrderParts } from '@/lib/dms-live-recalc'
-import { ensureOutletBalance, creditStatus } from '@/lib/dms-credit'
 
 export async function GET(req: Request) {
   try {
@@ -286,6 +286,16 @@ export async function POST(req: Request) {
     const advBase = Math.max(0, Math.round((orderTotal - tradeOfferTotal + gstTotal) * 100) / 100)
     const tax = advanceTaxFor(advBase, outlet.filerStatus, rates)
 
+    // ---- Task 102: INVOICE ACCOUNT SNAPSHOT (bill bante hi "auto detect") ----
+    // payable pehle compute — prevBalance (shop ka purana udhaar) + return advance
+    // projection (FIFO, dusri unsettled bills ka claim minus) ORDER PAR freeze hoti hai.
+    // Print par foran "Previous Balance" + "Advance Adjust" + "Grand Net Total" dikhega.
+    // LEDGER SAFE: sirf likhi jati hai — actual kaato settlement par hota hai (no-minus).
+    const payable = orderGrandPayable({ total: orderTotal, tradeOfferTotal, gstTotal, advanceTax: tax.amount })
+    const currentBalance = await ensureOutletBalance(outlet.id)
+    const prevBalance = Math.max(0, currentBalance)
+    const projection = await computeAdvanceProjection(outlet.id, payable)
+
     const order = await db.order.create({
       data: {
         orderNo: `ORD-${seq}`,
@@ -305,6 +315,9 @@ export async function POST(req: Request) {
         filerStatus: outlet.filerStatus,
         advanceTaxRate: tax.rate,
         advanceTax: tax.amount,
+        prevBalance,
+        advanceApplied: projection.applied,
+        advanceAppliedNote: projection.note,
         orderLat,
         orderLng,
         unplanned: isUnplanned,
@@ -315,17 +328,14 @@ export async function POST(req: Request) {
       include: { items: true },
     })
 
-    const payable = orderGrandPayable({ total: orderTotal, tradeOfferTotal, gstTotal, advanceTax: order.advanceTax })
-
     // ---- Task 98: CREDIT LIMIT WARNING (Finexa convention — block NAHI) ----
     // Shop ka running udhaar + ye bill (agar poora udhaar jaye = max exposure) limit ke
     // against: OK / NEAR (80%+) / OVER. Warning sirf UI badge ke liye — order bilkul
     // normal banta hai (creditLimit 0 = no limit).
-    const currentBalance = await ensureOutletBalance(outlet.id)
-    // Task 101: shop ka return advance agli settlement par is bill se khud adjust
-    // ho jata hai — warning usi hisab se (kam effective exposure)
-    const outletAdvance = Math.max(0, outlet.advanceBalance ?? 0)
-    const maxExposure = Math.max(0, Math.round((currentBalance + payable - outletAdvance) * 100) / 100)
+    // Task 102: warning ADVANCE PROJECTION ke baad ke effective payable par — jo advance
+    // is bill par lag raha hai wo shop ke haq mein kam hai (real exposure wahi hai).
+    const effPayable = Math.max(0, Math.round((payable - projection.applied) * 100) / 100)
+    const maxExposure = Math.max(0, Math.round((currentBalance + effPayable) * 100) / 100)
     const cs = creditStatus(maxExposure, outlet.creditLimit)
     const creditWarning = cs.status === 'NONE' ? null : {
       status: cs.status,
@@ -348,6 +358,11 @@ export async function POST(req: Request) {
         filerStatus: order.filerStatus,
         unplanned: order.unplanned,
         payable,
+        // Task 102: booking confirmation par bhi account snapshot — UI toast/detail isi se
+        prevBalance,
+        advanceApplied: projection.applied,
+        advanceAppliedNote: projection.note,
+        grandNetTotal: Math.max(0, Math.round((payable + prevBalance - projection.applied) * 100) / 100),
         creditWarning,
       },
     })
