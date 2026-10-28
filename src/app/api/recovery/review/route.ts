@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
+import { postLedgerEntry } from '@/lib/dms-credit'
 
 /**
  * RECOVERY REVIEW — pending recoveries ka approval workflow.
@@ -116,16 +117,15 @@ export async function POST(req: Request) {
         },
       })
 
-      // 2) Shop ledger CREDIT (RECOVERY) — ab shop ka balance kam hota hai
-      await tx.outletLedger.create({
-        data: {
-          outletId: recovery.outlet.id,
-          type: 'CREDIT',
-          amount: approveAmt,
-          refType: 'RECOVERY',
-          refNo: recovery.recoveryNo,
-          note: `Udhaar wasooli (${recovery.method}${recovery.reference ? ` • Ref ${recovery.reference}` : ''}) — approved by ${me.name}`,
-        },
+      // 2) Shop ledger CREDIT (RECOVERY) — ab shop ka balance kam hota hai (Task 98:
+      // postLedgerEntry — balanceAfter + Outlet.balance transactional update)
+      await postLedgerEntry(tx, {
+        outletId: recovery.outlet.id,
+        type: 'CREDIT',
+        amount: approveAmt,
+        refType: 'RECOVERY',
+        refNo: recovery.recoveryNo,
+        note: `Udhaar wasooli (${recovery.method}${recovery.reference ? ` • Ref ${recovery.reference}` : ''}) — approved by ${me.name}`,
       })
 
       // 3) Collection receipt (RCP-) — cash record complete

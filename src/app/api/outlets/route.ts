@@ -38,6 +38,9 @@ export async function GET(req: Request) {
       lat: o.lat,
       lng: o.lng,
       creditDays: o.creditDays,
+      // Task 98: credit khata fields
+      creditLimit: o.creditLimit,
+      balance: o.balance,
       ntn: o.ntn,
       cnic: o.cnic,
       filerStatus: o.filerStatus,
@@ -73,7 +76,7 @@ export async function POST(req: Request) {
     const user = auth.user
 
     const body = await req.json()
-    const { name, ownerName, phone, address, city, channel, lat, lng, creditDays, distributorId, salesmanId, ntn, cnic, filerStatus, visitDays } = body
+    const { name, ownerName, phone, address, city, channel, lat, lng, creditDays, creditLimit, distributorId, salesmanId, ntn, cnic, filerStatus, visitDays } = body
     if (!name || !distributorId) return jsonError('Outlet name aur distributor required hain')
 
     // Task 95: tenant ownership — outlet apne hi tenant mein banega (cross-tenant create 403)
@@ -91,6 +94,8 @@ export async function POST(req: Request) {
         lat: lat != null ? Number(lat) : null,
         lng: lng != null ? Number(lng) : null,
         creditDays: Number(creditDays) || 7,
+        // Task 98: credit limit (Rs) — 0 = no limit; booking par warning (block nahi)
+        creditLimit: Math.max(0, Number(creditLimit) || 0),
         distributorId, salesmanId: salesmanId || null,
         // Filer/Non-Filer: NTN likha ho to default FILER (user override kar sakta hai)
         ntn: (ntn ?? '').trim() || null,

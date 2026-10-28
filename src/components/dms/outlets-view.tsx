@@ -180,6 +180,10 @@ export function OutletsView() {
                       ? <span className="text-emerald-700 font-medium">{o.salesmanName}</span>
                       : <span className="text-amber-600 font-medium">assign nahi ⚠</span>}</p>
                     <p className="text-slate-400">Credit: <span className="text-slate-600 font-medium">{o.creditDays} days</span></p>
+                    {/* Task 98: running udhaar (postLedgerEntry maintained) + limit badge */}
+                    <p className="text-slate-400">Udhaar: <span className={`font-bold ${(o as unknown as { balance?: number }).balance && (o as unknown as { balance?: number }).balance! > 0 ? 'text-red-600' : 'text-slate-600'}`}>{fmtPKR((o as unknown as { balance?: number }).balance ?? 0)}</span>
+                      {(o as unknown as { creditLimit?: number }).creditLimit ? <span className="text-slate-400 font-medium"> / {fmtPKR((o as unknown as { creditLimit?: number }).creditLimit!)}</span> : null}
+                    </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="text-right">
@@ -257,7 +261,7 @@ function OutletFormDialog({ open, onOpenChange, onCreated, onSaved, outlet }: {
 }) {
   const user = useDMS((s) => s.user)
   const editing = !!outlet
-  const [form, setForm] = useState({ name: '', ownerName: '', phone: '', address: '', city: 'Lahore', channel: 'KIRYANA', creditDays: '7', ntn: '', cnic: '', filerStatus: 'NON_FILER', visitDays: [] as string[], salesmanId: '' })
+  const [form, setForm] = useState({ name: '', ownerName: '', phone: '', address: '', city: 'Lahore', channel: 'KIRYANA', creditDays: '7', creditLimit: '0', ntn: '', cnic: '', filerStatus: 'NON_FILER', visitDays: [] as string[], salesmanId: '' })
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null)
   const [gettingLoc, setGettingLoc] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -271,10 +275,11 @@ function OutletFormDialog({ open, onOpenChange, onCreated, onSaved, outlet }: {
       setForm(outlet ? {
         name: outlet.name, ownerName: outlet.ownerName ?? '', phone: outlet.phone ?? '', address: outlet.address ?? '',
         city: outlet.city, channel: outlet.channel, creditDays: String(outlet.creditDays),
+        creditLimit: String((outlet as unknown as { creditLimit?: number }).creditLimit ?? 0),
         ntn: outlet.ntn ?? '', cnic: outlet.cnic ?? '', filerStatus: outlet.filerStatus,
         visitDays: outlet.visitDays ? outlet.visitDays.split(',').filter(Boolean) : [],
         salesmanId: outlet.salesmanId ?? '',
-      } : { name: '', ownerName: '', phone: '', address: '', city: 'Lahore', channel: 'KIRYANA', creditDays: '7', ntn: '', cnic: '', filerStatus: 'NON_FILER', visitDays: [], salesmanId: '' })
+      } : { name: '', ownerName: '', phone: '', address: '', city: 'Lahore', channel: 'KIRYANA', creditDays: '7', creditLimit: '0', ntn: '', cnic: '', filerStatus: 'NON_FILER', visitDays: [], salesmanId: '' })
       setCoords(null)
       if (user) {
         api<{ salesmen: SalesmanPerfDTO[] }>(`/api/field-force?userId=${user.id}`).then((r) => setSalesmen(r.salesmen)).catch(() => {})
@@ -314,14 +319,14 @@ function OutletFormDialog({ open, onOpenChange, onCreated, onSaved, outlet }: {
       if (editing && outlet) {
         await api(`/api/outlets/${outlet.id}`, {
           method: 'PATCH',
-          body: JSON.stringify({ ...form, creditDays: Number(form.creditDays), ntn: form.ntn.trim() || null, cnic: form.cnic.trim() || null, visitDays, salesmanId: form.salesmanId || null }),
+          body: JSON.stringify({ ...form, creditDays: Number(form.creditDays), creditLimit: Number(form.creditLimit) || 0, ntn: form.ntn.trim() || null, cnic: form.cnic.trim() || null, visitDays, salesmanId: form.salesmanId || null }),
         })
         const assigned = salesmen.find((s) => s.id === form.salesmanId)
         toast({ title: 'Outlet Updated ✓', description: `${form.name} — booker: ${assigned?.name ?? 'unassigned'}, visit days: ${form.visitDays.length ? form.visitDays.join(', ') : 'Roz'} save ho gaya` })
       } else {
         await api('/api/outlets', {
           method: 'POST',
-          body: JSON.stringify({ ...form, creditDays: Number(form.creditDays), distributorId: user.profile.id, lat: coords?.lat, lng: coords?.lng, ntn: form.ntn.trim() || null, cnic: form.cnic.trim() || null, visitDays, salesmanId: form.salesmanId || null }),
+          body: JSON.stringify({ ...form, creditDays: Number(form.creditDays), creditLimit: Number(form.creditLimit) || 0, distributorId: user.profile.id, lat: coords?.lat, lng: coords?.lng, ntn: form.ntn.trim() || null, cnic: form.cnic.trim() || null, visitDays, salesmanId: form.salesmanId || null }),
         })
         toast({ title: 'Outlet Registered ✓', description: `${form.name} geo-tagged with ${coords ? 'GPS location' : 'no location'}` })
       }
@@ -405,6 +410,12 @@ function OutletFormDialog({ open, onOpenChange, onCreated, onSaved, outlet }: {
               </Select>
             </div>
             <div className="grid gap-1.5"><Label>Credit Days</Label><Input type="number" value={form.creditDays} onChange={(e) => setForm({ ...form, creditDays: e.target.value })} /></div>
+          </div>
+          {/* Task 98: Credit limit — running khata par max udhaar. 0 = no limit. */}
+          <div className="grid gap-1.5">
+            <Label className="text-[11px]">Credit Limit (Rs) <span className="text-slate-400">— 0 = koi limit nahi</span></Label>
+            <Input type="number" min="0" value={form.creditLimit} onChange={(e) => setForm({ ...form, creditLimit: e.target.value })} placeholder="e.g. 50000" />
+            <p className="text-[10px] text-slate-500">Shop ka udhaar is limit ke qareeb pohanche to order booking par WARNING dikhega (order phir bhi ban sakta hai).</p>
           </div>
 
           {/* Visit Days — order booker ko day-wise route ke liye */}

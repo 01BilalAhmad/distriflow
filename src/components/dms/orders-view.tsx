@@ -605,14 +605,20 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
         const s = splitPcs(l.qtyPcs, upc, ppb)
         return { productId: l.productId, ctn: s.ctn, box: s.box, pcs: s.pcs, tradeOffer: Math.max(0, parseFloat(l.tradeOffer) || 0) }
       })
-      const res = await api<{ order: { orderNo: string; total: number; payable?: number } }>('/api/orders', {
+      const res = await api<{ order: { orderNo: string; total: number; payable?: number; creditWarning?: { status: string; message: string } | null } }>('/api/orders', {
         method: 'POST',
         body: JSON.stringify({
           outletId, salesmanId: bookerId, items, notes,
           discount: discType !== 'NONE' && discInputValid ? { type: discType, value: discNum } : undefined,
         }),
       })
-      toast({ title: `Order ${res.order.orderNo} Booked ✓`, description: `Booker: ${booker?.name ?? ''} • Payable: ${fmtPKR(res.order.payable ?? res.order.total)}${manualDiscount > 0 ? ` (manual disc ${fmtPKR(manualDiscount)})` : ''}${computed.toTotal > 0 ? ` • TO ${fmtPKR(computed.toTotal)}` : ''}` })
+      // Task 98: credit limit warning (Finexa convention — order block nahi hota, sirf WARNING)
+      const cw = res.order.creditWarning
+      toast({
+        title: `Order ${res.order.orderNo} Booked ✓${cw ? ' — Credit Warning!' : ''}`,
+        description: `Booker: ${booker?.name ?? ''} • Payable: ${fmtPKR(res.order.payable ?? res.order.total)}${manualDiscount > 0 ? ` (manual disc ${fmtPKR(manualDiscount)})` : ''}${computed.toTotal > 0 ? ` • TO ${fmtPKR(computed.toTotal)}` : ''}${cw ? ` • ⚠ ${cw.message}` : ''}`,
+        variant: cw?.status === 'OVER' ? 'destructive' : undefined,
+      })
       onOpenChange(false)
       onCreated()
     } catch (e) {

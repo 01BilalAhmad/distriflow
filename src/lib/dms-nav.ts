@@ -34,6 +34,7 @@ export const VIEW_PATH: Record<ViewKey, string> = {
   'reports-zero-purchase': '/reports/zero-purchase',
   'reports-tax': '/reports/tax',
   'reports-recovery': '/reports/recovery',
+  'reports-credit': '/reports/credit',
   'reports-targets': '/reports/targets',
   'reports-stock': '/reports/stock',
   'reports-booker-perf': '/reports/booker-perf',

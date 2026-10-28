@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
 import { requireUser } from '@/lib/api-auth'
+import { postLedgerEntry } from '@/lib/dms-credit'
 
 const round2 = (n: number) => Math.round(n * 100) / 100
 
@@ -112,17 +113,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         })
       }
 
-      // 5) Ledger — original RETURN credit ka exact inverse (DEBIT), balance cum sahi
+      // 5) Ledger — original RETURN credit ka exact inverse (DEBIT) — Task 98:
+      // postLedgerEntry (balanceAfter + Outlet.balance transactional update)
       const ledgerAmount = Math.max(0, round2(v + taxRev + gstRev - toRev))
-      await tx.outletLedger.create({
-        data: {
-          outletId: ret.outletId,
-          type: 'DEBIT',
-          amount: ledgerAmount,
-          refType: 'RETURN_CANCEL',
-          refNo: ret.returnNo,
-          note: `Return cancelled — ghalti se return tha, stock + shop balance wapas • ${order.orderNo}`,
-        },
+      await postLedgerEntry(tx, {
+        outletId: ret.outletId,
+        type: 'DEBIT',
+        amount: ledgerAmount,
+        refType: 'RETURN_CANCEL',
+        refNo: ret.returnNo,
+        note: `Return cancelled — ghalti se return tha, stock + shop balance wapas • ${order.orderNo}`,
       })
 
       // 6) Summary totals

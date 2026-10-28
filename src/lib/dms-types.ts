@@ -269,6 +269,10 @@ export interface OutletDTO {
   lat: number | null
   lng: number | null
   creditDays: number
+  /** Task 98: credit limit (Rs) — 0 = no limit; booking par warning */
+  creditLimit: number
+  /** Task 98: running udhaar balance (postLedgerEntry maintained) */
+  balance: number
   /** Filer / Non-Filer advance tax */
   ntn: string | null
   /** Shop owner ka CNIC — bill print par shop ke apne NTN/CNIC */

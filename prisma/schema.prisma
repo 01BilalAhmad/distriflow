@@ -270,6 +270,12 @@ model Outlet {
   lat           Float?
   lng           Float?
   creditDays    Int                 @default(7)
+  // Task 98: Finexa-style credit management — bill-driven udhaar khata.
+  // balance = running udhaar (DEBIT − CREDIT, postLedgerEntry transactionally maintain karta hai;
+  // balanceCheckedAt null = legacy outlet — pehli posting/credit-report par ledger se backfill hota hai)
+  balance       Float               @default(0)
+  creditLimit   Float               @default(0) // 0 = no limit; booking par warning (Finexa convention — block nahi)
+  balanceCheckedAt DateTime?        // kabhi ledger se balance backfill/sync hua
   // Filer / Non-Filer (advance tax WHT): NTN ho to FILER warna NON_FILER
   ntn           String?
   cnic          String? // shop owner ka CNIC — bill par shop ke apne NTN/CNIC print hote hain
@@ -607,7 +613,11 @@ model OutletLedger {
   date      DateTime @default(now())
   type      String // DEBIT (invoice / udhaar) | CREDIT (cash received)
   amount    Float
-  refType   String // INVOICE | CASH | RETURN | OPENING
+  // Task 98: entry ke baad ka running balance (DEBIT − CREDIT cumulative) — Finexa
+  // mechanism: har entry par prev/new snapshot, audit + O(1) balance. Null = legacy row
+  // (backfill se pehle ki — UI blank dikhata hai, ledger aggregation source of truth rehti hai)
+  balanceAfter Float?
+  refType   String // INVOICE | CASH | RETURN | OPENING | RECOVERY | RETURN_CANCEL
   refNo     String
   note      String?
   createdAt DateTime @default(now())

@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
 import { requireUser, tenantMismatch } from '@/lib/api-auth'
 import { restockStock } from '@/lib/dms-inventory'
+import { postLedgerEntry } from '@/lib/dms-credit'
 
 interface SettleReturnItem { productId: string; qty: number }
 interface SettleReturn { reason?: string; items: SettleReturnItem[] }
@@ -174,15 +175,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           toFull > 0 ? `Trade Offer Rs ${toFull.toFixed(2)}` : null,
           advTaxFull > 0 ? `Adv Tax Rs ${advTaxFull.toFixed(2)} added (${order.filerStatus === 'FILER' ? 'Filer' : 'Non-Filer'} ${order.advanceTaxRate ?? 0}%)` : null,
         ].filter(Boolean).join(' • ')
-        await tx.outletLedger.create({
-          data: {
-            outletId: order.outletId,
-            type: 'DEBIT',
-            amount: debitAmount,
-            refType: 'INVOICE',
-            refNo: order.orderNo,
-            note: debitNotes,
-          },
+        // Task 98: postLedgerEntry — balanceAfter snapshot + Outlet.balance
+        // transactional update (legacy outlet par one-time backfill bhi)
+        await postLedgerEntry(tx, {
+          outletId: order.outletId,
+          type: 'DEBIT',
+          amount: debitAmount,
+          refType: 'INVOICE',
+          refNo: order.orderNo,
+          note: debitNotes,
         })
         if (returnValue > 0 && returnNo) {
           const returnCredit = Math.round((returnValue + gstReversal + taxReversal - toReversal) * 100) / 100
@@ -192,27 +193,23 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
             gstReversal > 0 ? `GST reversal Rs ${gstReversal.toFixed(2)}` : null,
             toReversal > 0 ? `Trade offer reversal Rs ${toReversal.toFixed(2)}` : null,
           ].filter(Boolean).join(' • ')
-          await tx.outletLedger.create({
-            data: {
-              outletId: order.outletId,
-              type: 'CREDIT',
-              amount: Math.max(0, returnCredit),
-              refType: 'RETURN',
-              refNo: returnNo,
-              note: returnNotes,
-            },
+          await postLedgerEntry(tx, {
+            outletId: order.outletId,
+            type: 'CREDIT',
+            amount: Math.max(0, returnCredit),
+            refType: 'RETURN',
+            refNo: returnNo,
+            note: returnNotes,
           })
         }
         if (cash > 0) {
-          await tx.outletLedger.create({
-            data: {
-              outletId: order.outletId,
-              type: 'CREDIT',
-              amount: cash,
-              refType: 'CASH',
-              refNo: summary.summaryNo,
-              note: 'Cash received at settlement',
-            },
+          await postLedgerEntry(tx, {
+            outletId: order.outletId,
+            type: 'CREDIT',
+            amount: cash,
+            refType: 'CASH',
+            refNo: summary.summaryNo,
+            note: 'Cash received at settlement',
           })
         }
 

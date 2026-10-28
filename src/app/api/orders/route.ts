@@ -6,6 +6,7 @@ import { advanceTaxFor, getTaxRates } from '@/lib/dms-settings'
 import { getAvailableToPromise, groupQtyByProduct, oversellMessage } from '@/lib/dms-inventory'
 import { getPjpSettings, karachiDayCode, karachiDayBounds, outletInTodayRoute } from '@/lib/dms-pjp'
 import { loadActiveSchemes, liveRecalcFromParts, type LiveRecalcOrderParts } from '@/lib/dms-live-recalc'
+import { ensureOutletBalance, creditStatus } from '@/lib/dms-credit'
 
 export async function GET(req: Request) {
   try {
@@ -316,6 +317,25 @@ export async function POST(req: Request) {
 
     const payable = orderGrandPayable({ total: orderTotal, tradeOfferTotal, gstTotal, advanceTax: order.advanceTax })
 
+    // ---- Task 98: CREDIT LIMIT WARNING (Finexa convention — block NAHI) ----
+    // Shop ka running udhaar + ye bill (agar poora udhaar jaye = max exposure) limit ke
+    // against: OK / NEAR (80%+) / OVER. Warning sirf UI badge ke liye — order bilkul
+    // normal banta hai (creditLimit 0 = no limit).
+    const currentBalance = await ensureOutletBalance(outlet.id)
+    const maxExposure = Math.round((currentBalance + payable) * 100) / 100
+    const cs = creditStatus(maxExposure, outlet.creditLimit)
+    const creditWarning = cs.status === 'NONE' ? null : {
+      status: cs.status,
+      pct: cs.pct,
+      overBy: cs.overBy,
+      currentBalance,
+      creditLimit: outlet.creditLimit,
+      maxExposure,
+      message: cs.status === 'OVER'
+        ? `Shop ka udhaar (is bill ke sath) limit se Rs ${cs.overBy.toFixed(2)} zyada hoga`
+        : `Shop ka udhaar limit ke ${cs.pct.toFixed(0)}% par pohanch raha hai`,
+    }
+
     return Response.json({
       order: {
         id: order.id, orderNo: order.orderNo, total: order.total,
@@ -325,6 +345,7 @@ export async function POST(req: Request) {
         filerStatus: order.filerStatus,
         unplanned: order.unplanned,
         payable,
+        creditWarning,
       },
     })
   } catch (e) {

@@ -52,6 +52,11 @@ export async function GET(req: Request) {
         outlet: {
           id: outlet.id, name: outlet.name, code: outlet.code, city: outlet.city,
           channel: outlet.channel, creditDays: outlet.creditDays,
+          // Task 98: credit khata context
+          creditLimit: outlet.creditLimit,
+          creditStatus: outlet.creditLimit > 0
+            ? (running > outlet.creditLimit ? 'OVER' : (running / outlet.creditLimit) >= 0.8 ? 'NEAR' : 'OK')
+            : 'NONE',
         },
         balance: Math.round(running * 100) / 100,
         entries: rows.reverse(), // newest first for UI

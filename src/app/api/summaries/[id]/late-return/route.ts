@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
 import { requireUser, tenantMismatch } from '@/lib/api-auth'
 import { restockStock } from '@/lib/dms-inventory'
+import { postLedgerEntry } from '@/lib/dms-credit'
 
 interface LateReturnItem { productId: string; qty: number }
 interface LateReturnBody {
@@ -130,22 +131,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         ? Math.min(round2(order.tradeOfferTotal * returnValue / order.total), st.tradeOfferTotal)
         : 0
 
-      // Shop ledger CREDIT — goods value + tax/GST reversal − TO reversal, balance cum ho jata hai
-      await tx.outletLedger.create({
-        data: {
-          outletId: order.outletId,
-          type: 'CREDIT',
-          amount: Math.max(0, round2(returnValue + taxReversal + gstReversal - toReversal)),
-          refType: 'RETURN',
-          refNo: returnNo,
-          note: [
-            `Late stock return after settlement (${reason})`,
-            taxReversal > 0 ? `Adv tax reversal Rs ${taxReversal.toFixed(2)}` : null,
-            gstReversal > 0 ? `GST reversal Rs ${gstReversal.toFixed(2)}` : null,
-            toReversal > 0 ? `Trade offer reversal Rs ${toReversal.toFixed(2)}` : null,
-            `• ${order.orderNo}`,
-          ].filter(Boolean).join(' • '),
-        },
+      // Shop ledger CREDIT — goods value + tax/GST reversal − TO reversal (Task 98:
+      // postLedgerEntry — balanceAfter + Outlet.balance transactional update)
+      await postLedgerEntry(tx, {
+        outletId: order.outletId,
+        type: 'CREDIT',
+        amount: Math.max(0, round2(returnValue + taxReversal + gstReversal - toReversal)),
+        refType: 'RETURN',
+        refNo: returnNo,
+        note: [
+          `Late stock return after settlement (${reason})`,
+          taxReversal > 0 ? `Adv tax reversal Rs ${taxReversal.toFixed(2)}` : null,
+          gstReversal > 0 ? `GST reversal Rs ${gstReversal.toFixed(2)}` : null,
+          toReversal > 0 ? `Trade offer reversal Rs ${toReversal.toFixed(2)}` : null,
+          `• ${order.orderNo}`,
+        ].filter(Boolean).join(' • '),
       })
 
       // Settlement row update — sheet reprint consistent rahe

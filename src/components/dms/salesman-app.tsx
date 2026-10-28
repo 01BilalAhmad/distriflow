@@ -1399,8 +1399,14 @@ function OrderBookSheet({ shop, userId, products: snapshotProducts, unplanned, o
       return
     }
     try {
-      const r = await api<{ order: { orderNo: string; total: number } }>('/api/orders', { method: 'POST', body: payload })
-      toast({ title: `Order ${r.order.orderNo} Booked ✓`, description: `${shop.name} — Total: ${fmtPKR(r.order.total)} — schemes applied` })
+      const r = await api<{ order: { orderNo: string; total: number; creditWarning?: { status: string; message: string } | null } }>('/api/orders', { method: 'POST', body: payload })
+      // Task 98: credit limit warning (block nahi — booker ko awareness dena hai)
+      const cw = r.order.creditWarning
+      toast({
+        title: `Order ${r.order.orderNo} Booked ✓${cw ? ' — Credit Warning!' : ''}`,
+        description: `${shop.name} — Total: ${fmtPKR(r.order.total)}${cw ? ` • ⚠ ${cw.message}` : ' — schemes applied'}`,
+        variant: cw?.status === 'OVER' ? 'destructive' : undefined,
+      })
       setCart([]); setCartOpen(false); deleteDiscount()
       onPlaced()
     } catch (e) {

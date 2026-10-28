@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
 import { requireUser, outletScopeError } from '@/lib/api-auth'
+import { postLedgerEntry } from '@/lib/dms-credit'
 
 export async function GET(req: Request) {
   try {
@@ -58,15 +59,33 @@ export async function POST(req: Request) {
     const ose = await outletScopeError(user, { distributorId: outlet.distributorId, salesmanId: outlet.salesmanId })
     if (ose) return ose
 
-    const seq = await nextSeq('receipt')
-    const coll = await db.collection.create({
-      data: {
-        receiptNo: `RCP-${seq}`,
-        outletId, amount: Number(amount),
-        method: method ?? 'CASH',
-        collectedById: user.id,
-      },
-    })
+    // Task 98 FIX: ye route pehle sirf receipt banata tha — ledger mein CREDIT post
+    // NAHI hota tha (independent RCP payment shop ka udhaar kam nahi karti thi —
+    // balance report par paise gayab dikhte the). Ab ONE transaction: receipt +
+    // OutletLedger CREDIT (CASH) + Outlet.balance transactional update.
+    const amt = Math.max(0, Math.round(Number(amount) * 100) / 100)
+    if (!(amt > 0)) return jsonError('Amount 0 se bara hona chahiye')
+
+    const coll = await db.$transaction(async (tx) => {
+      const seq = await nextSeq('receipt', tx)
+      const row = await tx.collection.create({
+        data: {
+          receiptNo: `RCP-${seq}`,
+          outletId, amount: amt,
+          method: method ?? 'CASH',
+          collectedById: user.id,
+        },
+      })
+      await postLedgerEntry(tx, {
+        outletId,
+        type: 'CREDIT',
+        amount: amt,
+        refType: 'CASH',
+        refNo: row.receiptNo,
+        note: `Direct payment receipt (${method ?? 'CASH'})`,
+      })
+      return row
+    }, { timeout: 15000 })
     return Response.json({ collection: { id: coll.id, receiptNo: coll.receiptNo } })
   } catch (e) {
     console.error(e)

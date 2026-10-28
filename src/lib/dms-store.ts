@@ -31,6 +31,7 @@ export type ViewKey =
   | 'reports-zero-purchase'
   | 'reports-tax'
   | 'reports-recovery'
+  | 'reports-credit'
   | 'reports-targets'
   | 'reports-stock'
   | 'reports-booker-perf'

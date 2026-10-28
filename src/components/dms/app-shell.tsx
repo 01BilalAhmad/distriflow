@@ -29,7 +29,7 @@ import { ThemeToggle } from './theme-toggle'
 import {
   LayoutDashboard, ShoppingCart, Warehouse, Package, Store, Network, Route,
   Users, Gift, Undo2, BarChart3, Package2, LogOut, Building2,
-  ClipboardList, FileStack, Wallet, BookText, HandCoins, Landmark,
+  ClipboardList, FileStack, Wallet, BookText, BookLock, HandCoins, Landmark,
   Database, Map as MapIcon, TrendingUp, Receipt, Target, Boxes, Coins,
   Settings as SettingsIcon, ChevronRight, ChevronLeft, Search, Calendar, Menu, PanelLeftClose, PanelLeftOpen, X,
 } from 'lucide-react'
@@ -60,6 +60,7 @@ const NAV: { key: string; label: string; icon: typeof LayoutDashboard; roles: st
   { key: 'reports-zero-purchase', label: 'Zero Purchase', icon: ShoppingCart, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'Dead shops 30/60/90 din' },
   { key: 'reports-tax', label: 'Tax (GST/WHT)', icon: Receipt, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'GST summary & FBR annex' },
   { key: 'reports-recovery', label: 'Recovery', icon: HandCoins, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'Wasooli performance report' },
+  { key: 'reports-credit', label: 'Credit Book', icon: BookLock, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'Shop-wise udhaar khata + credit limit' },
   { key: 'reports-targets', label: 'Targets', icon: Target, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'Booker targets & achievement' },
   { key: 'reports-stock', label: 'Stock', icon: Boxes, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'Stock on hand & expiring' },
   { key: 'reports-booker-perf', label: 'Booker Perf', icon: Users, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'Team scorecard' },

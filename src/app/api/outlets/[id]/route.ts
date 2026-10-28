@@ -12,7 +12,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
     const { id } = await params
     const body = await req.json()
-    const { name, ownerName, phone, address, city, channel, creditDays, ntn, cnic, filerStatus, visitDays, salesmanId } = body
+    const { name, ownerName, phone, address, city, channel, creditDays, creditLimit, ntn, cnic, filerStatus, visitDays, salesmanId } = body
 
     const existing = await db.outlet.findUnique({ where: { id } })
     if (!existing) return jsonError('Outlet not found', 404)
@@ -37,6 +37,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         city: city || existing.city,
         channel: channel || existing.channel,
         creditDays: creditDays != null ? (Number(creditDays) || existing.creditDays) : existing.creditDays,
+        // Task 98: credit limit — undefined = unchanged; 0 = no limit
+        creditLimit: creditLimit !== undefined ? Math.max(0, Number(creditLimit) || 0) : existing.creditLimit,
         ntn: nextNtn,
         cnic: cnic !== undefined ? cleanNullable(cnic) : cleanNullable(existing.cnic),
         filerStatus: nextStatus,

@@ -29,13 +29,14 @@ import { api, fmtPKR, fmtNum } from '@/lib/dms-api'
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import {
   BarChart3, TrendingUp, Percent, ShoppingCart, Receipt, HandCoins, Target,
-  Boxes, Users, Building2, Undo2, Store, Coins,
+  Boxes, Users, Building2, Undo2, Store, Coins, BookLock,
 } from 'lucide-react'
 import { SalesProfitTab } from './reports/sales-profit-tab'
 import { SkuProfitTab } from './reports/sku-profit-tab'
 import { ZeroPurchaseTab } from './reports/zero-purchase-tab'
 import { TaxTab } from './reports/tax-tab'
 import { RecoveryTab } from './reports/recovery-tab'
+import { CreditTab } from './reports/credit-tab'
 import { TargetsTab } from './reports/targets-tab'
 import { StockTab } from './reports/stock-tab'
 import { BookerPerformanceTab } from './reports/booker-performance-tab'
@@ -52,6 +53,7 @@ const TABS = [
   { key: 'zero-purchase', label: 'Zero Purchase', icon: ShoppingCart },
   { key: 'tax', label: 'Tax (GST/WHT)', icon: Receipt },
   { key: 'recovery', label: 'Recovery', icon: HandCoins },
+  { key: 'credit', label: 'Credit Book', icon: BookLock },
   { key: 'targets', label: 'Targets', icon: Target },
   { key: 'stock', label: 'Stock', icon: Boxes },
   { key: 'booker-perf', label: 'Booker Perf', icon: Users },
@@ -90,6 +92,7 @@ export function ReportsView({ tab: tabProp }: { tab?: string }) {
         {tab === 'zero-purchase' && <ZeroPurchaseTab />}
         {tab === 'tax' && <TaxTab />}
         {tab === 'recovery' && <RecoveryTab />}
+        {tab === 'credit' && <CreditTab />}
         {tab === 'targets' && <TargetsTab />}
         {tab === 'stock' && <StockTab />}
         {tab === 'booker-perf' && <BookerPerformanceTab />}

@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
 import { requireUser } from '@/lib/api-auth'
+import { postLedgerEntry } from '@/lib/dms-credit'
 
 /**
  * RECOVERY — order-booker wise udhaar wasooli.
@@ -351,16 +352,15 @@ export async function POST(req: Request) {
           continue
         }
 
-        // 2) Shop ledger CREDIT (RECOVERY) — shop ka balance foran kam
-        await tx.outletLedger.create({
-          data: {
-            outletId: outlet.id,
-            type: 'CREDIT',
-            amount: e.amount,
-            refType: 'RECOVERY',
-            refNo: recoveryNo,
-            note: `Udhaar wasooli (${e.method}${e.reference ? ` • Ref ${e.reference}` : ''})`,
-          },
+        // 2) Shop ledger CREDIT (RECOVERY) — shop ka balance foran kam (Task 98:
+        // postLedgerEntry — balanceAfter + Outlet.balance transactional update)
+        await postLedgerEntry(tx, {
+          outletId: outlet.id,
+          type: 'CREDIT',
+          amount: e.amount,
+          refType: 'RECOVERY',
+          refNo: recoveryNo,
+          note: `Udhaar wasooli (${e.method}${e.reference ? ` • Ref ${e.reference}` : ''})`,
         })
         batchDelta.set(outlet.id, (batchDelta.get(outlet.id) ?? 0) + e.amount)
 
