@@ -21,11 +21,16 @@ import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR, fmtDate } from '@/lib/dms-api'
 import type { RecoveryData, RecoveryRowDTO, RecoveryShopDTO } from '@/lib/dms-types'
 import { RouteSheetPrint, RecoveryReportPrint } from '@/components/dms/recovery-print'
+import { DAY_CODES, DAY_FULL, dayMatches } from '@/lib/dms-day'
 import { HandCoins, Loader2, Printer, ReceiptText, CheckCircle2, Users, AlertTriangle, History, ClipboardCheck, XCircle, Save, Clock3, ShieldCheck, Eye, Lock, Search, ArrowUpDown, FileSpreadsheet } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
 const METHOD_LABELS: Record<string, string> = { CASH: 'Cash', CHEQUE: 'Cheque', BANK: 'Bank Transfer' }
 const round2 = (n: number) => Math.round(n * 100) / 100
+
+/** Task 99: day chip style — selected = emerald filled, warna outline */
+const dayChipCls = (active: boolean) =>
+  `h-7 px-2.5 rounded-md border text-[11px] font-bold transition-colors whitespace-nowrap ${active ? 'border-emerald-500 bg-emerald-500 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700'}`
 
 const STATUS_BADGE: Record<string, string> = {
   PENDING: 'border-amber-300 bg-amber-50 text-amber-700',
@@ -77,6 +82,8 @@ export function RecoveryView() {
   const [tab, setTab] = useState('route')
   const [search, setSearch] = useState('')
   const [sortMode, setSortMode] = useState<'amount' | 'name'>('amount')
+  // Task 99: day-wise wasooli — 'ALL' ya day code (MON..SUN); default ALL = purana behavior
+  const [dayFilter, setDayFilter] = useState<string>('ALL')
   const [confirmPost, setConfirmPost] = useState(false)
   const [selPending, setSelPending] = useState<Set<string>>(new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
@@ -121,7 +128,21 @@ export function RecoveryView() {
 
   const selectedBooker = data?.bookers.find((b) => (b.id ?? 'none') === bookerId)
 
-  const pendingShops = useMemo(() => shops.filter((s) => s.balance > 0.005), [shops])
+  // Task 99: day-wise wasooli — sab pending shops + per-day counts + day filter
+  // (visitDays khali = roz visit — dayMatches har din mein shamil karta hai)
+  const pendingShopsAll = useMemo(() => shops.filter((s) => s.balance > 0.005), [shops])
+
+  const dayCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const d of DAY_CODES) counts[d] = 0
+    for (const s of pendingShopsAll) for (const d of DAY_CODES) if (dayMatches(s.visitDays, d)) counts[d] += 1
+    return counts
+  }, [pendingShopsAll])
+
+  const pendingShops = useMemo(
+    () => (dayFilter === 'ALL' ? pendingShopsAll : pendingShopsAll.filter((s) => dayMatches(s.visitDays, dayFilter))),
+    [pendingShopsAll, dayFilter],
+  )
 
   const rows = useMemo(() => pendingShops.map((s) => {
     const d = drafts[s.outletId] ?? emptyDraft()
@@ -448,11 +469,32 @@ export function RecoveryView() {
             )}
             <div className="ml-auto flex items-center gap-2">
               <Input type="date" value={recDate} onChange={(e) => setRecDate(e.target.value)} className="h-9 w-38 text-xs" title="Recovery date" />
-              <Button size="sm" variant="outline" className="border-violet-300 text-violet-700 hover:bg-violet-50 h-9" disabled={pendingShops.length === 0} onClick={() => setPrintSheet(true)}>
+              <Button size="sm" variant="outline" className="border-violet-300 text-violet-700 hover:bg-violet-50 h-9" disabled={pendingShops.length === 0} onClick={() => setPrintSheet(true)} title="Day-wise wasooli sheet print karein — booker route par hath se bhare ga">
                 <Printer className="h-3.5 w-3.5 mr-1.5" /> Route Sheet
               </Button>
             </div>
           </div>
+
+          {/* Task 99: Day-wise selector — kis din ki visit shops ki wasooli list/print
+              (roz wali shops har din ki list mein aati hain; ALL = purana poora route) */}
+          {selectedBooker && shops.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wide mr-0.5">Visit Day:</span>
+              <button type="button" onClick={() => setDayFilter('ALL')} className={dayChipCls(dayFilter === 'ALL')} title="Sari pending shops — koi day filter nahi">
+                All <span className={`ml-0.5 text-[10px] font-semibold ${dayFilter === 'ALL' ? 'text-emerald-50' : 'text-slate-400'}`}>{pendingShopsAll.length}</span>
+              </button>
+              {DAY_CODES.map((d) => (
+                <button key={d} type="button" onClick={() => setDayFilter(d)} className={dayChipCls(dayFilter === d)} title={`${DAY_FULL[d]} ki visit shops ki wasooli list`}>
+                  {d} <span className={`ml-0.5 text-[10px] font-semibold ${dayFilter === d ? 'text-emerald-50' : 'text-slate-400'}`}>{dayCounts[d]}</span>
+                </button>
+              ))}
+              {dayFilter !== 'ALL' && (
+                <span className="text-[11px] font-semibold text-violet-600">
+                  {DAY_FULL[dayFilter]}: {pendingShops.length} pending shops — Route Sheet isi din ki print hogi
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Aaj ki wasooli strip — already-collected shops ka badge/summary */}
           {todayCollected.total > 0 && (
@@ -885,6 +927,7 @@ export function RecoveryView() {
           bookerName={bookerName}
           bookerPhone={selectedBooker.phone}
           date={recDate ? new Date(recDate + 'T12:00:00').toISOString() : new Date().toISOString()}
+          day={dayFilter}
           shops={pendingShops}
           onClose={() => setPrintSheet(false)}
         />

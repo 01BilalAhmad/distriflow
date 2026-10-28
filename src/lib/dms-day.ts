@@ -36,3 +36,12 @@ export function outletInTodayRoute(outlet: { salesmanId: string | null; visitDay
 export function isSameKarachiDay(a: Date | string, b: Date = new Date()): boolean {
   return karachiDateStr(new Date(a)) === karachiDateStr(b)
 }
+
+/** Task 99: Week day codes — Outlet.visitDays aur day-wise wasooli sheet isi format mein */
+export const DAY_CODES = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'] as const
+export type DayCode = (typeof DAY_CODES)[number]
+
+/** Day code → poora naam (UI chips + print sheet headers) */
+export const DAY_FULL: Record<string, string> = {
+  MON: 'Monday', TUE: 'Tuesday', WED: 'Wednesday', THU: 'Thursday', FRI: 'Friday', SAT: 'Saturday', SUN: 'Sunday',
+}

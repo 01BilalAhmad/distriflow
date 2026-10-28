@@ -8,6 +8,7 @@
  */
 
 import { PrintFrame } from '@/components/dms/cbl-print'
+import { DAY_FULL } from '@/lib/dms-day'
 import type { RecoveryBookerDTO, RecoveryRowDTO, RecoveryShopDTO } from '@/lib/dms-types'
 
 const fmt2 = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -38,16 +39,23 @@ function Signatures({ left, right }: { left: [string, string]; right: [string, s
 
 // ============================================================
 // 1) RECOVERY ROUTE SHEET — booker ke route ki pending shops
+//    Task 99: day-wise — "Visit Day" select ho to sirf usi din ki visit shops
+//    print hoti hain (roz wali shops har din shamil), owner/phone + Sign column
+//    + khali rows — booker route par hath se bharta hai.
 // ============================================================
-export function RecoveryRouteSheetDoc({ businessName, bookerName, bookerPhone, date, shops }: {
+export function RecoveryRouteSheetDoc({ businessName, bookerName, bookerPhone, date, day, shops }: {
   businessName: string
   bookerName: string
   bookerPhone?: string | null
   date: string
+  /** 'ALL' ya day code (MON..SUN) — undefined = ALL */
+  day?: string
   shops: RecoveryShopDTO[]
 }) {
   const pending = shops.filter((s) => s.balance > 0.005)
   const total = pending.reduce((a, s) => a + s.balance, 0)
+  const dayName = day && day !== 'ALL' ? DAY_FULL[day] ?? null : null
+  const blankRows = 4
 
   return (
     <div className="cbl-doc">
@@ -59,7 +67,8 @@ export function RecoveryRouteSheetDoc({ businessName, bookerName, bookerPhone, d
             <table style={{ border: 'none', marginTop: 4 }}>
               <tbody>
                 <tr><td style={{ border: 'none', width: 105, fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Order Booker:</td><td style={{ border: 'none' }}>{bookerName}{bookerPhone ? ` — ${bookerPhone}` : ''}</td></tr>
-                <tr><td style={{ border: 'none', fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Route Shops:</td><td style={{ border: 'none' }}>{pending.length} shops (jinka udhaar baqi hai)</td></tr>
+                <tr><td style={{ border: 'none', fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Visit Day:</td><td style={{ border: 'none', fontWeight: 'bold' }}>{dayName ? dayName.toUpperCase() : 'TAMAM DIN (SARI SHOPS)'}</td></tr>
+                <tr><td style={{ border: 'none', fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Route Shops:</td><td style={{ border: 'none' }}>{pending.length} shops — jinka udhaar baqi hai</td></tr>
               </tbody>
             </table>
           </div>
@@ -71,17 +80,17 @@ export function RecoveryRouteSheetDoc({ businessName, bookerName, bookerPhone, d
               </tbody>
             </table>
             <p className="mt-2 text-[16px] font-bold">RECOVERY ROUTE SHEET</p>
-            <p className="text-[10px] font-bold" style={{ letterSpacing: 0.5 }}>UDHAAR WASOOLI — SHOP WISE PENDING LIST</p>
+            <p className="text-[10px] font-bold" style={{ letterSpacing: 0.5 }}>UDHAAR WASOOLI — {dayName ? `${dayName.toUpperCase()} KI SHOPS` : 'SHOP WISE PENDING LIST'}</p>
           </div>
         </div>
 
-        {/* shops table */}
+        {/* shops table — Wasooli/Receipt#/Sign columns KHALI hain (booker route par likhe ga) */}
         <p className="mb-1 mt-3 text-[11px] font-bold uppercase" style={{ letterSpacing: 0.5 }}>Shop Wise Pending Udhaar</p>
         <table style={{ fontSize: 9 }}>
           <colgroup>
-            <col style={{ width: '5%' }} /><col style={{ width: '11%' }} /><col style={{ width: '26%' }} />
-            <col style={{ width: '10%' }} /><col style={{ width: '10%' }} /><col style={{ width: '14%' }} />
-            <col style={{ width: '12%' }} /><col style={{ width: '12%' }} />
+            <col style={{ width: '5%' }} /><col style={{ width: '10%' }} /><col style={{ width: '25%' }} />
+            <col style={{ width: '9%' }} /><col style={{ width: '9%' }} /><col style={{ width: '12%' }} />
+            <col style={{ width: '12%' }} /><col style={{ width: '10%' }} /><col style={{ width: '8%' }} />
           </colgroup>
           <thead>
             <tr>
@@ -93,26 +102,42 @@ export function RecoveryRouteSheetDoc({ businessName, bookerName, bookerPhone, d
               <th>Pending Udhaar</th>
               <th>Wasooli (Rs)</th>
               <th>Receipt #</th>
+              <th>Sign</th>
             </tr>
           </thead>
           <tbody>
             {pending.length === 0 ? (
-              <tr><td colSpan={8} style={{ textAlign: 'left' }}>Is booker ke route mein koi pending udhaar nahi — sab shops settled hain.</td></tr>
+              <tr><td colSpan={9} style={{ textAlign: 'left' }}>{dayName ? `${dayName} ko is route ki koi pending udhaar shop nahi — sab settled hain.` : 'Is booker ke route mein koi pending udhaar nahi — sab shops settled hain.'}</td></tr>
             ) : pending.map((s, i) => (
               <tr key={s.outletId} className="cbl-break-avoid">
                 <td className="ctr">{i + 1}</td>
                 <td className="ctr">{s.code}</td>
-                <td style={{ textAlign: 'left' }}>{s.name.toUpperCase()}</td>
+                <td style={{ textAlign: 'left' }}>
+                  {s.name.toUpperCase()}
+                  {(s.ownerName || s.phone) && (
+                    <div style={{ fontSize: 7, color: '#444' }}>{[s.ownerName, s.phone].filter(Boolean).join(' — ')}</div>
+                  )}
+                </td>
                 <td className="ctr">{s.city}</td>
                 <td className="ctr" style={{ fontSize: 7.5, whiteSpace: 'nowrap' }}>{s.channel}</td>
                 <td className="num">{fmt2(s.balance)}</td>
                 <td>&nbsp;</td>
                 <td>&nbsp;</td>
+                <td>&nbsp;</td>
+              </tr>
+            ))}
+            {/* Task 99: khali rows — agar kisi dusri shop se bhi wasooli ho to booker likh sake */}
+            {pending.length > 0 && Array.from({ length: blankRows }).map((_, k) => (
+              <tr key={`blank-${k}`} className="cbl-break-avoid">
+                <td className="ctr" style={{ color: '#999' }}>{pending.length + k + 1}</td>
+                <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>
+                <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>
               </tr>
             ))}
             <tr style={{ fontWeight: 'bold', backgroundColor: '#f7f7f7' }}>
               <td colSpan={5} style={{ textAlign: 'right' }}>Total Pending ({pending.length} shops)</td>
               <td className="num">{fmt2(total)}</td>
+              <td>&nbsp;</td>
               <td>&nbsp;</td>
               <td>&nbsp;</td>
             </tr>
@@ -123,7 +148,7 @@ export function RecoveryRouteSheetDoc({ businessName, bookerName, bookerPhone, d
         <div className="mt-4" style={{ width: '58%' }}>
           <table style={{ fontSize: 9.5 }}>
             <tbody>
-              <tr><td style={{ border: 'none', fontWeight: 'bold' }}>Note:</td><td style={{ border: 'none', textAlign: 'left' }}>Booker ye sheet route par le jaye — har shop se jo raqam wasool ho usi waqt &quot;Wasooli (Rs)&quot; column mein likhe aur shop ke muhtamal se receipt par sign karwaye. Shaam ko office mein ye wasooli Recovery page par post hogi, shop ledger usi waqt update ho jayega.</td></tr>
+              <tr><td style={{ border: 'none', fontWeight: 'bold' }}>Note:</td><td style={{ border: 'none', textAlign: 'left' }}>Booker ye sheet route par le jaye{dayName ? ` — is par sirf ${dayName} ki visit shops hain (jis shop ke visit days set nahi wo roz aati hai)` : ''}. Har shop se jo raqam wasool ho usi waqt &quot;Wasooli (Rs)&quot; column mein likhe, receipt # darj kare aur shop ke muhtamal se sign karwaye. Agar kisi dusri shop se bhi wasooli ho to neeche khali rows mein likhein. Shaam ko office mein ye wasooli Recovery page par post hogi, shop ledger usi waqt update ho jayega.</td></tr>
             </tbody>
           </table>
         </div>
@@ -265,11 +290,16 @@ export function RecoveryReportDoc({ businessName, bookers, history }: {
   )
 }
 
-/** PrintFrame wrapper — route sheet */
+/** PrintFrame wrapper — route sheet (Task 99: day-aware — pdfName mein din) */
 export function RouteSheetPrint(props: Parameters<typeof RecoveryRouteSheetDoc>[0] & { onClose: () => void }) {
   const { onClose, ...doc } = props
+  const dayName = doc.day && doc.day !== 'ALL' ? DAY_FULL[doc.day] ?? null : null
   return (
-    <PrintFrame title="Recovery Route Sheet" onClose={onClose} pdfName={`recovery-sheet-${doc.bookerName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}>
+    <PrintFrame
+      title={dayName ? `Recovery Route Sheet — ${dayName}` : 'Recovery Route Sheet'}
+      onClose={onClose}
+      pdfName={`recovery-sheet-${dayName ? `${doc.day!.toLowerCase()}-` : ''}${doc.bookerName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+    >
       <RecoveryRouteSheetDoc {...doc} />
     </PrintFrame>
   )

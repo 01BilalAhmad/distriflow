@@ -689,6 +689,9 @@ export interface RecoveryShopDTO {
   city: string
   channel: string
   balance: number
+  /** Task 99: owner/phone — day-wise wasooli print sheet par shop pehchanne ke liye */
+  ownerName?: string | null
+  phone?: string | null
   /** Visit schedule — "MON,WED,SAT" | empty = roz visit */
   visitDays: string
   /** Aaj is shop par APPROVED wasooli — "aaj wasooli" badge ke liye */

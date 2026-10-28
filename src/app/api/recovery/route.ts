@@ -76,10 +76,12 @@ export async function GET(req: Request) {
     const mStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
 
     // Route shops (assigned + unassigned) — balance aggregation ke sath
+    // Task 99: ownerName/phone bhi — day-wise wasooli print sheet par shop pehchan
     const routeOutlets = await db.outlet.findMany({
       where: scope.outletWhere,
       select: {
         id: true, name: true, code: true, city: true, channel: true, salesmanId: true, visitDays: true,
+        ownerName: true, phone: true,
         ledgerEntries: { select: { type: true, amount: true, date: true } },
       },
     })
@@ -168,7 +170,7 @@ export async function GET(req: Request) {
 
     // Specific booker bucket ki route shops (Book Recovery tab ke liye)
     const bookerId = searchParams.get('bookerId')
-    let shops: Array<{ outletId: string; name: string; code: string; city: string; channel: string; balance: number; visitDays: string }> = []
+    let shops: Array<{ outletId: string; name: string; code: string; city: string; channel: string; ownerName: string | null; phone: string | null; balance: number; visitDays: string }> = []
     if (bookerId) {
       const bucketId = bookerId === 'none' ? null : bookerId
       // scope guard: bucket is scope ke bookers mein hona chahiye (ya 'none' jab unassigned shops hon)
@@ -185,6 +187,7 @@ export async function GET(req: Request) {
         : routeOutlets.filter((o) => (o.salesmanId ?? null) === bucketId))
         .map((o) => ({
           outletId: o.id, name: o.name, code: o.code, city: o.city, channel: o.channel,
+          ownerName: o.ownerName, phone: o.phone,
           visitDays: o.visitDays,
           balance: round2(
             o.ledgerEntries.filter((e) => e.type === 'DEBIT').reduce((s, e) => s + e.amount, 0)
