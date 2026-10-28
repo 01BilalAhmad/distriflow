@@ -92,6 +92,8 @@ export function RecoveryView() {
   // Task 100: OB Recovery Report — booker × date ki POSTED recovery (physical cash tally)
   const [obBookerId, setObBookerId] = useState('')
   const [obDate, setObDate] = useState(() => new Date(Date.now() + 5 * 3600 * 1000).toISOString().slice(0, 10)) // aaj ki PKT date
+  // mode: 'posting' = approve/post ki date (default — "aaj jo post hui") | 'collection' = wasooli ki date
+  const [obMode, setObMode] = useState<'posting' | 'collection'>('posting')
   const [obReport, setObReport] = useState<ObRecoveryReportDTO | null>(null)
   const [obLoading, setObLoading] = useState(false)
   const [obPrint, setObPrint] = useState(false)
@@ -331,12 +333,18 @@ export function RecoveryView() {
     }
   }
 
-  /* ---------- Task 100: OB Recovery Report — generate (booker × date) ---------- */
-  const generateObReport = async () => {
+  /* ---------- Task 100: OB Recovery Report — generate (booker × date × mode) ----------
+     Overrides: hints ke clickable date chips aur mode toggle seedha generate karte hain
+     (state bhi sync hoti hy taake baad ka Generate/Print consistent rahe) */
+  const generateObReport = async (dateOverride?: string, modeOverride?: 'posting' | 'collection') => {
     if (!userId || !obBookerId || obLoading) return
+    const dStr = dateOverride ?? obDate
+    const m = modeOverride ?? obMode
+    if (dateOverride && dateOverride !== obDate) setObDate(dateOverride)
+    if (modeOverride && modeOverride !== obMode) setObMode(modeOverride)
     setObLoading(true)
     try {
-      const d = await api<ObRecoveryReportDTO>(`/api/recovery/report?bookerId=${obBookerId}&date=${obDate}`)
+      const d = await api<ObRecoveryReportDTO>(`/api/recovery/report?bookerId=${obBookerId}&date=${dStr}&mode=${m}`)
       setObReport(d)
     } catch (e) {
       setObReport(null)
@@ -349,6 +357,13 @@ export function RecoveryView() {
   /** PKT time — report print jaisi hi ("2:45 pm") */
   const obTimeUI = (iso: string) =>
     new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Karachi' })
+
+  /** Cross-day stamp — agar ISO ki PKT date report date se alag hy to "28 Oct, 9:12 am" warna sirf time */
+  const obStampUI = (iso: string, reportDate: string) => {
+    const d = new Date(new Date(iso).getTime() + 5 * 3600 * 1000).toISOString().slice(0, 10)
+    if (d === reportDate) return obTimeUI(iso)
+    return `${new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { day: 'numeric', month: 'short', timeZone: 'UTC' })}, ${obTimeUI(iso)}`
+  }
 
   if (loading) {
     return (
@@ -953,7 +968,7 @@ export function RecoveryView() {
             <Banknote className="h-4.5 w-4.5 text-emerald-600 shrink-0 mt-0.5" />
             <div className="min-w-0">
               <p className="text-xs font-semibold text-emerald-800">Order booker ki POSTED recovery report — physical cash tally ke liye</p>
-              <p className="text-[11px] text-emerald-700 mt-0.5">Pehle order booker chunein, phir date pick karein (koi bhi old date chal jayegi) aur Generate Report dabayen. Sirf APPROVED entries aati hain — pending approvals shamil nahi hoti.</p>
+              <p className="text-[11px] text-emerald-700 mt-0.5">Booker chunein, date pick karein (koi bhi old date), Report Basis chunein — <b>Posting Date</b> = jis din entry approve/post hui (default), <b>Collection Date</b> = jis din cash wasool hui — phir Generate Report dabayen. Sirf APPROVED entries aati hain.</p>
             </div>
           </div>
 
@@ -975,7 +990,22 @@ export function RecoveryView() {
                 <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1"><CalendarDays className="h-3 w-3" /> Date</label>
                 <Input type="date" value={obDate} onChange={(e) => { setObDate(e.target.value); setObReport(null) }} className="h-9 mt-1 w-40 text-xs" title="Kisi bhi purani date ki posted recovery report" />
               </div>
-              <Button className="bg-emerald-600 hover:bg-emerald-700 h-9" onClick={generateObReport} disabled={!obBookerId || obLoading}>
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1"><Clock3 className="h-3 w-3" /> Report Basis</label>
+                <div className="flex gap-1.5 mt-1">
+                  {([
+                    { m: 'posting' as const, label: 'Posting Date', title: 'Jis din entry APPROVE/post hui (aaj jo post hui wo yahan)' },
+                    { m: 'collection' as const, label: 'Collection Date', title: 'Jis din booker ne cash collect ki (wasooli ki date)' },
+                  ]).map((o) => (
+                    <button key={o.m} type="button" title={o.title}
+                      onClick={() => { setObMode(o.m); setObReport(null) }}
+                      className={`h-9 px-3 rounded-md border text-[11px] font-bold transition-colors whitespace-nowrap ${obMode === o.m ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm' : 'bg-white border-slate-300 text-slate-600 hover:border-emerald-400 hover:text-emerald-700'}`}>
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <Button className="bg-emerald-600 hover:bg-emerald-700 h-9" onClick={() => generateObReport()} disabled={!obBookerId || obLoading}>
                 {obLoading ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Search className="h-4 w-4 mr-1.5" />}
                 Generate Report
               </Button>
@@ -986,6 +1016,41 @@ export function RecoveryView() {
               )}
             </CardContent>
           </Card>
+
+          {/* Task 100-C: khali report par smart hints — pending + qareebi dates (clickable) */}
+          {obReport && obReport.entries.length === 0 && obReport.hints && (
+            <Card className="border-amber-200 bg-amber-50 shrink-0">
+              <CardContent className="px-4 py-3 space-y-2">
+                <p className="text-xs font-bold text-amber-900 flex items-center gap-1.5"><AlertTriangle className="h-3.5 w-3.5" /> Is date par koi posted recovery nahi mili — mumkin wajuhat:</p>
+                {!!obReport.hints.pendingCount && (
+                  <p className="text-[11px] text-amber-800 leading-relaxed">
+                    • <b>{obReport.hints.pendingCount} wasooliyan (Rs {fmtPKR(obReport.hints.pendingTotal)})</b> is date par collect hui thin magar <b>abhi PENDING</b> hain — approve hone ke baad <b>Posting Date</b> report mein aayengi (Approvals tab dekhein).
+                  </p>
+                )}
+                {obReport.hints.nearbyDates.length > 0 && (
+                  <div className="text-[11px] text-amber-800 leading-relaxed">
+                    <p>• Qareebi dates jin par is booker ki posted entries hain (click karein — report usi date par ban jayegi):</p>
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      {obReport.hints.nearbyDates.map((n) => (
+                        <button key={n.date} type="button" onClick={() => generateObReport(n.date)}
+                          className="px-2.5 py-1 rounded-md border border-amber-300 bg-white text-[11px] font-bold text-amber-900 hover:bg-amber-100 transition-colors">
+                          {new Date(`${n.date}T12:00:00Z`).toLocaleDateString('en-US', { day: 'numeric', month: 'short', timeZone: 'UTC' })} — {n.count} entries / Rs {fmtPKR(n.total)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {!obReport.hints.pendingCount && obReport.hints.nearbyDates.length === 0 && (
+                  <p className="text-[11px] text-amber-800 leading-relaxed">
+                    • Is booker ki aas paas 7 din mein koi posted entry nahi mili — booker ya date check karein, ya <b>History &amp; Report</b> tab mein voucher history dekhein. Agar booker ne recovery bheji hi nahi to report khali hona theek hy.
+                  </p>
+                )}
+                <p className="text-[10px] text-amber-700/80 leading-relaxed border-t border-amber-200 pt-1.5">
+                  Report basis: <b>{obReport.mode === 'collection' ? 'Collection Date (wasooli ki date)' : 'Posting Date (approve/post hone ki date)'}</b> — doosri bunyad par dekhna ho to upar Report Basis toggle badal kar dobara Generate karein.
+                </p>
+              </CardContent>
+            </Card>
+          )}
 
           {obReport && (
             <>
@@ -1017,6 +1082,7 @@ export function RecoveryView() {
                   <div className="px-4 py-2.5 border-b border-slate-100 flex items-center gap-2 flex-wrap">
                     <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mr-auto">
                       {obReport.booker.name} — Posted Entries ({obReport.entries.length})
+                      <span className="ml-1.5 font-semibold normal-case text-[10px] text-slate-400">({obReport.mode === 'collection' ? 'collection date basis' : 'posting date basis'})</span>
                     </p>
                     {obReport.entries.length === 0 && (
                       <Badge variant="outline" className="border-slate-300 text-slate-500 text-[11px]">Koi posted recovery nahi</Badge>
@@ -1042,7 +1108,15 @@ export function RecoveryView() {
                         ) : obReport.entries.map((e, i) => (
                           <TableRow key={e.id}>
                             <TableCell className="text-center text-xs text-slate-400">{i + 1}</TableCell>
-                            <TableCell className="text-xs text-slate-500 whitespace-nowrap">{obTimeUI(e.time)}</TableCell>
+                            <TableCell className="text-xs text-slate-500 whitespace-nowrap">
+                              <div>{obStampUI(e.time, obReport.date)}</div>
+                              {obReport.mode === 'posting' && e.postedAt && e.collectedAt && e.collectedAt !== e.postedAt && (
+                                <div className="text-[10px] text-slate-400" title="Booker ne cash is waqt collect ki thi">collected {obStampUI(e.collectedAt, obReport.date)}</div>
+                              )}
+                              {obReport.mode === 'collection' && e.postedAt && e.collectedAt && e.collectedAt !== e.postedAt && (
+                                <div className="text-[10px] text-slate-400" title="Ye entry is waqt approve/post hui">posted {obStampUI(e.postedAt, obReport.date)}</div>
+                              )}
+                            </TableCell>
                             <TableCell className="text-xs font-bold text-emerald-700 whitespace-nowrap">{e.recoveryNo}</TableCell>
                             <TableCell>
                               <p className="text-sm text-slate-800">{e.outletName}</p>
@@ -1103,6 +1177,7 @@ export function RecoveryView() {
           bookerName={obReport.booker.name}
           bookerPhone={obReport.booker.phone}
           date={obReport.date}
+          mode={obReport.mode ?? 'posting'}
           entries={obReport.entries}
           totals={obReport.totals}
           onClose={() => setObPrint(false)}

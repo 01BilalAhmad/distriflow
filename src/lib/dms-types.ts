@@ -748,8 +748,12 @@ export interface RecoveryData {
 export interface ObRecoveryEntryDTO {
   id: string
   recoveryNo: string
-  /** recoveredAt ISO — UI/print par PKT time format hota hai */
+  /** primary timestamp ISO (mode ke hisaab se: posting = approvedAt ?? recoveredAt, collection = recoveredAt) — PKT time format UI/print mein */
   time: string
+  /** ISO — booker ne kab collect/submit ki (recoveredAt) */
+  collectedAt?: string
+  /** ISO — admin approve/post kab ki (null = direct post, approve hui hi nahi) */
+  postedAt?: string | null
   amount: number
   method: string // CASH | CHEQUE | BANK
   reference: string | null
@@ -765,6 +769,16 @@ export interface ObRecoveryReportDTO {
   booker: { id: string | null; name: string; phone: string | null }
   /** YYYY-MM-DD — report ka business day (PKT) */
   date: string
+  /** 'posting' = approve/post date (default) | 'collection' = wasooli date */
+  mode?: 'posting' | 'collection'
   entries: ObRecoveryEntryDTO[]
   totals: { total: number; cash: number; nonCash: number; count: number; shops: number }
+  /** khali report par raasta dikhane ke liye diagnostics */
+  hints?: {
+    /** is date par collect hui magar abhi PENDING wasooliyan */
+    pendingCount: number
+    pendingTotal: number
+    /** aas paas 7 din mein posted entries wali dates (mode-aware, qareebi pehle) */
+    nearbyDates: Array<{ date: string; count: number; total: number }>
+  }
 }

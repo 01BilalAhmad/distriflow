@@ -334,18 +334,28 @@ const OB_METHOD: Record<string, string> = { CASH: 'Cash', CHEQUE: 'Cheque', BANK
 const obTime = (iso: string) =>
   new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Karachi' })
 
+/** Cross-day stamp — ISO ki PKT date report date se alag ho to "28 Oct, 9:12 am" warna sirf time */
+const obStamp = (iso: string, reportDate: string) => {
+  const d = new Date(new Date(iso).getTime() + 5 * 3600 * 1000).toISOString().slice(0, 10)
+  if (d === reportDate) return obTime(iso)
+  return `${new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { day: 'numeric', month: 'short', timeZone: 'UTC' })}, ${obTime(iso)}`
+}
+
 /** 'YYYY-MM-DD' -> "15 January 2026 / Thursday" — TZ-safe (noon anchor) */
 const obDayDate = (date: string) => dayDate(new Date(`${date}T12:00:00`))
 
-export function OBRecoveryReportDoc({ businessName, bookerName, bookerPhone, date, entries, totals }: {
+export function OBRecoveryReportDoc({ businessName, bookerName, bookerPhone, date, mode, entries, totals }: {
   businessName: string
   bookerName: string
   bookerPhone?: string | null
   /** YYYY-MM-DD — business day (PKT) */
   date: string
+  /** 'posting' (default) = approve/post date basis | 'collection' = wasooli date basis */
+  mode?: 'posting' | 'collection'
   entries: ObRecoveryEntryDTO[]
   totals: { total: number; cash: number; nonCash: number; count: number; shops: number }
 }) {
+  const basis = mode === 'collection' ? 'Collection Date (wasooli ki date)' : 'Posting Date (approve/post ki date)'
   return (
     <div className="cbl-doc">
       <div className="cbl-page bg-white px-8 py-7 flex flex-col">
@@ -357,6 +367,7 @@ export function OBRecoveryReportDoc({ businessName, bookerName, bookerPhone, dat
               <tbody>
                 <tr><td style={{ border: 'none', width: 105, fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Order Booker:</td><td style={{ border: 'none' }}>{bookerName}{bookerPhone ? ` — ${bookerPhone}` : ''}</td></tr>
                 <tr><td style={{ border: 'none', fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Report Date:</td><td style={{ border: 'none', fontWeight: 'bold' }}>{obDayDate(date)}</td></tr>
+                <tr><td style={{ border: 'none', fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Basis:</td><td style={{ border: 'none' }}>{basis}</td></tr>
                 <tr><td style={{ border: 'none', fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Posted Entries:</td><td style={{ border: 'none' }}>{totals.count} wasooli — {totals.shops} shops</td></tr>
               </tbody>
             </table>
@@ -420,7 +431,15 @@ export function OBRecoveryReportDoc({ businessName, bookerName, bookerPhone, dat
             ) : entries.map((e, i) => (
               <tr key={e.id} className="cbl-break-avoid">
                 <td className="ctr">{i + 1}</td>
-                <td className="ctr" style={{ whiteSpace: 'nowrap' }}>{obTime(e.time)}</td>
+                <td className="ctr" style={{ whiteSpace: 'nowrap' }}>
+                  {obStamp(e.time, date)}
+                  {mode !== 'collection' && e.postedAt && e.collectedAt && e.collectedAt !== e.postedAt && (
+                    <div style={{ fontSize: 7, color: '#888' }}>col. {obStamp(e.collectedAt, date)}</div>
+                  )}
+                  {mode === 'collection' && e.postedAt && e.collectedAt && e.collectedAt !== e.postedAt && (
+                    <div style={{ fontSize: 7, color: '#888' }}>post {obStamp(e.postedAt, date)}</div>
+                  )}
+                </td>
                 <td className="ctr" style={{ fontWeight: 'bold' }}>{e.recoveryNo}</td>
                 <td className="ctr" style={{ fontWeight: 'bold' }}>{e.outletCode4 ?? e.outletCode}</td>
                 <td style={{ textAlign: 'left' }}>{e.outletName.toUpperCase()}</td>
@@ -445,7 +464,7 @@ export function OBRecoveryReportDoc({ businessName, bookerName, bookerPhone, dat
         <div className="mt-4" style={{ width: '58%' }}>
           <table style={{ fontSize: 9.5 }}>
             <tbody>
-              <tr><td style={{ border: 'none', fontWeight: 'bold' }}>Note:</td><td style={{ border: 'none', textAlign: 'left' }}>Is report par sirf APPROVED/posted recoveries hain — order booker ne jo raqam shops se wasool ki aur office mein jama hui. Cash ko jama raqam se tally karein — koi farq ho to foran note karein. Pending/rejected entries is report mein shamil nahi hoti.</td></tr>
+              <tr><td style={{ border: 'none', fontWeight: 'bold' }}>Note:</td><td style={{ border: 'none', textAlign: 'left' }}>Is report par sirf APPROVED/posted recoveries hain — order booker ne jo raqam shops se wasool ki aur office mein jama hui. Report {mode === 'collection' ? 'wasooli (collection)' : 'approve/posting'} date ki bunyad par hy — har entry ke neechay chhota stamp doosri timestamp dikhata hy. Cash ko jama raqam se tally karein — koi farq ho to foran note karein. Pending/rejected entries shamil nahi.</td></tr>
             </tbody>
           </table>
         </div>
