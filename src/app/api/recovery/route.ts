@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
 import { requireUser } from '@/lib/api-auth'
 import { postLedgerEntry } from '@/lib/dms-credit'
+import { ensureCode4Backfill } from '@/lib/dms-code4'
 
 /**
  * RECOVERY — order-booker wise udhaar wasooli.
@@ -72,6 +73,9 @@ export async function GET(req: Request) {
 
     const scope = recoveryScopeFor({ id: me.id, role: me.role, profileId: me.profile?.id ?? null })
 
+    // Task 100: legacy shops ka 4-digit code backfill (once — pehli load par hi ho jata hai)
+    await ensureCode4Backfill()
+
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0)
     const mStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
 
@@ -80,8 +84,8 @@ export async function GET(req: Request) {
     const routeOutlets = await db.outlet.findMany({
       where: scope.outletWhere,
       select: {
-        id: true, name: true, code: true, city: true, channel: true, salesmanId: true, visitDays: true,
-        ownerName: true, phone: true,
+        id: true, name: true, code: true, code4: true, city: true, channel: true, salesmanId: true, visitDays: true,
+        ownerName: true, phone: true, address: true,
         ledgerEntries: { select: { type: true, amount: true, date: true } },
       },
     })
@@ -137,7 +141,7 @@ export async function GET(req: Request) {
     const historyRows = await db.recovery.findMany({
       where: { outlet: scope.outletWhere },
       include: {
-        outlet: { select: { name: true, code: true } },
+        outlet: { select: { name: true, code: true, code4: true } },
         booker: { select: { name: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -153,6 +157,7 @@ export async function GET(req: Request) {
       bookerName: r.booker?.name ?? 'Unassigned',
       outletName: r.outlet.name,
       outletCode: r.outlet.code,
+      outletCode4: r.outlet.code4,
       amount: r.amount,
       method: r.method,
       reference: r.reference,
@@ -170,7 +175,7 @@ export async function GET(req: Request) {
 
     // Specific booker bucket ki route shops (Book Recovery tab ke liye)
     const bookerId = searchParams.get('bookerId')
-    let shops: Array<{ outletId: string; name: string; code: string; city: string; channel: string; ownerName: string | null; phone: string | null; balance: number; visitDays: string }> = []
+    let shops: Array<{ outletId: string; name: string; code: string; code4: string | null; city: string; channel: string; ownerName: string | null; phone: string | null; address: string | null; balance: number; visitDays: string }> = []
     if (bookerId) {
       const bucketId = bookerId === 'none' ? null : bookerId
       // scope guard: bucket is scope ke bookers mein hona chahiye (ya 'none' jab unassigned shops hon)
@@ -186,8 +191,8 @@ export async function GET(req: Request) {
         ? routeOutlets // apna poora route — assigned + planned dono
         : routeOutlets.filter((o) => (o.salesmanId ?? null) === bucketId))
         .map((o) => ({
-          outletId: o.id, name: o.name, code: o.code, city: o.city, channel: o.channel,
-          ownerName: o.ownerName, phone: o.phone,
+          outletId: o.id, name: o.name, code: o.code, code4: o.code4, city: o.city, channel: o.channel,
+          ownerName: o.ownerName, phone: o.phone, address: o.address,
           visitDays: o.visitDays,
           balance: round2(
             o.ledgerEntries.filter((e) => e.type === 'DEBIT').reduce((s, e) => s + e.amount, 0)

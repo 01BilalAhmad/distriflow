@@ -261,6 +261,10 @@ model CompanyLedgerEntry {
 model Outlet {
   id            String              @id @default(cuid())
   code          String              @unique
+  // Task 100: unique 4-digit shop code ("1001".."9999") — wasooli list / route sheet /
+  // OB recovery report par asaan reference. Sequential auto-assign (dms-code4.ts),
+  // nullable = legacy outlet jab tak backfill script na chale (unique NULLs allow karta hai)
+  code4         String?             @unique
   name          String
   ownerName     String?
   phone         String?

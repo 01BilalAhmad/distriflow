@@ -3,6 +3,8 @@ import { jsonError, megaBlocked } from '@/lib/dms-scope'
 import { requireUser } from '@/lib/api-auth'
 import { getTenantIdForSalesman } from '@/lib/dms-pjp'
 import { resolveShopChannel } from '@/lib/dms-settings'
+import { currentMaxCode4, padCode4, CODE4_MAX } from '@/lib/dms-code4'
+import { Prisma } from '@prisma/client'
 
 /**
  * Task 85 — OFFLINE-FIRST NEW SHOP TAGGING (booker app / web booker portal)
@@ -61,28 +63,41 @@ export async function POST(req: Request) {
     // list mein nahi to GENERAL fallback
     const resolvedChannel = await resolveShopChannel(tenantId, channel)
 
-    const outlet = await db.outlet.create({
-      data: {
-        code,
-        name: String(name).trim(),
-        ownerName: String(ownerName).trim(),
-        phone: String(ownerPhone).trim(),
-        address: String(address).trim(),
-        city: (city ?? '').trim() || 'Lahore',
-        channel: resolvedChannel,
-        lat: latN,
-        lng: lngN,
-        ntn: (ntn ?? '').trim() || null,
-        cnic: (cnic ?? '').trim() || null,
-        filerStatus: (ntn ?? '').trim() ? 'FILER' : 'NON_FILER',
-        distributorId: tenantId,
-        salesmanId: user.id,
-        // Task 85: booker-tagged shop — admin approve kare tab active hogi
-        status: 'PENDING',
-        clientRef: ref || null,
-        taggedByName: user.name,
-      },
-    })
+    // Task 100: unique 4-digit shop code — sequential, collision par bump (retry)
+    const outletData = {
+      code,
+      name: String(name).trim(),
+      ownerName: String(ownerName).trim(),
+      phone: String(ownerPhone).trim(),
+      address: String(address).trim(),
+      city: (city ?? '').trim() || 'Lahore',
+      channel: resolvedChannel,
+      lat: latN,
+      lng: lngN,
+      ntn: (ntn ?? '').trim() || null,
+      cnic: (cnic ?? '').trim() || null,
+      filerStatus: (ntn ?? '').trim() ? 'FILER' : 'NON_FILER',
+      distributorId: tenantId,
+      salesmanId: user.id,
+      // Task 85: booker-tagged shop — admin approve kare tab active hogi
+      status: 'PENDING',
+      clientRef: ref || null,
+      taggedByName: user.name,
+    }
+    const createTagged = (c4: string) => db.outlet.create({ data: { ...outletData, code4: c4 } })
+    let code4 = padCode4(Math.min((await currentMaxCode4(db)) + 1, CODE4_MAX))
+    let outlet: Awaited<ReturnType<typeof createTagged>> | null = null
+    for (let attempt = 0; attempt < 5 && !outlet; attempt++) {
+      try {
+        outlet = await createTagged(code4)
+      } catch (e) {
+        const isCode4 = e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002'
+          && String((e.meta as { target?: string[] } | null)?.target ?? '').includes('code4')
+        if (!isCode4 || attempt === 4) throw e
+        code4 = padCode4(Math.min((await currentMaxCode4(db)) + 1, CODE4_MAX))
+      }
+    }
+    if (!outlet) return jsonError('Shop tag failed — code4 range exhaust', 500)
 
     return Response.json({
       outlet: { id: outlet.id, code: outlet.code, name: outlet.name, status: outlet.status },

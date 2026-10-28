@@ -1,6 +1,8 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
 import { requireUser, tenantMismatch } from '@/lib/api-auth'
+import { currentMaxCode4, ensureCode4Backfill, padCode4, CODE4_MAX } from '@/lib/dms-code4'
+import { Prisma } from '@prisma/client'
 
 export async function GET(req: Request) {
   try {
@@ -15,6 +17,9 @@ export async function GET(req: Request) {
       user.role === 'SALESMAN'
         ? { salesmanId: user.id }
         : { distributorId: user.profile?.id }
+
+    // Task 100: legacy shops ka 4-digit code backfill (once per instance)
+    await ensureCode4Backfill()
 
     const outlets = await db.outlet.findMany({
       where,
@@ -33,6 +38,7 @@ export async function GET(req: Request) {
       ownerName: o.ownerName,
       phone: o.phone,
       address: o.address,
+      code4: o.code4,
       city: o.city,
       channel: o.channel,
       lat: o.lat,
@@ -86,7 +92,8 @@ export async function POST(req: Request) {
     const count = await db.outlet.count()
     const code = `OUT-${1005 + (count + 1) * 5}`
 
-    const outlet = await db.outlet.create({
+    // Task 100: unique 4-digit shop code — sequential, collision par bump (retry)
+    const createOutlet = (c4: string) => db.outlet.create({
       data: {
         code, name, ownerName: ownerName ?? null, phone: phone ?? null,
         address: address ?? null, city: city ?? 'Lahore',
@@ -105,8 +112,22 @@ export async function POST(req: Request) {
           : ((ntn ?? '').trim() ? 'FILER' : 'NON_FILER'),
         // Visit schedule: sirf valid day codes (MON..SUN), comma separated
         visitDays: sanitizeVisitDays(visitDays),
+        code4: c4,
       },
     })
+    let code4 = padCode4(Math.min((await currentMaxCode4(db)) + 1, CODE4_MAX))
+    let outlet: Awaited<ReturnType<typeof createOutlet>> | null = null
+    for (let attempt = 0; attempt < 5 && !outlet; attempt++) {
+      try {
+        outlet = await createOutlet(code4)
+      } catch (e) {
+        const isCode4 = e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002'
+          && String((e.meta as { target?: string[] } | null)?.target ?? '').includes('code4')
+        if (!isCode4 || attempt === 4) throw e
+        code4 = padCode4(Math.min((await currentMaxCode4(db)) + 1, CODE4_MAX))
+      }
+    }
+    if (!outlet) return jsonError('Outlet create failed — code4 range exhaust', 500)
     return Response.json({ outlet })
   } catch (e) {
     console.error(e)

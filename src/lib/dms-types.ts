@@ -260,6 +260,8 @@ export interface ProductDTO {
 export interface OutletDTO {
   id: string
   code: string
+  /** Task 100: unique 4-digit shop code ("1001") — backfill se pehle legacy shop par null */
+  code4: string | null
   name: string
   ownerName: string | null
   phone: string | null
@@ -686,8 +688,12 @@ export interface RecoveryShopDTO {
   outletId: string
   name: string
   code: string
+  /** Task 100: 4-digit shop code — list/print par asaan reference (legacy null ho sakta) */
+  code4?: string | null
   city: string
   channel: string
+  /** Task 100: route sheet print par address column ke liye */
+  address?: string | null
   balance: number
   /** Task 99: owner/phone — day-wise wasooli print sheet par shop pehchanne ke liye */
   ownerName?: string | null
@@ -709,6 +715,8 @@ export interface RecoveryRowDTO {
   bookerName: string
   outletName: string
   outletCode: string
+  /** Task 100: 4-digit shop code (legacy null = OUT- code fallback UI par) */
+  outletCode4: string | null
   amount: number
   method: string
   reference: string | null
@@ -731,4 +739,32 @@ export interface RecoveryData {
   /** PENDING recoveries — admin approval ka intezar */
   pending: RecoveryRowDTO[]
   totals: { outstanding: number; recoveredToday: number; recoveredMonth: number; pendingCount: number; pendingAmount: number }
+}
+
+// ============================================================
+// Task 100 — OB RECOVERY REPORT (posted recoveries — cash tally)
+// ============================================================
+
+export interface ObRecoveryEntryDTO {
+  id: string
+  recoveryNo: string
+  /** recoveredAt ISO — UI/print par PKT time format hota hai */
+  time: string
+  amount: number
+  method: string // CASH | CHEQUE | BANK
+  reference: string | null
+  note: string | null
+  outletName: string
+  outletCode: string
+  outletCode4: string | null
+  outletAddress: string | null
+  outletCity: string
+}
+
+export interface ObRecoveryReportDTO {
+  booker: { id: string | null; name: string; phone: string | null }
+  /** YYYY-MM-DD — report ka business day (PKT) */
+  date: string
+  entries: ObRecoveryEntryDTO[]
+  totals: { total: number; cash: number; nonCash: number; count: number; shops: number }
 }

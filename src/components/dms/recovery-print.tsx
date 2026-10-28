@@ -5,11 +5,18 @@
  *  1. RecoveryRouteSheetDoc — booker apne route ki shops ki pending-udhaar sheet
  *     print karta hai (Wasooli/Receipt columns khali — route par hath se bhar jati hain)
  *  2. RecoveryReportDoc     — orderbooker-wise recovery report (summary + voucher history)
+ *  3. OBRecoveryReportDoc   — Task 100: kisi booker ki kisi bhi date ki POSTED (approved)
+ *     recovery report — physical cash tally ke liye (Finexa "OB Recovery Report" format)
  */
 
 import { PrintFrame } from '@/components/dms/cbl-print'
 import { DAY_FULL } from '@/lib/dms-day'
-import type { RecoveryBookerDTO, RecoveryRowDTO, RecoveryShopDTO } from '@/lib/dms-types'
+import type {
+  ObRecoveryEntryDTO,
+  RecoveryBookerDTO,
+  RecoveryRowDTO,
+  RecoveryShopDTO,
+} from '@/lib/dms-types'
 
 const fmt2 = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const printDate = () => {
@@ -84,22 +91,22 @@ export function RecoveryRouteSheetDoc({ businessName, bookerName, bookerPhone, d
           </div>
         </div>
 
-        {/* shops table — Wasooli/Receipt#/Sign columns KHALI hain (booker route par likhe ga) */}
+        {/* shops table — Task 100 column order: S.No > Shop Code > Name > Address > Overdue > Sign.
+            Wasooli/Receipt#/Sign KHALI hain (booker route par likhe ga) */}
         <p className="mb-1 mt-3 text-[11px] font-bold uppercase" style={{ letterSpacing: 0.5 }}>Shop Wise Pending Udhaar</p>
         <table style={{ fontSize: 9 }}>
           <colgroup>
-            <col style={{ width: '5%' }} /><col style={{ width: '10%' }} /><col style={{ width: '25%' }} />
-            <col style={{ width: '9%' }} /><col style={{ width: '9%' }} /><col style={{ width: '12%' }} />
-            <col style={{ width: '12%' }} /><col style={{ width: '10%' }} /><col style={{ width: '8%' }} />
+            <col style={{ width: '4%' }} /><col style={{ width: '7%' }} /><col style={{ width: '21%' }} />
+            <col style={{ width: '26%' }} /><col style={{ width: '11%' }} /><col style={{ width: '11%' }} />
+            <col style={{ width: '12%' }} /><col style={{ width: '8%' }} />
           </colgroup>
           <thead>
             <tr>
               <th style={{ whiteSpace: 'nowrap' }}>S.No#</th>
-              <th>Shop Code</th>
+              <th style={{ whiteSpace: 'nowrap' }}>Shop Code</th>
               <th style={{ textAlign: 'left' }}>Shop Name / Owner</th>
-              <th>City</th>
-              <th>Channel</th>
-              <th>Pending Udhaar</th>
+              <th style={{ textAlign: 'left' }}>Address</th>
+              <th style={{ whiteSpace: 'nowrap' }}>Overdue (Rs)</th>
               <th>Wasooli (Rs)</th>
               <th>Receipt #</th>
               <th>Sign</th>
@@ -107,19 +114,20 @@ export function RecoveryRouteSheetDoc({ businessName, bookerName, bookerPhone, d
           </thead>
           <tbody>
             {pending.length === 0 ? (
-              <tr><td colSpan={9} style={{ textAlign: 'left' }}>{dayName ? `${dayName} ko is route ki koi pending udhaar shop nahi — sab settled hain.` : 'Is booker ke route mein koi pending udhaar nahi — sab shops settled hain.'}</td></tr>
+              <tr><td colSpan={8} style={{ textAlign: 'left' }}>{dayName ? `${dayName} ko is route ki koi pending udhaar shop nahi — sab settled hain.` : 'Is booker ke route mein koi pending udhaar nahi — sab shops settled hain.'}</td></tr>
             ) : pending.map((s, i) => (
               <tr key={s.outletId} className="cbl-break-avoid">
                 <td className="ctr">{i + 1}</td>
-                <td className="ctr">{s.code}</td>
+                <td className="ctr" style={{ fontWeight: 'bold' }}>{s.code4 ?? s.code}</td>
                 <td style={{ textAlign: 'left' }}>
                   {s.name.toUpperCase()}
                   {(s.ownerName || s.phone) && (
                     <div style={{ fontSize: 7, color: '#444' }}>{[s.ownerName, s.phone].filter(Boolean).join(' — ')}</div>
                   )}
                 </td>
-                <td className="ctr">{s.city}</td>
-                <td className="ctr" style={{ fontSize: 7.5, whiteSpace: 'nowrap' }}>{s.channel}</td>
+                <td style={{ textAlign: 'left', fontSize: 7.5 }}>
+                  {(s.address ?? s.city) || '—'}
+                </td>
                 <td className="num">{fmt2(s.balance)}</td>
                 <td>&nbsp;</td>
                 <td>&nbsp;</td>
@@ -131,11 +139,11 @@ export function RecoveryRouteSheetDoc({ businessName, bookerName, bookerPhone, d
               <tr key={`blank-${k}`} className="cbl-break-avoid">
                 <td className="ctr" style={{ color: '#999' }}>{pending.length + k + 1}</td>
                 <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>
-                <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>
+                <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>
               </tr>
             ))}
             <tr style={{ fontWeight: 'bold', backgroundColor: '#f7f7f7' }}>
-              <td colSpan={5} style={{ textAlign: 'right' }}>Total Pending ({pending.length} shops)</td>
+              <td colSpan={4} style={{ textAlign: 'right' }}>Total Overdue ({pending.length} shops)</td>
               <td className="num">{fmt2(total)}</td>
               <td>&nbsp;</td>
               <td>&nbsp;</td>
@@ -148,7 +156,7 @@ export function RecoveryRouteSheetDoc({ businessName, bookerName, bookerPhone, d
         <div className="mt-4" style={{ width: '58%' }}>
           <table style={{ fontSize: 9.5 }}>
             <tbody>
-              <tr><td style={{ border: 'none', fontWeight: 'bold' }}>Note:</td><td style={{ border: 'none', textAlign: 'left' }}>Booker ye sheet route par le jaye{dayName ? ` — is par sirf ${dayName} ki visit shops hain (jis shop ke visit days set nahi wo roz aati hai)` : ''}. Har shop se jo raqam wasool ho usi waqt &quot;Wasooli (Rs)&quot; column mein likhe, receipt # darj kare aur shop ke muhtamal se sign karwaye. Agar kisi dusri shop se bhi wasooli ho to neeche khali rows mein likhein. Shaam ko office mein ye wasooli Recovery page par post hogi, shop ledger usi waqt update ho jayega.</td></tr>
+              <tr><td style={{ border: 'none', fontWeight: 'bold' }}>Note:</td><td style={{ border: 'none', textAlign: 'left' }}>Booker ye sheet route par le jaye{dayName ? ` — is par sirf ${dayName} ki visit shops hain (jis shop ke visit days set nahi wo roz aati hai)` : ''}. Har shop se jo raqam wasool ho usi waqt &quot;Wasooli (Rs)&quot; column mein likhe, receipt # darj kare aur shop wale se sign karwaye. Agar kisi dusri shop se bhi wasooli ho to neeche khali rows mein likhein. Shaam ko office mein ye wasooli Recovery page par post hogi, shop ledger usi waqt update ho jayega.</td></tr>
             </tbody>
           </table>
         </div>
@@ -311,6 +319,150 @@ export function RecoveryReportPrint(props: Parameters<typeof RecoveryReportDoc>[
   return (
     <PrintFrame title="Orderbooker Recovery Report" onClose={onClose} pdfName="orderbooker-recovery-report">
       <RecoveryReportDoc {...doc} />
+    </PrintFrame>
+  )
+}
+
+// ============================================================
+// 3) OB RECOVERY REPORT — kisi booker ki kisi bhi date ki POSTED
+//    (APPROVED) recovery — cash tally (Finexa format par base)
+// ============================================================
+
+const OB_METHOD: Record<string, string> = { CASH: 'Cash', CHEQUE: 'Cheque', BANK: 'Bank Transfer' }
+
+/** recoveredAt ISO -> PKT time ("2:45 pm") — report hamesha Pakistan time par */
+const obTime = (iso: string) =>
+  new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Karachi' })
+
+/** 'YYYY-MM-DD' -> "15 January 2026 / Thursday" — TZ-safe (noon anchor) */
+const obDayDate = (date: string) => dayDate(new Date(`${date}T12:00:00`))
+
+export function OBRecoveryReportDoc({ businessName, bookerName, bookerPhone, date, entries, totals }: {
+  businessName: string
+  bookerName: string
+  bookerPhone?: string | null
+  /** YYYY-MM-DD — business day (PKT) */
+  date: string
+  entries: ObRecoveryEntryDTO[]
+  totals: { total: number; cash: number; nonCash: number; count: number; shops: number }
+}) {
+  return (
+    <div className="cbl-doc">
+      <div className="cbl-page bg-white px-8 py-7 flex flex-col">
+        {/* header: distributor (left) + meta (right) */}
+        <div className="flex justify-between">
+          <div style={{ width: '58%' }}>
+            <p className="text-[17px] font-bold underline">{businessName}</p>
+            <table style={{ border: 'none', marginTop: 4 }}>
+              <tbody>
+                <tr><td style={{ border: 'none', width: 105, fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Order Booker:</td><td style={{ border: 'none' }}>{bookerName}{bookerPhone ? ` — ${bookerPhone}` : ''}</td></tr>
+                <tr><td style={{ border: 'none', fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Report Date:</td><td style={{ border: 'none', fontWeight: 'bold' }}>{obDayDate(date)}</td></tr>
+                <tr><td style={{ border: 'none', fontWeight: 'bold', whiteSpace: 'nowrap', paddingRight: 8 }}>Posted Entries:</td><td style={{ border: 'none' }}>{totals.count} wasooli — {totals.shops} shops</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style={{ width: '40%' }}>
+            <table style={{ border: 'none' }}>
+              <tbody>
+                <tr><td style={{ border: 'none', fontWeight: 'bold', width: 105, whiteSpace: 'nowrap', paddingRight: 8 }}>Print Date :</td><td style={{ border: 'none', whiteSpace: 'nowrap' }}>{printDate()}</td></tr>
+              </tbody>
+            </table>
+            <p className="mt-2 text-[16px] font-bold">OB RECOVERY REPORT</p>
+            <p className="text-[10px] font-bold" style={{ letterSpacing: 0.5 }}>POSTED RECOVERY — PHYSICAL CASH TALLY</p>
+          </div>
+        </div>
+
+        {/* summary boxes — Finexa summary-card ka print analog */}
+        <table style={{ marginTop: 10, marginBottom: 4 }}>
+          <colgroup><col style={{ width: '34%' }} /><col style={{ width: '33%' }} /><col style={{ width: '33%' }} /></colgroup>
+          <tbody>
+            <tr>
+              <td style={{ textAlign: 'center', backgroundColor: '#f0fdf4', padding: '6px 4px' }}>
+                <div style={{ fontSize: 8, fontWeight: 'bold', color: '#444', letterSpacing: 0.5 }}>TOTAL POSTED RECOVERY</div>
+                <div style={{ fontSize: 14, fontWeight: 'bold' }}>Rs {fmt2(totals.total)}</div>
+              </td>
+              <td style={{ textAlign: 'center', backgroundColor: '#f7f7f7', padding: '6px 4px' }}>
+                <div style={{ fontSize: 8, fontWeight: 'bold', color: '#444', letterSpacing: 0.5 }}>CASH</div>
+                <div style={{ fontSize: 14, fontWeight: 'bold' }}>Rs {fmt2(totals.cash)}</div>
+              </td>
+              <td style={{ textAlign: 'center', backgroundColor: '#f7f7f7', padding: '6px 4px' }}>
+                <div style={{ fontSize: 8, fontWeight: 'bold', color: '#444', letterSpacing: 0.5 }}>CHEQUE / BANK</div>
+                <div style={{ fontSize: 14, fontWeight: 'bold' }}>{totals.nonCash > 0 ? `Rs ${fmt2(totals.nonCash)}` : '—'}</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        {/* entries table — har posted wasooli ki line (tally ke liye time-order) */}
+        <p className="mb-1 mt-2 text-[11px] font-bold uppercase" style={{ letterSpacing: 0.5 }}>Posted Recovery Entries (Approve Ho Chuki)</p>
+        <table style={{ fontSize: 9 }}>
+          <colgroup>
+            <col style={{ width: '4%' }} /><col style={{ width: '7%' }} /><col style={{ width: '9%' }} /><col style={{ width: '7%' }} />
+            <col style={{ width: '18%' }} /><col style={{ width: '24%' }} /><col style={{ width: '7%' }} />
+            <col style={{ width: '10%' }} /><col style={{ width: '14%' }} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th style={{ whiteSpace: 'nowrap' }}>S.No#</th>
+              <th>Time</th>
+              <th style={{ whiteSpace: 'nowrap' }}>Voucher #</th>
+              <th style={{ whiteSpace: 'nowrap' }}>Shop Code</th>
+              <th style={{ textAlign: 'left' }}>Shop Name</th>
+              <th style={{ textAlign: 'left' }}>Address</th>
+              <th>Method</th>
+              <th>Reference</th>
+              <th>Amount (Rs)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.length === 0 ? (
+              <tr><td colSpan={9} style={{ textAlign: 'left' }}>Is date par koi posted recovery nahi — ya to wasooli nahi hui ya entries abhi approval pending hain.</td></tr>
+            ) : entries.map((e, i) => (
+              <tr key={e.id} className="cbl-break-avoid">
+                <td className="ctr">{i + 1}</td>
+                <td className="ctr" style={{ whiteSpace: 'nowrap' }}>{obTime(e.time)}</td>
+                <td className="ctr" style={{ fontWeight: 'bold' }}>{e.recoveryNo}</td>
+                <td className="ctr" style={{ fontWeight: 'bold' }}>{e.outletCode4 ?? e.outletCode}</td>
+                <td style={{ textAlign: 'left' }}>{e.outletName.toUpperCase()}</td>
+                <td style={{ textAlign: 'left', fontSize: 7.5 }}>{[e.outletAddress, e.outletCity].filter(Boolean).join(', ') || '—'}</td>
+                <td className="ctr" style={{ fontSize: 7.5, whiteSpace: 'nowrap' }}>{OB_METHOD[e.method] ?? e.method}</td>
+                <td className="ctr">{e.reference ?? '—'}</td>
+                <td className="num">{fmt2(e.amount)}</td>
+              </tr>
+            ))}
+            <tr style={{ fontWeight: 'bold', backgroundColor: '#f7f7f7' }}>
+              <td colSpan={8} style={{ textAlign: 'right' }}>Total Posted ({entries.length} entries — {totals.shops} shops)</td>
+              <td className="num">{fmt2(totals.total)}</td>
+            </tr>
+            <tr style={{ fontWeight: 'bold', backgroundColor: '#ffffff' }}>
+              <td colSpan={8} style={{ textAlign: 'right' }}>Cash jama — Cheque/Bank (tally ke liye)</td>
+              <td className="num" style={{ fontSize: 8 }}>{fmt2(totals.cash)} — {fmt2(totals.nonCash)}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        {/* note */}
+        <div className="mt-4" style={{ width: '58%' }}>
+          <table style={{ fontSize: 9.5 }}>
+            <tbody>
+              <tr><td style={{ border: 'none', fontWeight: 'bold' }}>Note:</td><td style={{ border: 'none', textAlign: 'left' }}>Is report par sirf APPROVED/posted recoveries hain — order booker ne jo raqam shops se wasool ki aur office mein jama hui. Cash ko jama raqam se tally karein — koi farq ho to foran note karein. Pending/rejected entries is report mein shamil nahi hoti.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <Signatures left={[bookerName, 'Order Booker Signature']} right={['Cash Received By', 'Office Signature']} />
+      </div>
+    </div>
+  )
+}
+
+/** PrintFrame wrapper — OB recovery report (date/booker aware pdf name) */
+export function OBRecoveryPrint(props: Parameters<typeof OBRecoveryReportDoc>[0] & { onClose: () => void }) {
+  const { onClose, ...doc } = props
+  const slug = doc.bookerName.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+  return (
+    <PrintFrame title={`OB Recovery Report — ${doc.date}`} onClose={onClose} pdfName={`ob-recovery-${doc.date}-${slug}`}>
+      <OBRecoveryReportDoc {...doc} />
     </PrintFrame>
   )
 }

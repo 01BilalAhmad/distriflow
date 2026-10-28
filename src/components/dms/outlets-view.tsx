@@ -100,7 +100,7 @@ export function OutletsView() {
 
   const filtered = useMemo(() => outlets.filter((o) => {
     if (taxFilter !== 'ALL' && o.filerStatus !== taxFilter) return false
-    return `${o.name} ${o.code} ${o.channel} ${o.address ?? ''} ${o.ntn ?? ''} ${o.cnic ?? ''}`.toLowerCase().includes(search.toLowerCase())
+    return `${o.name} ${o.code} ${o.code4 ?? ''} ${o.channel} ${o.address ?? ''} ${o.ntn ?? ''} ${o.cnic ?? ''}`.toLowerCase().includes(search.toLowerCase())
   }), [outlets, search, taxFilter])
 
   const filerCount = outlets.filter((o) => o.filerStatus === 'FILER').length
@@ -153,7 +153,9 @@ export function OutletsView() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="font-semibold text-slate-900 truncate">{o.name}</p>
-                    <p className="text-xs text-slate-400 font-mono">{o.code}</p>
+                    <p className="text-xs text-slate-400 font-mono">
+                      {o.code4 ? <span className="font-bold text-slate-600">{o.code4}</span> : <span className="text-slate-300">code4 pending</span>} • {o.code}
+                    </p>
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-1">
                     <Badge variant="outline" className="border-emerald-200 text-emerald-700 bg-emerald-50 text-[10px]">{o.channel}</Badge>

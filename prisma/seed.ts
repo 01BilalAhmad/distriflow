@@ -235,13 +235,15 @@ async function main() {
     { name: 'Bismillah General Store', owner: 'Rafiq jr', channel: 'GENERAL', area: 'Samanabad', lat: 31.5364, lng: 74.2741, dist: 'main', sm: 1 },
     { name: 'Grand Smokers & Grocers', owner: 'Kamran Akmal', channel: 'SUPERMARKET', area: 'Cantt', lat: 31.5204, lng: 74.3515, dist: 'sub', sm: 2 },
   ]
-  const outlets: Array<{ id: string; code: string; name: string; channel: string; salesmanId: string | null; distributorId: string; lat: number | null; lng: number | null }> = []
+  const outlets: Array<{ id: string; code: string; code4: string | null; name: string; channel: string; salesmanId: string | null; distributorId: string; lat: number | null; lng: number | null }> = []
   let outCode = 1000
+  let outCode4 = 1000
   for (const o of outletDefs) {
     outCode += 5
+    outCode4 += 1
     const outlet = await db.outlet.create({
       data: {
-        code: `OUT-${outCode}`, name: o.name, ownerName: o.owner, phone: `+92 3${ri(0, 4)}${ri(0, 9)} ${ri(1000000, 9999999)}`,
+        code: `OUT-${outCode}`, code4: String(outCode4), name: o.name, ownerName: o.owner, phone: `+92 3${ri(0, 4)}${ri(0, 9)} ${ri(1000000, 9999999)}`,
         address: o.area + ', Lahore', city: 'Lahore', channel: o.channel, lat: o.lat, lng: o.lng,
         creditDays: o.channel === 'WHOLESALE' ? 15 : 7,
         distributorId: distProfile.id,

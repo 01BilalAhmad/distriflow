@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
 import { requireUser } from '@/lib/api-auth'
 import { matchShopCategory, readShopCategories } from '@/lib/dms-settings'
+import { padCode4, CODE4_MAX } from '@/lib/dms-code4'
 
 // Task 30 — BULK SHOPS IMPORT: Excel/CSV se ek sath saari shops import.
 // Rules:
@@ -56,10 +57,24 @@ export async function POST(req: Request) {
     const usedCodes = new Set(allCodes.map((o) => o.code))
     const baseCount = existing.length
 
+    // Task 100: 4-digit code4 pool — batch ke andar local counter se bump (har row par query nahi)
+    const usedCode4 = new Set(
+      (await db.outlet.findMany({ where: { code4: { not: null } }, select: { code4: true } })).map((o) => o.code4 as string),
+    )
+    let nextCode4 = 1001
+    const takeCode4 = (): string => {
+      while (nextCode4 <= CODE4_MAX) {
+        const c = padCode4(nextCode4)
+        nextCode4 += 1
+        if (!usedCode4.has(c)) { usedCode4.add(c); return c }
+      }
+      throw new Error(`CODE4 range (1001-${CODE4_MAX}) exhaust ho gayi — 4-digit code batch mein assign nahi ho saka`)
+    }
+
     const skipped: { row: number; name: string; reason: string }[] = []
     const warnings: { row: number; name: string; reason: string }[] = []
     const toCreate: {
-      code: string; name: string; ownerName: string | null; phone: string | null; address: string | null
+      code: string; code4: string; name: string; ownerName: string | null; phone: string | null; address: string | null
       city: string; channel: string; creditDays: number; ntn: string | null; cnic: string | null
       filerStatus: string; visitDays: string; salesmanId: string | null; distributorId: string
     }[] = []
@@ -107,6 +122,7 @@ export async function POST(req: Request) {
 
       toCreate.push({
         code,
+        code4: takeCode4(),
         name,
         ownerName: get('ownerName') || null,
         phone: get('phone') || null,
@@ -123,11 +139,11 @@ export async function POST(req: Request) {
       })
     }
 
-    const created: { id: string; code: string; name: string }[] = []
+    const created: { id: string; code: string; code4: string; name: string }[] = []
     await db.$transaction(async (tx) => {
       for (const o of toCreate) {
         const rec = await tx.outlet.create({ data: o })
-        created.push({ id: rec.id, code: rec.code, name: rec.name })
+        created.push({ id: rec.id, code: rec.code, code4: rec.code4 ?? '', name: rec.name })
       }
     })
 

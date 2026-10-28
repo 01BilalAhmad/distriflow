@@ -19,10 +19,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR, fmtDate } from '@/lib/dms-api'
-import type { RecoveryData, RecoveryRowDTO, RecoveryShopDTO } from '@/lib/dms-types'
-import { RouteSheetPrint, RecoveryReportPrint } from '@/components/dms/recovery-print'
+import type { ObRecoveryReportDTO, RecoveryData, RecoveryRowDTO, RecoveryShopDTO } from '@/lib/dms-types'
+import { RouteSheetPrint, RecoveryReportPrint, OBRecoveryPrint } from '@/components/dms/recovery-print'
 import { DAY_CODES, DAY_FULL, dayMatches } from '@/lib/dms-day'
-import { HandCoins, Loader2, Printer, ReceiptText, CheckCircle2, Users, AlertTriangle, History, ClipboardCheck, XCircle, Save, Clock3, ShieldCheck, Eye, Lock, Search, ArrowUpDown, FileSpreadsheet } from 'lucide-react'
+import { HandCoins, Loader2, Printer, ReceiptText, CheckCircle2, Users, AlertTriangle, History, ClipboardCheck, XCircle, Save, Clock3, ShieldCheck, Eye, Lock, Search, ArrowUpDown, FileSpreadsheet, Banknote, CalendarDays } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
 const METHOD_LABELS: Record<string, string> = { CASH: 'Cash', CHEQUE: 'Cheque', BANK: 'Bank Transfer' }
@@ -89,6 +89,12 @@ export function RecoveryView() {
   const [bulkBusy, setBulkBusy] = useState(false)
   const [histFrom, setHistFrom] = useState('')
   const [histTo, setHistTo] = useState('')
+  // Task 100: OB Recovery Report — booker × date ki POSTED recovery (physical cash tally)
+  const [obBookerId, setObBookerId] = useState('')
+  const [obDate, setObDate] = useState(() => new Date(Date.now() + 5 * 3600 * 1000).toISOString().slice(0, 10)) // aaj ki PKT date
+  const [obReport, setObReport] = useState<ObRecoveryReportDTO | null>(null)
+  const [obLoading, setObLoading] = useState(false)
+  const [obPrint, setObPrint] = useState(false)
 
   const load = useCallback(async (uid: string) => {
     try {
@@ -161,7 +167,7 @@ export function RecoveryView() {
   // Search + sort — sirf display/Enter-nav ke liye; post hamesha SAB entered rows par (search se mask na ho)
   const visibleRows = useMemo(() => {
     const q = search.trim().toLowerCase()
-    const list = q ? rows.filter((r) => `${r.shop.name} ${r.shop.code} ${r.shop.city}`.toLowerCase().includes(q)) : rows
+    const list = q ? rows.filter((r) => `${r.shop.name} ${r.shop.code} ${r.shop.code4 ?? ''} ${r.shop.city}`.toLowerCase().includes(q)) : rows
     return sortMode === 'name' ? [...list].sort((a, b) => a.shop.name.localeCompare(b.shop.name)) : list
   }, [rows, search, sortMode])
 
@@ -325,6 +331,25 @@ export function RecoveryView() {
     }
   }
 
+  /* ---------- Task 100: OB Recovery Report — generate (booker × date) ---------- */
+  const generateObReport = async () => {
+    if (!userId || !obBookerId || obLoading) return
+    setObLoading(true)
+    try {
+      const d = await api<ObRecoveryReportDTO>(`/api/recovery/report?bookerId=${obBookerId}&date=${obDate}`)
+      setObReport(d)
+    } catch (e) {
+      setObReport(null)
+      toast({ title: 'Report generate failed', description: e instanceof Error ? e.message : '', variant: 'destructive' })
+    } finally {
+      setObLoading(false)
+    }
+  }
+
+  /** PKT time — report print jaisi hi ("2:45 pm") */
+  const obTimeUI = (iso: string) =>
+    new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Karachi' })
+
   if (loading) {
     return (
       <div className="h-full flex flex-col gap-3">
@@ -417,6 +442,9 @@ export function RecoveryView() {
           </TabsTrigger>
           <TabsTrigger value="report" className="data-[state=active]:bg-white data-[state=active]:text-emerald-700">
             <ReceiptText className="h-3.5 w-3.5 mr-1.5" /> History &amp; Report
+          </TabsTrigger>
+          <TabsTrigger value="obreport" className="data-[state=active]:bg-white data-[state=active]:text-emerald-700">
+            <Banknote className="h-3.5 w-3.5 mr-1.5" /> OB Recovery Report
           </TabsTrigger>
         </TabsList>
 
@@ -559,7 +587,7 @@ export function RecoveryView() {
                           <TableRow key={r.shop.outletId} className={r.amt > 0 && !r.over ? 'bg-emerald-50/40' : undefined}>
                             <TableCell>
                               <p className="text-sm font-medium text-slate-800">{r.shop.name}</p>
-                              <p className="text-[10px] text-slate-400">{r.shop.code} • {r.shop.channel}</p>
+                              <p className="text-[10px] text-slate-400"><span className="font-mono font-bold text-slate-600">{r.shop.code4 ?? r.shop.code}</span> • {r.shop.channel}</p>
                               {(r.shop.collectedToday ?? 0) > 0.005 && (
                                 <Badge variant="outline" className="mt-1 border-emerald-300 bg-emerald-50 text-emerald-700 text-[9px]">Aaj: {fmtPKR(r.shop.collectedToday ?? 0)} wasooli</Badge>
                               )}
@@ -717,7 +745,7 @@ export function RecoveryView() {
                               <TableCell className="text-sm whitespace-nowrap">{r.bookerName}</TableCell>
                               <TableCell>
                                 <p className="text-sm text-slate-800">{r.outletName}</p>
-                                <p className="text-[10px] text-slate-400">{r.outletCode}</p>
+                                <p className="text-[10px] text-slate-400 font-mono">{r.outletCode4 ?? r.outletCode}</p>
                               </TableCell>
                               <TableCell className="text-xs text-slate-500 whitespace-nowrap">{fmtDate(r.date, true)}</TableCell>
                               <TableCell>
@@ -891,7 +919,7 @@ export function RecoveryView() {
                         <TableCell className="text-sm">{r.bookerName}</TableCell>
                         <TableCell>
                           <p className="text-sm text-slate-800">{r.outletName}</p>
-                          <p className="text-[10px] text-slate-400">{r.outletCode}</p>
+                          <p className="text-[10px] text-slate-400 font-mono">{r.outletCode4 ?? r.outletCode}</p>
                         </TableCell>
                         <TableCell className="text-center">
                           <Badge variant="outline" className={`text-[10px] ${r.method === 'CASH' ? 'border-emerald-200 text-emerald-700' : 'border-blue-200 text-blue-700'}`}>{METHOD_LABELS[r.method] ?? r.method}</Badge>
@@ -918,6 +946,135 @@ export function RecoveryView() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* ==================== TAB 4: OB RECOVERY REPORT (Task 100 — cash tally) ==================== */}
+        <TabsContent value="obreport" className="flex-1 min-h-0 mt-3 flex flex-col gap-3 overflow-y-auto pr-0.5">
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 flex items-start gap-2.5 shrink-0">
+            <Banknote className="h-4.5 w-4.5 text-emerald-600 shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-emerald-800">Order booker ki POSTED recovery report — physical cash tally ke liye</p>
+              <p className="text-[11px] text-emerald-700 mt-0.5">Pehle order booker chunein, phir date pick karein (koi bhi old date chal jayegi) aur Generate Report dabayen. Sirf APPROVED entries aati hain — pending approvals shamil nahi hoti.</p>
+            </div>
+          </div>
+
+          {/* Controls — booker + date + generate (Finexa flow: select karo, phir generate) */}
+          <Card className="border-slate-200 shrink-0">
+            <CardContent className="p-4 flex flex-wrap items-end gap-2.5">
+              <div className="min-w-52 flex-1 max-w-sm">
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1"><Users className="h-3 w-3" /> Order Booker</label>
+                <Select value={obBookerId} onValueChange={(v) => { setObBookerId(v); setObReport(null) }}>
+                  <SelectTrigger className="h-9 mt-1 text-sm"><SelectValue placeholder="Order booker chunein" /></SelectTrigger>
+                  <SelectContent>
+                    {data?.bookers.map((b) => (
+                      <SelectItem key={b.id ?? 'none'} value={b.id ?? 'none'}>{b.id ? b.name : 'Unassigned Shops (Direct)'}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1"><CalendarDays className="h-3 w-3" /> Date</label>
+                <Input type="date" value={obDate} onChange={(e) => { setObDate(e.target.value); setObReport(null) }} className="h-9 mt-1 w-40 text-xs" title="Kisi bhi purani date ki posted recovery report" />
+              </div>
+              <Button className="bg-emerald-600 hover:bg-emerald-700 h-9" onClick={generateObReport} disabled={!obBookerId || obLoading}>
+                {obLoading ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Search className="h-4 w-4 mr-1.5" />}
+                Generate Report
+              </Button>
+              {obReport && (
+                <Button variant="outline" className="border-violet-300 text-violet-700 hover:bg-violet-50 h-9" onClick={() => setObPrint(true)} disabled={obReport.entries.length === 0}>
+                  <Printer className="h-4 w-4 mr-1.5" /> Print Report
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+
+          {obReport && (
+            <>
+              {/* summary cards */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
+                {[
+                  { label: `Posted Recovery — ${obReport.date}`, value: obReport.totals.total, cls: 'text-emerald-600' },
+                  { label: 'Cash (jama honi wali)', value: obReport.totals.cash, cls: 'text-green-700' },
+                  { label: 'Cheque / Bank', value: obReport.totals.nonCash, cls: 'text-blue-600' },
+                ].map((k) => (
+                  <Card key={k.label} className="border-slate-200">
+                    <CardContent className="px-4 py-3">
+                      <p className="text-[11px] text-slate-400 font-medium truncate">{k.label}</p>
+                      <p className={`text-lg font-bold leading-tight ${k.cls}`}>{fmtPKR(k.value)}</p>
+                    </CardContent>
+                  </Card>
+                ))}
+                <Card className="border-slate-200">
+                  <CardContent className="px-4 py-3">
+                    <p className="text-[11px] text-slate-400 font-medium truncate">Shops / Entries</p>
+                    <p className="text-lg font-bold leading-tight text-slate-700">{obReport.totals.shops} / {obReport.totals.count}</p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* entries preview */}
+              <Card className="border-slate-200 shrink-0">
+                <CardContent className="p-0">
+                  <div className="px-4 py-2.5 border-b border-slate-100 flex items-center gap-2 flex-wrap">
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mr-auto">
+                      {obReport.booker.name} — Posted Entries ({obReport.entries.length})
+                    </p>
+                    {obReport.entries.length === 0 && (
+                      <Badge variant="outline" className="border-slate-300 text-slate-500 text-[11px]">Koi posted recovery nahi</Badge>
+                    )}
+                  </div>
+                  <div className="overflow-x-auto">
+                    <Table className="min-w-[820px]">
+                      <TableHeader>
+                        <TableRow className="bg-slate-50/70">
+                          <TableHead className="text-center" style={{ width: 40 }}>#</TableHead>
+                          <TableHead>Time</TableHead>
+                          <TableHead>Voucher #</TableHead>
+                          <TableHead>Shop</TableHead>
+                          <TableHead>Address</TableHead>
+                          <TableHead className="text-center">Method</TableHead>
+                          <TableHead>Reference</TableHead>
+                          <TableHead className="text-right">Amount</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {obReport.entries.length === 0 ? (
+                          <TableRow><TableCell colSpan={8} className="text-center text-sm text-slate-400 py-8">Is date par posted recovery nahi mili — date/booker badal kar dobara try karein</TableCell></TableRow>
+                        ) : obReport.entries.map((e, i) => (
+                          <TableRow key={e.id}>
+                            <TableCell className="text-center text-xs text-slate-400">{i + 1}</TableCell>
+                            <TableCell className="text-xs text-slate-500 whitespace-nowrap">{obTimeUI(e.time)}</TableCell>
+                            <TableCell className="text-xs font-bold text-emerald-700 whitespace-nowrap">{e.recoveryNo}</TableCell>
+                            <TableCell>
+                              <p className="text-sm text-slate-800">{e.outletName}</p>
+                              <p className="text-[10px] text-slate-400 font-mono">{e.outletCode4 ?? e.outletCode}</p>
+                            </TableCell>
+                            <TableCell className="text-xs text-slate-500 max-w-52"><span className="line-clamp-2">{[e.outletAddress, e.outletCity].filter(Boolean).join(', ') || '—'}</span></TableCell>
+                            <TableCell className="text-center">
+                              <Badge variant="outline" className={`text-[10px] ${e.method === 'CASH' ? 'border-emerald-200 text-emerald-700' : 'border-blue-200 text-blue-700'}`}>{METHOD_LABELS[e.method] ?? e.method}</Badge>
+                            </TableCell>
+                            <TableCell className="text-xs text-slate-500">{e.reference ?? '—'}</TableCell>
+                            <TableCell className="text-right text-sm font-bold whitespace-nowrap">{fmtPKR(e.amount)}</TableCell>
+                          </TableRow>
+                        ))}
+                        {obReport.entries.length > 0 && (
+                          <TableRow className="bg-slate-50/70">
+                            <TableCell colSpan={7} className="text-right text-sm font-bold text-slate-700">Total Posted ({obReport.totals.shops} shops)</TableCell>
+                            <TableCell className="text-right text-sm font-bold text-emerald-700 whitespace-nowrap">{fmtPKR(obReport.totals.total)}</TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <div className="border-t border-slate-100 px-4 py-2.5 bg-slate-50/50 rounded-b-xl">
+                    <p className="text-[11px] text-slate-500">
+                      Print par: S.No | Time | Voucher | Shop Code | Shop Name | Address | Method | Reference | Amount — booker sign + office sign ke sath. Ye report cash tally ke liye hai.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          )}
+        </TabsContent>
       </Tabs>
 
       {/* Print overlays */}
@@ -940,6 +1097,17 @@ export function RecoveryView() {
           onClose={() => setPrintReport(false)}
         />
       )}
+      {obPrint && obReport && (
+        <OBRecoveryPrint
+          businessName={user?.profile?.businessName ?? 'Company HQ'}
+          bookerName={obReport.booker.name}
+          bookerPhone={obReport.booker.phone}
+          date={obReport.date}
+          entries={obReport.entries}
+          totals={obReport.totals}
+          onClose={() => setObPrint(false)}
+        />
+      )}
 
       {/* Post confirm dialog — ghalat post se bachne ke liye */}
       <Dialog open={confirmPost} onOpenChange={setConfirmPost}>
@@ -954,7 +1122,7 @@ export function RecoveryView() {
           <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-100 divide-y divide-slate-50">
             {validRows.map((r) => (
               <div key={r.shop.outletId} className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs">
-                <span className="min-w-0 truncate text-slate-700">{r.shop.name} <span className="text-slate-400">({r.shop.code})</span></span>
+                <span className="min-w-0 truncate text-slate-700">{r.shop.name} <span className="text-slate-400 font-mono">({r.shop.code4 ?? r.shop.code})</span></span>
                 <span className="font-bold text-slate-800 whitespace-nowrap">{fmtPKR(r.amt)} <span className="font-normal text-slate-400">• {METHOD_LABELS[r.draft.method]}</span></span>
               </div>
             ))}
