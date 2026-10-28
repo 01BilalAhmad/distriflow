@@ -115,7 +115,7 @@ export function SalesProfitTab() {
     cols: curCols.map((c) => ({ label: c.label, align: c.align, money: c.money })),
     rows: rows.map((r) => curCols.map((c) => ((r as Record<string, unknown>)[c.key] ?? '') as string | number)),
     totalsRow: curCols.map((c, i) => (i === 0 ? 'TOTAL' : c.total ? fmtTotal(rows as Record<string, unknown>[], c.key) : '')),
-    footerNote: 'Cost basis: purchase invoices weighted average • Free units ki cost included • Returns net effect included',
+    footerNote: 'NET vs NET: Net Sales = gross − discounts − trade offer • COGS = purchase net − trade offer (weighted avg) • Free units ki cost included • Returns net effect included',
   }
 
   return (

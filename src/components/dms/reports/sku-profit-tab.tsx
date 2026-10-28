@@ -76,7 +76,7 @@ export function SkuProfitTab() {
       const sum = rows.reduce((t, r) => t + (Number((r as Record<string, unknown>)[c.key]) || 0), 0)
       return c.money ? fmtMoney(sum) : String(sum)
     }),
-    footerNote: 'Cost = weighted-avg purchase cost (free units included, returns minus) • Sale = net billing (discounts + returns minus) • Margin % = Profit ÷ Sale × 100',
+    footerNote: 'Cost = weighted-avg NET purchase cost (pass-on discount − trade offer; free units included, returns minus) • Sale = NET billing (scheme + manual discount + trade offer minus, returns minus) • Margin % = Profit ÷ Sale × 100',
   }
 
   return (

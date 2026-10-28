@@ -47,20 +47,25 @@ export function parseRange(url: URL): Range {
   return { from, to }
 }
 
-/** Weighted-average per-unit (pcs) cost per product — purchase invoices ke netAmount/units se.
- *  Report end date tak ki saari invoices (stock jo becha ja raha hai uski asli keemat).
+/** Weighted-average per-unit (pcs) NET cost per product — purchase invoices se.
+ *  NET = netAmount (line gross − pass-on discount) − tradeOfferAmt (company ka
+ *  scheme wapas) — yehi asli kharcha hai jo company ko diya. GST recoverable
+ *  (input credit) hai is liye cost ka hissa NAHI; advance tax 236H income-tax
+ *  adjust hota hai, wo bhi nahi. Report end date tak ki saari invoices (stock jo
+ *  becha ja raha hai uski asli keemat).
  *  Koi purchase na ho to caller product.purchasePrice / tradePrice fallback lagata hai. */
 export async function unitCostMap(profileId: string, upTo: Date): Promise<Map<string, number>> {
   const rows = await db.purchaseInvoiceItem.findMany({
     where: { invoice: { distributorId: profileId, date: { lte: upTo } } },
-    select: { productId: true, units: true, netAmount: true },
+    select: { productId: true, units: true, netAmount: true, tradeOfferAmt: true },
   })
   const agg = new Map<string, { units: number; amt: number }>()
   for (const r of rows) {
     if (!r.units || r.units <= 0) continue
     const a = agg.get(r.productId) ?? { units: 0, amt: 0 }
     a.units += r.units
-    a.amt += r.netAmount
+    // per-line clamp 0 — scheme zyada ho to line negative cost poison na kare
+    a.amt += Math.max(0, r2(r.netAmount - (r.tradeOfferAmt || 0)))
     agg.set(r.productId, a)
   }
   const map = new Map<string, number>()

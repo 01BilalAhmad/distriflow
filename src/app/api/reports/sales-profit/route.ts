@@ -5,18 +5,21 @@ import { parseRange, unitCostMap, bookerList, companyList, r2 } from '@/lib/repo
 
 // ============================================================
 // Task 66 — SALES & PROFIT REPORT
+// Task 97 — NET vs NET: profit hamesha NET par — gross par nahi.
 // Product / Order-Booker / Company wise breakdown with date range.
 //   Gross Sales   = Σ (rate × qty)                [return se pehle]
 //   Discounts     = Σ (scheme discount + manual share)
-//   Net Sales     = Σ lineTotal                   (gross − discounts)
+//   Net Sales     = Σ (lineTotal − tradeOfferAmt) — TRUE net: gross − discounts
+//                   − trade offer (dukanko di gayi TO asal revenue kamati hai)
 //   Returns       = APPROVED SaleReturn items (period) — value eff-rate par
-//   COGS          = (qty + freeQty − retQty) × weighted-avg unit cost
-//                   (free units ki cost bhi — wo maal kharida tha, sale 0)
-//   Profit (Self) = Net after returns − COGS      [scheme cost khud bear]
+//   COGS          = (qty + freeQty − retQty) × weighted-avg NET unit cost
+//                   ((netAmount − tradeOffer)/units; free units ki cost bhi —
+//                   wo maal kharida tha, sale 0)
+//   Profit (Self) = NET Sale after returns − NET COGS   [sab khud bear — net vs net]
 //   Claim Potential = discounts + trade offer     [company claim ho to]
 //   Profit (Claim)= Profit (Self) + Claim Potential
-// Cost basis: purchase invoices ka weighted avg (netAmount/units) —
-// trade price NAHI (asal kharcha company invoice ka hai).
+// Cost basis: purchase invoices ka weighted avg ((netAmount − tradeOffer)/units) —
+// trade price NAHI (asal kharcha company invoice ka hai, scheme wapas minus).
 // ============================================================
 
 export async function GET(req: Request) {
@@ -110,13 +113,13 @@ export async function GET(req: Request) {
         a.freeQty += it.freeQty
         a.gross = r2(a.gross + gross)
         a.disc = r2(a.disc + disc)
-        a.net = r2(a.net + it.lineTotal)
+        a.net = r2(a.net + it.lineTotal - (it.tradeOfferAmt || 0)) // Task 97: TRUE net — TO minus
         a.toAmt = r2(a.toAmt + it.tradeOfferAmt)
         prodAgg.set(it.productId, a)
 
         bk.gross = r2(bk.gross + gross)
         bk.disc = r2(bk.disc + disc)
-        bk.net = r2(bk.net + it.lineTotal)
+        bk.net = r2(bk.net + it.lineTotal - (it.tradeOfferAmt || 0)) // Task 97: TRUE net
         bk.toAmt = r2(bk.toAmt + it.tradeOfferAmt)
         bk.cogs = r2(bk.cogs + (it.qty + it.freeQty) * uc)
         bookerAgg.set(o.salesmanId ?? 'unassigned', bk)
@@ -125,7 +128,7 @@ export async function GET(req: Request) {
         const ca = compAgg.get(cid) ?? { gross: 0, disc: 0, net: 0, toAmt: 0, cogs: 0, retValue: 0 }
         ca.gross = r2(ca.gross + gross)
         ca.disc = r2(ca.disc + disc)
-        ca.net = r2(ca.net + it.lineTotal)
+        ca.net = r2(ca.net + it.lineTotal - (it.tradeOfferAmt || 0)) // Task 97: TRUE net
         ca.toAmt = r2(ca.toAmt + it.tradeOfferAmt)
         ca.cogs = r2(ca.cogs + (it.qty + it.freeQty) * uc)
         compAgg.set(cid, ca)

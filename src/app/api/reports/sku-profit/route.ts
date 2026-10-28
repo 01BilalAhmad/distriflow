@@ -5,15 +5,18 @@ import { parseRange, unitCostMap, bookerList, companyList, r2 } from '@/lib/repo
 
 // ============================================================
 // Task 86 — SKU PROFIT REPORT (distributor ka profit hisaab)
+// Task 97 — NET vs NET: profit hamesha NET par — gross par nahi.
 // Har SKU ke liye seedha jawab:
-//   • Kitny ka Aya     = COGS — jo maal becha (qty + free − returns)
-//                        uski weighted-avg purchase cost (asli kharcha)
-//   • Kitny ka Sale Kia= Net Sale — billing rate se (scheme/manual discount
-//                        minus) aur approved returns minus
-//   • Kitna Profit     = Sale − Cost
+//   • Kitny ka Aya     = COGS — jo maal becha (qty + free − returns) uski
+//                        weighted-avg NET purchase cost (netAmount − tradeOffer:
+//                        pass-on discount + company scheme dono minus — asli kharcha)
+//   • Kitny ka Sale Kia= NET Sale — lineTotal (gross − scheme − manual) se Trade
+//                        Offer bhi minus (dukan ko di gayi TO asal revenue kamati
+//                        hai) aur approved returns minus
+//   • Kitna Profit     = NET Sale − NET Cost (GST recoverable — dono taraf excl.)
 //   • Kitny Percentage = Margin % = Profit ÷ Sale × 100
 // Cost basis (sales-profit report jaisa): purchase invoices ka weighted
-// average netAmount/units — trade price NAHI. Koi purchase invoice na ho
+// average (netAmount − tradeOffer)/units — trade price NAHI. Koi purchase invoice na ho
 // to product.purchasePrice (per ctn ÷ unitsPerCarton) fallback, warna trade.
 // CONFIRMED (unprocessed) se DELIVERED tak sab non-cancelled orders count —
 // booked sale bhi profit hisaab mein aati hai (Task 66 convention).
@@ -66,7 +69,7 @@ export async function GET(req: Request) {
       },
       select: {
         id: true,
-        items: { select: { productId: true, qty: true, freeQty: true, lineTotal: true } },
+        items: { select: { productId: true, qty: true, freeQty: true, lineTotal: true, tradeOfferAmt: true } },
       },
     })
 
@@ -76,15 +79,16 @@ export async function GET(req: Request) {
       select: { items: { select: { productId: true, qty: true, value: true } } },
     })
 
-    type Agg = { qty: number; freeQty: number; retQty: number; net: number; retValue: number }
+    type Agg = { qty: number; freeQty: number; retQty: number; net: number; toAmt: number; retValue: number }
     const agg = new Map<string, Agg>()
     for (const o of orders) {
       for (const it of o.items) {
         if (companyId && pMap.get(it.productId)?.companyId !== companyId) continue
-        const a = agg.get(it.productId) ?? { qty: 0, freeQty: 0, retQty: 0, net: 0, retValue: 0 }
+        const a = agg.get(it.productId) ?? { qty: 0, freeQty: 0, retQty: 0, net: 0, toAmt: 0, retValue: 0 }
         a.qty += it.qty
         a.freeQty += it.freeQty
         a.net = r2(a.net + it.lineTotal)
+        a.toAmt = r2(a.toAmt + (it.tradeOfferAmt || 0))
         agg.set(it.productId, a)
       }
     }
@@ -103,8 +107,9 @@ export async function GET(req: Request) {
         const p = pMap.get(pid)
         const upc = Math.max(1, p?.unitsPerCarton || 1)
         const cRate = unitCost(pid)
-        const saleRate = a.qty > 0 ? r2(a.net / a.qty) : 0 // avg billed rate per pc
-        const saleTotal = r2(a.net - a.retValue) // jo asli bikri rahi (returns ke baad)
+        const saleNet = r2(a.net - a.toAmt) // NET bikri — scheme + manual + trade offer sab minus
+        const saleRate = a.qty > 0 ? r2(saleNet / a.qty) : 0 // avg NET rate per pc
+        const saleTotal = r2(saleNet - a.retValue) // jo asli bikri rahi (returns ke baad)
         const costUnits = Math.max(0, a.qty + a.freeQty - a.retQty) // free units ki cost bhi humari thi
         const costTotal = r2(costUnits * cRate)
         const profit = r2(saleTotal - costTotal)
