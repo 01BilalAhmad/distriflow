@@ -1,7 +1,7 @@
 import { db } from '@/lib/db'
 import { r2 } from '@/lib/reports-kit-server'
 import type { Prisma, PrismaClient } from '@prisma/client'
-import { planAdvanceConsumption, advanceNote, type AdvanceSource } from './dms-return-core'
+import { planAdvanceConsumption, advanceNote, advanceAllocParts, type AdvanceSource } from './dms-return-core'
 
 // ============================================================
 // Task 98 — CREDIT MANAGEMENT (Finexa mechanism, bill-driven)
@@ -252,6 +252,7 @@ export async function advanceSources(client: AnyClient, outletId: string): Promi
     where: { outletId, status: 'APPROVED', advancePosted: { gt: 0 } },
     select: {
       id: true, returnNo: true, advancePosted: true, advanceConsumed: true,
+      type: true, // Task 103: note mein return-type label ke liye
       order: { select: { orderNo: true } },
     },
     orderBy: { createdAt: 'asc' },
@@ -261,6 +262,7 @@ export async function advanceSources(client: AnyClient, outletId: string): Promi
       returnId: rw.id,
       returnNo: rw.returnNo,
       orderNo: rw.order?.orderNo ?? null,
+      type: rw.type,
       available: r2(Math.max(0, rw.advancePosted - rw.advanceConsumed)),
     }))
     .filter((rw) => rw.available > 0.005)
@@ -351,8 +353,7 @@ export async function computeAdvanceProjection(
   const plan = planAdvanceConsumption(sources, Math.min(available, Math.max(0, r2(payable))))
   if (plan.used <= 0.005) return { applied: 0, note: null }
   // Chhoti detail — bill/invoice par wahi dikhegi jo settlement ledger mein likhi jayegi
-  const note = plan.allocations
-    .map((a) => `${a.returnNo}${a.orderNo ? ` (${a.orderNo})` : ''} Rs ${a.amount.toFixed(2)}`)
-    .join(' • ')
+  // Task 103: return-type label bhi (Return Stock / Damage & Expiry Claim)
+  const note = advanceAllocParts(plan.allocations)
   return { applied: plan.used, note }
 }

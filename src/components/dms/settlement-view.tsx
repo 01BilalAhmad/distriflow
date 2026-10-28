@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR, fmtDate, STATUS_STYLES, statusLabel } from '@/lib/dms-api'
+import { returnTypeLabel } from '@/lib/dms-return-core'
 import type { SummaryDTO, SummaryDetailDTO, SummaryOrderDTO } from '@/lib/dms-types'
 import { UnitQtyInputs, fmtQty } from '@/components/dms/unit-qty'
 import { PrintFrame, CblSettlementDoc } from '@/components/dms/cbl-print'
@@ -601,7 +602,7 @@ export function SettlementView() {
     if (!detail) return []
     // Task 101: advance FIFO preview — per outlet running balance, order sequence mein
     // consume. (API settle par yehi authoritative karta hai — UI sirf preview/deta dikhata hai)
-    const advRem = new Map<string, { balance: number; sources: { returnNo: string; orderNo: string | null; available: number }[] }>()
+    const advRem = new Map<string, { balance: number; sources: { returnNo: string; orderNo: string | null; type?: string | null; available: number }[] }>()
     return detail.orders.map((o) => {
       const d = retInputs[o.id]
       let returnValue = 0
@@ -635,7 +636,7 @@ export function SettlementView() {
             if (rem <= 0.005) break
             const take = Math.min(s.available, rem)
             if (take <= 0.005) continue
-            usedParts.push(`${s.returnNo}${s.orderNo ? ` (${s.orderNo})` : ''} ${fmtPKR(take)}`)
+            usedParts.push(`${s.returnNo}${s.orderNo ? ` (${s.orderNo})` : ''} ${fmtPKR(take)} — ${returnTypeLabel(s.type)}`)
             s.available = Math.max(0, s.available - take)
             rem = Math.max(0, rem - take)
           }

@@ -7,6 +7,8 @@ import {
   splitReturnCredit,
   planAdvanceConsumption,
   advanceNote,
+  returnTypeLabel,
+  advanceAllocParts,
   recalcSettlementRow,
 } from './dms-return-core'
 
@@ -103,16 +105,16 @@ describe('splitReturnCredit — SHOP FLOOR (no-minus ka dil)', () => {
 
 describe('planAdvanceConsumption — FIFO', () => {
   const sources = [
-    { returnId: 'r1', returnNo: 'RET-101', orderNo: 'ORD-1', available: 500 },
-    { returnId: 'r2', returnNo: 'RET-102', orderNo: null, available: 800 },
-    { returnId: 'r3', returnNo: 'RET-103', orderNo: 'ORD-3', available: 200 },
+    { returnId: 'r1', returnNo: 'RET-101', orderNo: 'ORD-1', type: 'DAMAGED', available: 500 },
+    { returnId: 'r2', returnNo: 'RET-102', orderNo: null, type: 'UNSOLD', available: 800 },
+    { returnId: 'r3', returnNo: 'RET-103', orderNo: 'ORD-3', type: 'EXPIRED', available: 200 },
   ]
   it('purana advance pehle kharch', () => {
     const p = planAdvanceConsumption(sources, 600)
     expect(p.used).toBe(600)
     expect(p.allocations).toEqual([
-      { returnId: 'r1', returnNo: 'RET-101', orderNo: 'ORD-1', amount: 500 },
-      { returnId: 'r2', returnNo: 'RET-102', orderNo: null, amount: 100 },
+      { returnId: 'r1', returnNo: 'RET-101', orderNo: 'ORD-1', type: 'DAMAGED', amount: 500 },
+      { returnId: 'r2', returnNo: 'RET-102', orderNo: null, type: 'UNSOLD', amount: 100 },
     ])
   })
   it('sab se zyada maanga — total available tak', () => {
@@ -123,11 +125,30 @@ describe('planAdvanceConsumption — FIFO', () => {
   it('zero demand — koi allocation nahi', () => {
     expect(planAdvanceConsumption(sources, 0)).toEqual({ allocations: [], used: 0 })
   })
-  it('note mein returnNo + orderNo ki detail hoti hai (user ki chhoti detail)', () => {
+  it('note mein returnNo + orderNo + TYPE label (user ki chhoti detail) hoti hai', () => {
     const p = planAdvanceConsumption(sources, 600)
     expect(advanceNote(p.allocations, 'ORD-900')).toBe(
-      'Advance adjust — maal wapsi ka: RET-101 (ORD-1) Rs 500.00 • RET-102 Rs 100.00 • ORD-900',
+      'Advance adjust: RET-101 (ORD-1) Rs 500.00 — Damage & Expiry Claim • RET-102 Rs 100.00 — Return Stock • ORD-900',
     )
+  })
+})
+
+describe('returnTypeLabel — Task 103 (user ki zubaan)', () => {
+  it('DAMAGED/EXPIRED => Damage & Expiry Claim', () => {
+    expect(returnTypeLabel('DAMAGED')).toBe('Damage & Expiry Claim')
+    expect(returnTypeLabel('EXPIRED')).toBe('Damage & Expiry Claim')
+  })
+  it('UNSOLD => Return Stock', () => {
+    expect(returnTypeLabel('UNSOLD')).toBe('Return Stock')
+  })
+  it('unknown/legacy null => Return Stock fallback', () => {
+    expect(returnTypeLabel(null)).toBe('Return Stock')
+    expect(returnTypeLabel(undefined)).toBe('Return Stock')
+  })
+  it('advanceAllocParts — label allocation ke sath', () => {
+    expect(
+      advanceAllocParts([{ returnId: 'r1', returnNo: 'RET-1', orderNo: 'ORD-2', type: 'DAMAGED', amount: 1500 }]),
+    ).toBe('RET-1 (ORD-2) Rs 1500.00 — Damage & Expiry Claim')
   })
 })
 

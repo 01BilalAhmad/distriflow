@@ -146,10 +146,24 @@ export interface AdvanceSource {
   returnId: string
   returnNo: string
   orderNo: string | null
+  /** Task 103: return ka type — note mein user ki zubaan mein label (Return Stock / Damage & Expiry Claim) */
+  type?: string | null
   /** is return ka abhi tak un-consumed advance (advancePosted − advanceConsumed) */
   available: number
 }
-export interface AdvanceAllocation { returnId: string; returnNo: string; orderNo: string | null; amount: number }
+export interface AdvanceAllocation { returnId: string; returnNo: string; orderNo: string | null; type?: string | null; amount: number }
+
+/**
+ * Task 103 — return type ko USER KI ZUBAAN mein label karo (wohi jo return waqt
+ * dropdown se select hota hai): DAMAGED/EXPIRED => "Damage & Expiry Claim",
+ * UNSOLD (sellable maal wapas) => "Return Stock". Unknown/legacy => "Return Stock".
+ * User: "Yahn pr wohi likha ho jo hm return krty huy select krty hn — return stock
+ * ya damage & expiry claim"
+ */
+export function returnTypeLabel(type?: string | null): string {
+  if (type === 'DAMAGED' || type === 'EXPIRED') return 'Damage & Expiry Claim'
+  return 'Return Stock'
+}
 
 /**
  * FIFO consumption plan — sab se PURANA advance pehle kharch hota hai (khate ki tarah).
@@ -165,10 +179,24 @@ export function planAdvanceConsumption(
     if (remaining <= 0.005) break
     const take = Math.min(r2c(src.available), remaining)
     if (take <= 0) continue
-    allocations.push({ returnId: src.returnId, returnNo: src.returnNo, orderNo: src.orderNo, amount: take })
+    allocations.push({ returnId: src.returnId, returnNo: src.returnNo, orderNo: src.orderNo, type: src.type ?? null, amount: take })
     remaining = r2c(remaining - take)
   }
   return { allocations, used: r2c(allocations.reduce((t, a) => t + a.amount, 0)) }
+}
+
+/**
+ * Allocation parts — "RET-12 (ORD-45) Rs 2,000.00 — Damage & Expiry Claim • ..."
+ * Task 103: har allocation ke sath return ka TYPE label (user ki chhoti detail ab
+ * batati hai deduction kis return ki AUR kis qism ki hai).
+ */
+export function advanceAllocParts(allocations: AdvanceAllocation[]): string {
+  return allocations
+    .map(
+      (a) =>
+        `${a.returnNo}${a.orderNo ? ` (${a.orderNo})` : ''} Rs ${a.amount.toFixed(2)} — ${returnTypeLabel(a.type)}`,
+    )
+    .join(' • ')
 }
 
 /** Consumption note — settlement sheet/ledger par yehi "chhoti detail" dikhti hai */
@@ -176,10 +204,7 @@ export function advanceNote(
   allocations: AdvanceAllocation[],
   orderNo?: string | null,
 ): string {
-  const parts = allocations.map(
-    (a) => `${a.returnNo}${a.orderNo ? ` (${a.orderNo})` : ''} Rs ${a.amount.toFixed(2)}`,
-  )
-  const base = `Advance adjust — maal wapsi ka: ${parts.join(' • ')}`
+  const base = `Advance adjust: ${advanceAllocParts(allocations)}`
   return orderNo ? `${base} • ${orderNo}` : base
 }
 

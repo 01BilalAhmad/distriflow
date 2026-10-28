@@ -580,6 +580,8 @@ export interface SummaryOrderDTO {
 export interface OutletAdvanceSourceDTO {
   returnNo: string
   orderNo: string | null
+  /** Task 103: return type — UI label (Return Stock / Damage & Expiry Claim) ke liye */
+  type?: string | null
   available: number
 }
 export interface OutletAdvanceInfoDTO {

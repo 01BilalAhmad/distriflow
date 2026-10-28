@@ -825,7 +825,8 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
             const [name, role] = s.split('|')
             return (
               <div key={i} className="w-44 text-center cbl-break-avoid">
-                <p className="mb-1 text-[11px]">{name}</p>
+                {/* Task 103: name line FIXED height — khali name (Shop Keeper) par box upar chadh jata tha (alignment) */}
+                <p style={{ height: 18, lineHeight: '18px', fontSize: 11, marginBottom: 4 }}>{name}</p>
                 <div style={{ border: '1.5px solid #000' }} className="px-3 py-1.5 text-[11px] font-bold">{role}</div>
               </div>
             )
@@ -1085,7 +1086,7 @@ export function CblSettlementDoc({ detail }: { detail: SummaryDetailDTO }) {
             const [name, role] = s.split('|')
             return (
               <div key={i} className="w-48 text-center cbl-break-avoid">
-                <p className="mb-1 text-[11px]">{name}</p>
+                <p style={{ height: 18, lineHeight: '18px', fontSize: 11, marginBottom: 4 }}>{name}</p>
                 <div style={{ border: '1.5px solid #000' }} className="px-3 py-1.5 text-[11px] font-bold">{role}</div>
               </div>
             )
