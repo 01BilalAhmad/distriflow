@@ -15,7 +15,7 @@ import {
 
 interface ShopRow extends Record<string, unknown> {
   id: string; name: string; code: string; city: string | null; channel: string; booker: string | null
-  creditDays: number; creditLimit: number; balance: number
+  creditDays: number; creditLimit: number; balance: number; advance: number
   creditStatus: 'OK' | 'NEAR' | 'OVER' | 'NONE'; limitPct: number; overBy: number
   oldestUnpaidDate: string | null; oldestUnpaidDays: number | null; agingBucket: string
 }
@@ -23,7 +23,7 @@ interface Resp extends Record<string, unknown> {
   summary: {
     totalOutstanding: number; shopsWithBalance: number
     overLimitShops: number; overLimitAmount: number; nearLimitShops: number
-    advanceShops: number; over30Amount: number
+    advanceShops: number; totalAdvance: number; over30Amount: number
   }
   shops: ShopRow[]
   aging: { bucket: string; shops: number; amount: number }[]
@@ -62,7 +62,7 @@ export function CreditTab() {
   const { data, loading } = gate
 
   const rows = (data?.shops ?? []).filter((s) =>
-    !status || (status === 'WITH_BALANCE' ? Math.abs(s.balance) > 0.005 : s.creditStatus === status),
+    !status || (status === 'WITH_BALANCE' ? Math.abs(s.balance) > 0.005 || s.advance > 0.005 : s.creditStatus === status),
   )
 
   const cols: Col<ShopRow>[] = [
@@ -70,6 +70,7 @@ export function CreditTab() {
     { key: 'city', label: 'City' },
     { key: 'booker', label: 'Booker' },
     { key: 'balance', label: 'Balance (Udhaar)', align: 'right', money: true, total: true, cls: 'font-bold text-red-600' },
+    { key: 'advance', label: 'Advance (Shop Ke Haq Mein)', align: 'right', money: true, cls: 'font-semibold text-emerald-600', render: (r) => r.advance > 0.005 ? `Rs ${r.advance.toLocaleString('en-PK')}` : '—' },
     { key: 'creditLimit', label: 'Credit Limit', align: 'right', money: true, render: (r) => r.creditLimit > 0 ? `Rs ${r.creditLimit.toLocaleString('en-PK')}` : 'No limit' },
     { key: 'creditStatus', label: 'Limit Status', align: 'center', render: (r) => (
       <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_BADGE[r.creditStatus].cls}`}>
@@ -135,6 +136,7 @@ export function CreditTab() {
             { label: 'Total Outstanding', value: `Rs ${fmt0(data.summary.totalOutstanding)}`, sub: `${data.summary.shopsWithBalance} shops par`, tone: 'red' },
             { label: 'Over Limit', value: `${data.summary.overLimitShops} shops`, sub: `Rs ${fmt0(data.summary.overLimitAmount)} extra`, tone: 'amber' },
             { label: 'Near Limit (80%+)', value: String(data.summary.nearLimitShops), sub: 'in shops ko follow karein', tone: 'amber' },
+            { label: 'Shop Ke Haq Mein Advance', value: `Rs ${fmt0(data.summary.totalAdvance)}`, sub: `${data.summary.advanceShops} shops — return ka (agli bill se auto-adjust)`, tone: 'emerald' },
             { label: '30+ Din Purana', value: `Rs ${fmt0(data.summary.over30Amount)}`, sub: 'sab se purana udhaar', tone: 'red' },
           ]}
         />
@@ -151,8 +153,8 @@ export function CreditTab() {
               period: 'Running balance (aaj)',
               filename: `credit-book-${new Date().toISOString().slice(0, 10)}`,
               cols: cols.map((c) => ({ label: c.label, align: c.align, money: c.money })),
-              rows: rows.map((r) => [r.name, r.city ?? '', r.booker ?? '', r.balance, r.creditLimit, STATUS_BADGE[r.creditStatus].label, r.oldestUnpaidDate ? fmtDay(r.oldestUnpaidDate) : '—', r.agingBucket]),
-              totalsRow: ['TOTAL', '', '', data?.summary.totalOutstanding ?? 0, '', '', '', ''],
+              rows: rows.map((r) => [r.name, r.city ?? '', r.booker ?? '', r.balance, r.advance, r.creditLimit, STATUS_BADGE[r.creditStatus].label, r.oldestUnpaidDate ? fmtDay(r.oldestUnpaidDate) : '—', r.agingBucket]),
+              totalsRow: ['TOTAL', '', '', data?.summary.totalOutstanding ?? 0, data?.summary.totalAdvance ?? 0, '', '', '', ''],
             }}
           />
         }

@@ -1,6 +1,8 @@
 import { db } from '@/lib/db'
 import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
 import { requireUser, outletScopeError } from '@/lib/api-auth'
+import { computeReturnLines } from '@/lib/dms-return-core'
+import { applyBillReturnEffects } from '@/lib/dms-return-effects'
 
 export async function GET(req: Request) {
   try {
@@ -18,6 +20,7 @@ export async function GET(req: Request) {
       where: { outlet: outletWhere },
       include: {
         outlet: { select: { name: true } },
+        order: { select: { orderNo: true } },
         items: { include: { product: { select: { name: true, unitsPerCarton: true, pcsPerBox: true } } } },
       },
       orderBy: { createdAt: 'desc' },
@@ -29,6 +32,9 @@ export async function GET(req: Request) {
         id: r.id,
         returnNo: r.returnNo,
         outletName: r.outlet.name,
+        // Task 101: bill-linked return par bill ka number bhi dikhta hai
+        orderNo: r.order?.orderNo ?? null,
+        advancePosted: r.advancePosted,
         type: r.type,
         status: r.status,
         totalValue: r.totalValue,
@@ -51,18 +57,119 @@ export async function POST(req: Request) {
     const user = auth.user
 
     const body = await req.json()
-    const { outletId, type, reason, items } = body
+    const { outletId, type, reason, items, orderId } = body as {
+      outletId: string; type: string; reason?: string; items: { productId: string; qty: number }[]
+      orderId?: string
+    }
     if (!outletId || !type || !items || items.length === 0) {
       return jsonError('Outlet, type aur items required hain')
     }
 
-    const productIds = items.map((i: { productId: string }) => i.productId)
-    // Task 23: tenant scope — return jis distributor ki shop ka, products usi ke
     const outlet = await db.outlet.findUnique({ where: { id: outletId } })
     if (!outlet) return jsonError('Outlet not found', 404)
     // Task 95: outlet scope — return sirf apni route / apne tenant ki shop par
     const ose = await outletScopeError(user, { distributorId: outlet.distributorId, salesmanId: outlet.salesmanId })
     if (ose) return ose
+
+    // ---------------- Task 101: BILL-LINKED RETURN ----------------
+    // Bill select kar ke usi bill ke items wapas — full amount with all taxes
+    // (settlement page jaisa math). Distributor khud banaye => auto-APPROVED
+    // (effects foran); salesman banaye => PENDING (approve par effects).
+    if (orderId) {
+      const order = await db.order.findUnique({
+        where: { id: orderId },
+        include: { items: { include: { product: { select: { name: true } } } } },
+      })
+      if (!order) return jsonError('Order not found', 404)
+      if (order.outletId !== outletId) return jsonError('Ye bill is shop ka nahi hai')
+      const st = await db.summarySettlement.findFirst({ where: { orderId: order.id } })
+      if (!st) return jsonError('Is bill ki settlement abhi nahi hui — return sirf settled bills par hota hai')
+      const summary = await db.deliverySummary.findUnique({ where: { id: st.summaryId }, select: { warehouseId: true } })
+      if (!summary) return jsonError('Bill ki summary nahi mili', 404)
+
+      // Server-side cap truth — over-return impossible (NO-MINUS guard #1)
+      const priorReturns = await db.saleReturn.findMany({
+        where: { orderId: order.id, status: 'APPROVED' },
+        select: { items: { select: { productId: true, qty: true } } },
+      })
+      const returnedMap: Record<string, number> = {}
+      for (const r of priorReturns) {
+        for (const ri of r.items) returnedMap[ri.productId] = (returnedMap[ri.productId] ?? 0) + ri.qty
+      }
+      let lines: { productId: string; qty: number; rate: number; value: number }[]
+      let returnValue: number
+      try {
+        const calc = computeReturnLines(
+          order.items.map((it) => ({ productId: it.productId, qty: it.qty, rate: it.rate, lineTotal: it.lineTotal, productName: it.product.name })),
+          items,
+          returnedMap,
+        )
+        lines = calc.lines
+        returnValue = calc.returnValue
+      } catch (err) {
+        return jsonError(err instanceof Error ? err.message : 'Return items galat hain')
+      }
+
+      const isDistributor = user.role === 'DISTRIBUTOR'
+      const status = isDistributor ? 'APPROVED' : 'PENDING'
+      const seq = await nextSeq('return')
+      const returnNo = `RET-${seq}`
+
+      if (!isDistributor) {
+        // Salesman — PENDING, koi effect nahi (approve par lagenge)
+        const ret = await db.saleReturn.create({
+          data: {
+            returnNo, outletId, orderId: order.id, type, status: 'PENDING',
+            totalValue: returnValue, reason: reason ?? null,
+            items: { create: lines },
+          },
+        })
+        return Response.json({ return: { id: ret.id, returnNo: ret.returnNo, status: 'PENDING' } })
+      }
+
+      // Distributor — auto-APPROVED + full effects (ONE transaction)
+      const result = await db.$transaction(async (tx) => {
+        const ret = await tx.saleReturn.create({
+          data: {
+            returnNo, outletId, orderId: order.id, type, status: 'APPROVED',
+            totalValue: returnValue, reason: reason ?? null,
+            items: { create: lines },
+          },
+        })
+        const fx = await applyBillReturnEffects(tx, {
+          returnId: ret.id,
+          returnNo,
+          outletId,
+          order: { id: order.id, orderNo: order.orderNo, total: order.total, advanceTax: order.advanceTax, gstTotal: order.gstTotal, tradeOfferTotal: order.tradeOfferTotal },
+          st,
+          warehouseId: summary.warehouseId,
+          lines,
+          userId: user.id,
+          contextNote: `Stock return (${type}) — Return & Claims se`,
+        })
+        return { ret, fx }
+      }, { timeout: 20000 })
+
+      const advanceMsg = result.fx.advancePosted > 0
+        ? ` Rs ${result.fx.advancePosted.toFixed(2)} shop ke ADVANCE mein (agli bill se auto-adjust)`
+        : ''
+      return Response.json({
+        return: {
+          id: result.ret.id,
+          returnNo,
+          status: 'APPROVED',
+          totalValue: returnValue,
+          orderNo: order.orderNo,
+          ledgerCredit: result.fx.ledgerCredit,
+          advancePosted: result.fx.advancePosted,
+          message: `Return ${returnNo} approved — stock wapas, shop ka khata update. Total credit Rs ${result.fx.totalCredit.toFixed(2)}.${advanceMsg}`,
+        },
+      })
+    }
+
+    // ---------------- STANDALONE RETURN (purana tarika — unchanged) ----------------
+    const productIds = items.map((i: { productId: string }) => i.productId)
+    // Task 23: tenant scope — return jis distributor ki shop ka, products usi ke
     const products = await db.product.findMany({ where: { id: { in: productIds }, distributorId: outlet.distributorId } })
     let totalValue = 0
     // qty = PIECES (base unit) — rate per piece = tradePrice / unitsPerCarton
@@ -83,7 +190,7 @@ export async function POST(req: Request) {
         items: { create: itemData },
       },
     })
-    return Response.json({ return: { id: ret.id, returnNo: ret.returnNo } })
+    return Response.json({ return: { id: ret.id, returnNo: ret.returnNo, status: 'PENDING' } })
   } catch (e) {
     console.error(e)
     return jsonError('Return create failed', 500)

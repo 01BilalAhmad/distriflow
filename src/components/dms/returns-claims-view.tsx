@@ -10,12 +10,16 @@ import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Separator } from '@/components/ui/separator'
 import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR, fmtDate, STATUS_STYLES, statusLabel } from '@/lib/dms-api'
 import { UnitQtyInputs, fmtQty } from '@/components/dms/unit-qty'
-import type { ReturnDTO, ClaimDTO, OutletDTO, ProductDTO } from '@/lib/dms-types'
-import { Check, X, Undo2, FileText, Plus, Loader2 } from 'lucide-react'
+import type { ReturnDTO, ClaimDTO, OutletDTO, ProductDTO, BillReturnOptionsDTO } from '@/lib/dms-types'
+import { Check, X, Undo2, FileText, Plus, Loader2, ReceiptText } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
+
+const round2v = (n: number) => Math.round(n * 100) / 100
+const STANDALONE = '__standalone__'
 
 export function ReturnsClaimsView() {
   const user = useDMS((s) => s.user)
@@ -43,8 +47,8 @@ export function ReturnsClaimsView() {
 
   async function returnAction(id: string, action: 'APPROVE' | 'REJECT') {
     try {
-      await api(`/api/returns/${id}`, { method: 'PATCH', body: JSON.stringify({ action, approvedBy: user?.name }) })
-      toast({ title: action === 'APPROVE' ? 'Return Approved ✓' : 'Return Rejected', description: 'Status update ho gaya' })
+      await api<{ status: string; effects?: { advancePosted?: number } }>(`/api/returns/${id}`, { method: 'PATCH', body: JSON.stringify({ action, approvedBy: user?.name }) })
+      toast({ title: action === 'APPROVE' ? 'Return Approved ✓' : 'Return Rejected', description: action === 'APPROVE' ? 'Stock wapas, shop ka khata update ho gaya' : 'Status update ho gaya' })
       load()
     } catch (e) { toast({ title: 'Error', description: e instanceof Error ? e.message : 'Failed', variant: 'destructive' }) }
   }
@@ -67,7 +71,7 @@ export function ReturnsClaimsView() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-slate-900">Returns & Claims</h2>
-          <p className="text-sm text-slate-500">Damaged/expired stock returns aur scheme claims — hierarchical approval</p>
+          <p className="text-sm text-slate-500">Bill-linked return (full amount + taxes) — shop select, bill select, items wapas</p>
         </div>
         <Button onClick={() => setNewReturnOpen(true)} className="bg-emerald-600 hover:bg-emerald-700">
           <Plus className="h-4 w-4 mr-1.5" /> New Sale Return
@@ -96,12 +100,20 @@ export function ReturnsClaimsView() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <button onClick={() => setDetail(r)} className="font-semibold text-emerald-700 hover:underline text-sm">{r.returnNo}</button>
                     <Badge variant="outline" className="text-[9px] border-slate-200">{r.type}</Badge>
+                    {r.orderNo && (
+                      <Badge variant="outline" className="text-[9px] border-emerald-200 text-emerald-700 bg-emerald-50 gap-1">
+                        <ReceiptText className="h-2.5 w-2.5" /> {r.orderNo}
+                      </Badge>
+                    )}
                   </div>
                   <p className="text-xs text-slate-500 truncate">{r.outletName} • {r.items.length} items • {fmtDate(r.createdAt)}</p>
                   {r.reason && <p className="text-xs text-slate-400 truncate italic">&ldquo;{r.reason}&rdquo;</p>}
                 </div>
                 <div className="text-right shrink-0">
                   <p className="font-bold text-slate-900">{fmtPKR(r.totalValue)}</p>
+                  {(r.advancePosted ?? 0) > 0 && (
+                    <p className="text-[10px] text-emerald-600 font-semibold" title="Bill paid tha — ye hissa shop ke advance mein gaya (agli bill se auto-adjust)">Advance {fmtPKR(r.advancePosted!)}</p>
+                  )}
                   <Badge variant="outline" className={`${STATUS_STYLES[r.status]} text-[9px]`}>{statusLabel(r.status)}</Badge>
                 </div>
                 {r.status === 'PENDING' && canApprove && (
@@ -154,7 +166,7 @@ export function ReturnsClaimsView() {
             <>
               <DialogHeader>
                 <DialogTitle>{detail.returnNo} — Items</DialogTitle>
-                <DialogDescription>{detail.outletName} • {detail.type}</DialogDescription>
+                <DialogDescription>{detail.outletName} • {detail.type}{detail.orderNo ? ` • Bill ${detail.orderNo}` : ''}</DialogDescription>
               </DialogHeader>
               <div className="space-y-2">
                 {detail.items.map((it, i) => (
@@ -164,6 +176,11 @@ export function ReturnsClaimsView() {
                   </div>
                 ))}
                 <div className="flex justify-between font-bold pt-1"><span>Total</span><span>{fmtPKR(detail.totalValue)}</span></div>
+                {(detail.advancePosted ?? 0) > 0 && (
+                  <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-md px-2 py-1.5">
+                    Is return ki Rs {fmtPKR(detail.advancePosted!)} credit shop ke <b>ADVANCE</b> mein gayi (bill paid tha) — agli bill se auto-adjust hogi
+                  </p>
+                )}
               </div>
             </>
           )}
@@ -175,6 +192,14 @@ export function ReturnsClaimsView() {
   )
 }
 
+/**
+ * Task 101 — New Sale Return (BILL-LINKED):
+ *  1. Shop select → us shop ke SETTLED bills dropdown (sirf ledger wale — user rule)
+ *  2. Bill select → bill ke items (billed / pehle wapas / returnable) @ actual effRate
+ *  3. Qty + "Pura Bill Return" + live totals (goods + GST + advTax − TO = Total Credit)
+ *  4. No-minus: bill paid ho to bachi credit shop ke ADVANCE mein — agli bill se auto-adjust
+ * Bill select na ho to purana standalone tarika (trade price, PENDING) bhi mojood hai.
+ */
 function NewReturnDialog({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (v: boolean) => void; onCreated: () => void }) {
   const user = useDMS((s) => s.user)
   const [outlets, setOutlets] = useState<OutletDTO[]>([])
@@ -182,17 +207,101 @@ function NewReturnDialog({ open, onOpenChange, onCreated }: { open: boolean; onO
   const [outletId, setOutletId] = useState('')
   const [type, setType] = useState('DAMAGED')
   const [reason, setReason] = useState('')
+  // Task 101: bill-linked state
+  const [billsLoading, setBillsLoading] = useState(false)
+  const [billOpts, setBillOpts] = useState<BillReturnOptionsDTO | null>(null)
+  const [billId, setBillId] = useState('') // '' = standalone (purana tarika)
+  const [billQtys, setBillQtys] = useState<Record<string, number>>({})
+  const [fullBill, setFullBill] = useState(false)
+  // standalone lines
   const [lines, setLines] = useState<{ productId: string; qtyPcs: number }[]>([])
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (!open || !user) return
-    setOutletId(''); setLines([]); setReason('')
+    setOutletId(''); setLines([]); setReason(''); setBillId(''); setBillQtys({}); setBillOpts(null); setFullBill(false)
     api<{ outlets: OutletDTO[] }>(`/api/outlets?userId=${user.id}`).then((r) => setOutlets(r.outlets)).catch(() => {})
     api<{ products: ProductDTO[] }>(`/api/products?userId=${user.id}`).then((r) => setProducts(r.products)).catch(() => {})
   }, [open, user])
 
+  // Outlet change => settled bills + shop advance info (chhoti detail)
+  useEffect(() => {
+    setBillOpts(null); setBillId(''); setBillQtys({}); setFullBill(false)
+    if (!open || !outletId) return
+    let alive = true
+    setBillsLoading(true)
+    api<BillReturnOptionsDTO>(`/api/returns/bill-options?outletId=${outletId}`)
+      .then((r) => { if (alive) setBillOpts(r) })
+      .catch(() => { if (alive) setBillOpts(null) })
+      .finally(() => { if (alive) setBillsLoading(false) })
+    return () => { alive = false }
+  }, [open, outletId])
+
+  const bill = billOpts?.bills.find((b) => b.id === billId) ?? null
+  const isBillMode = !!bill
+
+  // Live totals — server (applyBillReturnEffects) ka EXACT math mirror:
+  // effRate value + pro-rata caps (settlement effective remaining par)
+  let retQty = 0, returnValue = 0, gstRev = 0, taxRev = 0, toRev = 0, overCap = false
+  if (bill) {
+    for (const it of bill.items) {
+      const q = billQtys[it.productId] ?? 0
+      if (q > 0) { retQty += q; returnValue += q * it.effRate }
+      if (q > it.returnable) overCap = true
+    }
+    returnValue = round2v(returnValue)
+    const cap = (full: number, remaining: number) =>
+      returnValue > 0 && bill.total > 0 && full > 0 ? Math.min(round2v((full * returnValue) / bill.total), remaining) : 0
+    gstRev = cap(bill.gstTotal, bill.settlement.gstTotal)
+    taxRev = cap(bill.advanceTax, bill.settlement.advanceTax)
+    toRev = cap(bill.tradeOfferTotal, bill.settlement.tradeOfferTotal)
+  }
+  const totalCredit = Math.max(0, round2v(returnValue + gstRev + taxRev - toRev))
+  const outstanding = Math.max(0, billOpts?.outlet.balance ?? 0)
+  const advancePortion = Math.max(0, round2v(totalCredit - outstanding))
+
+  function setQty(productId: string, totalPcs: number) {
+    setFullBill(false)
+    setBillQtys({ ...billQtys, [productId]: Math.max(0, Math.floor(totalPcs || 0)) })
+  }
+
+  function toggleFullBill(on: boolean) {
+    setFullBill(on)
+    if (!bill) return
+    if (on) setBillQtys(Object.fromEntries(bill.items.map((it) => [it.productId, it.returnable])))
+    else setBillQtys({})
+  }
+
   async function save() {
+    if (isBillMode) {
+      if (!bill || retQty === 0) {
+        toast({ title: 'Missing info', description: 'Return qty enter karein', variant: 'destructive' }); return
+      }
+      if (overCap) {
+        toast({ title: 'Qty zyada hai', description: 'Return qty returnable se zyada nahi ho sakti', variant: 'destructive' }); return
+      }
+      setSaving(true)
+      try {
+        const r = await api<{ return: { returnNo: string; status: string; message?: string } }>('/api/returns', {
+          method: 'POST',
+          body: JSON.stringify({
+            outletId, type, reason,
+            orderId: bill.id,
+            items: bill.items.map((it) => ({ productId: it.productId, qty: billQtys[it.productId] ?? 0 })).filter((x) => x.qty > 0),
+          }),
+        })
+        toast({
+          title: `Return ${r.return.returnNo} ✓`,
+          description: r.return.message ?? (r.return.status === 'PENDING' ? 'Bill-linked return PENDING hai — distributor approve kare' : 'Approved — stock + khata update ho gaya'),
+        })
+        onOpenChange(false)
+        onCreated()
+      } catch (e) {
+        toast({ title: 'Failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' })
+      } finally { setSaving(false) }
+      return
+    }
+    // ---- standalone (purana tarika) ----
     if (!outletId || lines.length === 0) {
       toast({ title: 'Missing info', description: 'Outlet aur items select karein', variant: 'destructive' }); return
     }
@@ -210,17 +319,118 @@ function NewReturnDialog({ open, onOpenChange, onCreated }: { open: boolean; onO
     } finally { setSaving(false) }
   }
 
+  const returnableBills = (billOpts?.bills ?? []).filter((b) => !b.fullyReturned)
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>New Sale Return</DialogTitle><DialogDescription>Damaged / expired / unsold stock wapas</DialogDescription></DialogHeader>
+      <DialogContent className="max-w-2xl max-h-[88vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>New Sale Return</DialogTitle>
+          <DialogDescription>Bill select kar ke usi bill ka maal wapas karein (full amount + taxes) — ya bina bill general return</DialogDescription>
+        </DialogHeader>
         <div className="grid gap-3">
-          <div className="grid gap-1.5"><Label>Outlet</Label>
+          <div className="grid gap-1.5"><Label>Outlet (Shop)</Label>
             <Select value={outletId} onValueChange={setOutletId}>
               <SelectTrigger><SelectValue placeholder="Select outlet" /></SelectTrigger>
               <SelectContent>{outlets.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}</SelectContent>
             </Select>
           </div>
+
+          {/* Task 101: Bills dropdown — sirf processed/settled bills (ledger wale hi) */}
+          <div className="grid gap-1.5">
+            <div className="flex items-center justify-between">
+              <Label>Bill (jis se return karna hai)</Label>
+              {billsLoading && <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-400" />}
+            </div>
+            <Select
+              value={billId || STANDALONE}
+              onValueChange={(v) => { setBillId(v === STANDALONE ? '' : v); setBillQtys({}); setFullBill(false) }}
+              disabled={!outletId || billsLoading}
+            >
+              <SelectTrigger><SelectValue placeholder={outletId ? (billsLoading ? 'Bills load ho rahe hain…' : 'Bill select karein') : 'Pehle outlet select karein'} /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={STANDALONE}>Bina bill — general return (purana tarika)</SelectItem>
+                {returnableBills.map((b) => (
+                  <SelectItem key={b.id} value={b.id}>
+                    {b.orderNo} • {fmtDate(b.orderDate)} • {fmtPKR(b.total)} {b.settlement.status === 'CASH' ? '(Cash)' : b.settlement.status === 'CREDIT' ? '(Udhaar)' : '(Partial)'} — bacha {b.returnableQty} pcs
+                  </SelectItem>
+                ))}
+                {billOpts && returnableBills.length === 0 && (
+                  <SelectItem value="__nobills__" disabled>Is shop ka koi settled bill (jis par kuch returnable ho) nahi</SelectItem>
+                )}
+              </SelectContent>
+            </Select>
+            {billOpts && billOpts.outlet.advanceBalance > 0.005 && (
+              <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-md px-2 py-1.5">
+                Is shop ke paas <b>Advance Rs {fmtPKR(billOpts.outlet.advanceBalance)}</b> hai ({billOpts.outlet.advanceSources.map((s) => s.returnNo).join(', ')}) — agli bill se auto-adjust ho jayega
+              </p>
+            )}
+          </div>
+
+          {isBillMode && bill && (
+            <>
+              <div className="rounded-lg border border-slate-200 overflow-x-auto">
+                <table className="w-full text-xs min-w-[540px]">
+                  <thead className="bg-slate-50 text-slate-500">
+                    <tr>
+                      <th className="text-left font-semibold px-2 py-1.5">Item</th>
+                      <th className="text-center font-semibold px-1 py-1.5">Billed</th>
+                      <th className="text-center font-semibold px-1 py-1.5">Pehle Wapas</th>
+                      <th className="text-center font-semibold px-1 py-1.5">Returnable</th>
+                      <th className="text-center font-semibold px-1 py-1.5">Return Qty (pcs)</th>
+                      <th className="text-right font-semibold px-2 py-1.5">Value</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {bill.items.map((it) => {
+                      const q = billQtys[it.productId] ?? 0
+                      return (
+                        <tr key={it.productId} className={q > it.returnable ? 'bg-red-50' : ''}>
+                          <td className="px-2 py-1.5 text-slate-700">{it.productName}</td>
+                          <td className="px-1 py-1.5 text-center text-slate-500">{it.billed}</td>
+                          <td className="px-1 py-1.5 text-center text-slate-400">{it.returned}</td>
+                          <td className="px-1 py-1.5 text-center font-semibold text-slate-600">{it.returnable}</td>
+                          <td className="px-1 py-1.5 text-center">
+                            <Input type="number" min={0} max={it.returnable} value={q || ''} onChange={(e) => setQty(it.productId, Number(e.target.value))} className="h-7 w-20 text-right mx-auto" disabled={it.returnable === 0} />
+                          </td>
+                          <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{q > 0 ? fmtPKR(q * it.effRate) : '—'}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Button size="sm" variant="outline" className={`h-7 text-[11px] ${fullBill ? 'bg-orange-600 text-white hover:bg-orange-700' : 'border-orange-200 text-orange-700'}`} onClick={() => toggleFullBill(!fullBill)}>
+                  <Undo2 className="h-3 w-3 mr-1" /> Pura Bill Return (bacha hua sab)
+                </Button>
+                <span className="text-xs text-orange-700 font-semibold">Returnable: {bill.returnableQty} pcs • {fmtPKR(bill.returnableValue)}</span>
+              </div>
+
+              {retQty > 0 && (
+                <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5 space-y-1 text-xs">
+                  <div className="flex justify-between"><span className="text-slate-500">Return Value (bill ke actual rate par)</span><span className="font-semibold tabular-nums">{fmtPKR(returnValue)}</span></div>
+                  {gstRev > 0 && <div className="flex justify-between"><span className="text-slate-500">GST wapas (+)</span><span className="font-semibold text-blue-600 tabular-nums">+ {fmtPKR(gstRev)}</span></div>}
+                  {taxRev > 0 && <div className="flex justify-between"><span className="text-slate-500">Advance Tax wapas (+)</span><span className="font-semibold text-blue-600 tabular-nums">+ {fmtPKR(taxRev)}</span></div>}
+                  {toRev > 0 && <div className="flex justify-between"><span className="text-slate-500">Trade Offer wapas (−)</span><span className="font-semibold text-red-500 tabular-nums">− {fmtPKR(toRev)}</span></div>}
+                  <Separator />
+                  <div className="flex justify-between"><span className="font-bold text-slate-700">Total Credit</span><span className="font-bold text-emerald-700 tabular-nums">{fmtPKR(totalCredit)}</span></div>
+                  {advancePortion > 0.005 && (
+                    <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-100 rounded px-2 py-1">
+                      Bill paid hai — Rs {fmtPKR(advancePortion)} shop ke <b>ADVANCE</b> mein jayegi (agli bill se auto-adjust — <b>balance minus mein nahi jayega</b>)
+                    </p>
+                  )}
+                  {overCap && <p className="text-[11px] text-red-600 font-semibold">Return qty returnable se zyada hai — theek karein</p>}
+                </div>
+              )}
+            </>
+          )}
+
+          {!isBillMode && outletId && !billsLoading && (
+            <p className="text-[11px] text-slate-400">Bina bill: trade price par general return — PENDING banegi (approval distributor karega). Behtar hai bill select karein — full amount + taxes return hote hain.</p>
+          )}
+
           <div className="grid gap-1.5"><Label>Type</Label>
             <Select value={type} onValueChange={setType}>
               <SelectTrigger><SelectValue /></SelectTrigger>
@@ -231,32 +441,36 @@ function NewReturnDialog({ open, onOpenChange, onCreated }: { open: boolean; onO
               </SelectContent>
             </Select>
           </div>
-          <div className="grid gap-1.5">
-            <div className="flex items-center justify-between"><Label>Items (qty = pcs)</Label>
-              <Button size="sm" variant="outline" className="h-7 border-emerald-200 text-emerald-700" onClick={() => setLines([...lines, { productId: products[0]?.id ?? '', qtyPcs: Math.max(1, products[0]?.unitsPerCarton ?? 1) }])}>
-                <Plus className="h-3 w-3 mr-1" /> Add
-              </Button>
+
+          {!isBillMode && (
+            <div className="grid gap-1.5">
+              <div className="flex items-center justify-between"><Label>Items (qty = pcs)</Label>
+                <Button size="sm" variant="outline" className="h-7 border-emerald-200 text-emerald-700" onClick={() => setLines([...lines, { productId: products[0]?.id ?? '', qtyPcs: Math.max(1, products[0]?.unitsPerCarton ?? 1) }])}>
+                  <Plus className="h-3 w-3 mr-1" /> Add
+                </Button>
+              </div>
+              {lines.map((l, i) => {
+                const lp = products.find((x) => x.id === l.productId)
+                return (
+                  <div key={i} className="flex gap-2 items-start">
+                    <Select value={l.productId} onValueChange={(v) => { const n = [...lines]; n[i] = { ...n[i], productId: v }; setLines(n) }}>
+                      <SelectTrigger className="flex-1 h-9"><SelectValue /></SelectTrigger>
+                      <SelectContent>{products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <UnitQtyInputs
+                      pcs={l.qtyPcs}
+                      upc={Math.max(1, lp?.unitsPerCarton ?? 1)}
+                      pcsPerBox={lp?.pcsPerBox && lp.pcsPerBox > 0 ? lp.pcsPerBox : 0}
+                      inputW="w-12"
+                      onChange={(totalPcs) => { const n = [...lines]; n[i] = { ...n[i], qtyPcs: totalPcs }; setLines(n) }}
+                    />
+                    <Button size="sm" variant="ghost" className="h-9 w-9 p-0 text-red-400" onClick={() => setLines(lines.filter((_, j) => j !== i))}><X className="h-4 w-4" /></Button>
+                  </div>
+                )
+              })}
             </div>
-            {lines.map((l, i) => {
-              const lp = products.find((x) => x.id === l.productId)
-              return (
-                <div key={i} className="flex gap-2 items-start">
-                  <Select value={l.productId} onValueChange={(v) => { const n = [...lines]; n[i] = { ...n[i], productId: v }; setLines(n) }}>
-                    <SelectTrigger className="flex-1 h-9"><SelectValue /></SelectTrigger>
-                    <SelectContent>{products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
-                  </Select>
-                  <UnitQtyInputs
-                    pcs={l.qtyPcs}
-                    upc={Math.max(1, lp?.unitsPerCarton ?? 1)}
-                    pcsPerBox={lp?.pcsPerBox && lp.pcsPerBox > 0 ? lp.pcsPerBox : 0}
-                    inputW="w-12"
-                    onChange={(totalPcs) => { const n = [...lines]; n[i] = { ...n[i], qtyPcs: totalPcs }; setLines(n) }}
-                  />
-                  <Button size="sm" variant="ghost" className="h-9 w-9 p-0 text-red-400" onClick={() => setLines(lines.filter((_, j) => j !== i))}><X className="h-4 w-4" /></Button>
-                </div>
-              )
-            })}
-          </div>
+          )}
+
           <div className="grid gap-1.5"><Label>Reason</Label>
             <Select onValueChange={setReason} value={reason}>
               <SelectTrigger><SelectValue placeholder="Select reason" /></SelectTrigger>
@@ -269,8 +483,9 @@ function NewReturnDialog({ open, onOpenChange, onCreated }: { open: boolean; onO
             </Select>
           </div>
         </div>
-        <Button onClick={save} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700">
-          {saving && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />} Submit Return
+        <Button onClick={save} disabled={saving || (isBillMode && (retQty === 0 || overCap))} className="bg-emerald-600 hover:bg-emerald-700">
+          {saving && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+          {isBillMode ? `Submit Return (${retQty} pcs — ${fmtPKR(totalCredit)} credit)` : 'Submit Return'}
         </Button>
       </DialogContent>
     </Dialog>

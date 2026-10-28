@@ -435,6 +435,10 @@ export interface ReturnDTO {
   id: string
   returnNo: string
   outletName: string
+  /** Task 101: bill-linked return par bill ka number (null = standalone) */
+  orderNo?: string | null
+  /** Task 101: is return ki credit mein se kitna shop ke ADVANCE mein gaya (bill paid tha) */
+  advancePosted?: number
   type: string
   status: string
   totalValue: number
@@ -566,6 +570,68 @@ export interface SummaryOrderDTO {
   settled: boolean
   items: SummaryOrderItemDTO[]
   returns?: SummaryOrderReturnDTO[]
+  /**
+   * Task 101: shop ka un-consumed return advance + FIFO sources — settlement form
+   * par deduction line ("kis cheez ki deduction hai") isi se dikhti hai.
+   */
+  outletAdvance?: OutletAdvanceInfoDTO | null
+}
+
+export interface OutletAdvanceSourceDTO {
+  returnNo: string
+  orderNo: string | null
+  available: number
+}
+export interface OutletAdvanceInfoDTO {
+  balance: number
+  sources: OutletAdvanceSourceDTO[]
+}
+
+// ---------------- Task 101: Bill-linked return (Return & Claims page) ----------------
+
+export interface BillReturnItemDTO {
+  productId: string
+  productName: string
+  unitsPerCarton: number
+  pcsPerBox: number
+  billed: number
+  returned: number
+  returnable: number
+  /** per-pc net rate (scheme + manual discount ke baad) — return isi par hota hai */
+  effRate: number
+  lineTotal: number
+}
+
+export interface BillReturnBillDTO {
+  id: string
+  orderNo: string
+  orderDate: string
+  status: string
+  total: number
+  gstTotal: number
+  tradeOfferTotal: number
+  advanceTax: number
+  filerStatus: string | null
+  summaryNo: string
+  /** settlement row ki effective raqamen — pro-rata reversal caps inhi par */
+  settlement: { cashAmount: number; status: string; returnAmount: number; advanceTax: number; gstTotal: number; tradeOfferTotal: number }
+  items: BillReturnItemDTO[]
+  returnableQty: number
+  returnableValue: number
+  fullyReturned: boolean
+}
+
+export interface BillReturnOptionsDTO {
+  outlet: {
+    id: string
+    name: string
+    code: string
+    code4: string | null
+    balance: number
+    advanceBalance: number
+    advanceSources: OutletAdvanceSourceDTO[]
+  }
+  bills: BillReturnBillDTO[]
 }
 
 export interface SummaryOrderReturnItemDTO {
@@ -609,6 +675,8 @@ export interface SettlementRowDTO {
   outletName: string
   billAmount: number
   returnAmount: number
+  /** Task 101: is settlement par shop ke advance se auto-adjust (cash is se kam) */
+  advanceAdjusted?: number
   advanceTax?: number
   /** Task 45: effective GST/TO (return reversal ke baad) — Task 80: settlement sheet Net Payable isi se */
   gstTotal?: number

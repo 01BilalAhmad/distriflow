@@ -39,6 +39,7 @@ export async function GET(req: Request) {
       select: {
         id: true, name: true, code: true, city: true, channel: true,
         creditDays: true, creditLimit: true, balance: true,
+        advanceBalance: true, // Task 101: shop ke haq mein advance (return se, hamesha positive)
         salesman: { select: { name: true } },
       },
       orderBy: { name: 'asc' },
@@ -73,6 +74,7 @@ export async function GET(req: Request) {
         creditDays: o.creditDays,
         creditLimit: o.creditLimit,
         balance: o.balance,
+        advance: r2(o.advanceBalance), // Task 101
         creditStatus: cs.status,
         limitPct: cs.pct,
         overBy: cs.overBy,
@@ -108,7 +110,9 @@ export async function GET(req: Request) {
       overLimitShops: shops.filter((s) => s.creditStatus === 'OVER').length,
       overLimitAmount: r2(shops.reduce((t, s) => t + s.overBy, 0)),
       nearLimitShops: shops.filter((s) => s.creditStatus === 'NEAR').length,
-      advanceShops: shops.filter((s) => s.balance < -0.005).length, // negative balance = shop ke paas advance
+      // Task 101: advance ab Outlet.advanceBalance se (positive) — pehle negative balance se andaza tha
+      advanceShops: shops.filter((s) => s.advance > 0.005).length,
+      totalAdvance: r2(shops.reduce((t, s) => t + s.advance, 0)),
       over30Amount: aging[AGING_ORDER.indexOf('30+')].amount,
     }
 

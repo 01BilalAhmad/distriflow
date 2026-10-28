@@ -279,6 +279,11 @@ model Outlet {
   // balance = running udhaar (DEBIT − CREDIT, postLedgerEntry transactionally maintain karta hai;
   // balanceCheckedAt null = legacy outlet — pehli posting/credit-report par ledger se backfill hota hai)
   balance       Float               @default(0)
+  // Task 101: return advance — shop ke HAQ mein paisa (bill pehle hi cash-paid tha aur
+  // uske baad return hua). HAMESHA positive — shop ka ledger balance kabhi minus mein nahi
+  // jata (no-minus guard): return credit sirf outstanding tak, bachi raqam yahan. Agli
+  // settlement par auto-adjust (CREDIT 'ADVANCE' ledger row, FIFO return-wise detail ke sath)
+  advanceBalance Float              @default(0)
   creditLimit   Float               @default(0) // 0 = no limit; booking par warning (Finexa convention — block nahi)
   balanceCheckedAt DateTime?        // kabhi ledger se balance backfill/sync hua
   // Filer / Non-Filer (advance tax WHT): NTN ho to FILER warna NON_FILER
@@ -585,6 +590,9 @@ model SummarySettlement {
   order           Order           @relation(fields: [orderId], references: [id])
   billAmount      Float
   returnAmount    Float           @default(0)
+  // Task 101: is settlement par shop ke ADVANCE se kitna auto-adjust hua (info/audit —
+  // ledger CREDIT 'ADVANCE' row ka mirror; cash is se kam aata hai, udhaar sahi banta hai)
+  advanceAdjusted Float           @default(0)
   advanceTax      Float           @default(0) // WHT snapshot (order se)
   // Task 45: GST (effective, return reversal ke baad) + Trade Offer (effective) — late-return pro-rata isi se
   gstTotal        Float           @default(0)
@@ -642,6 +650,11 @@ model SaleReturn {
   type       String // DAMAGED | EXPIRED | UNSOLD
   status     String       @default("PENDING") // PENDING | APPROVED | REJECTED
   totalValue Float        @default(0)
+  // Task 101: no-minus guard — is return ki credit mein se jitna ledger udhaar mein adjust
+  // NAHI ho saka (bill already paid tha / outstanding kam tha), wo shop ke ADVANCE mein gaya
+  advancePosted   Float  @default(0)
+  // Task 101: us advance mein se agli settlement par kitna auto-adjust ho chuka (FIFO)
+  advanceConsumed Float  @default(0)
   reason     String?
   createdAt  DateTime     @default(now())
   items      ReturnItem[]

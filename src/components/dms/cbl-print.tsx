@@ -955,6 +955,20 @@ export function CblSettlementDoc({ detail }: { detail: SummaryDetailDTO }) {
             Net Payable = Bill − Stock Return + GST − Trade Offer + Adv Tax (Trade Offer breakup niche summary mein)
           </p>
         )}
+        {/* Task 101: Advance Adjust note — kis shop ka return advance is bill se kata
+            (user ki "chhoti detail": RET number + amount — ledger ADVANCE row ka mirror) */}
+        {detail.settlements.some((s) => (s.advanceAdjusted ?? 0) > 0.005) && (
+          <table style={{ fontSize: 8, marginTop: 3 }}><tbody>
+            {detail.settlements.filter((s) => (s.advanceAdjusted ?? 0) > 0.005).map((s) => (
+              <tr key={s.id} className="cbl-break-avoid">
+                <td style={{ border: 'none', textAlign: 'left' }}>
+                  <b>Advance Adjust:</b> {s.outletName} — Rs {(s.advanceAdjusted ?? 0).toFixed(2)}{' '}
+                  (shop ka return advance is bill se auto-adjust — cash isi se kam){s.notes ? ` • ${s.notes}` : ''}
+                </td>
+              </tr>
+            ))}
+          </tbody></table>
+        )}
 
         {/* SECTION B: item-wise return detail */}
         <p className="mb-1 mt-4 text-[11px] font-bold uppercase" style={{ letterSpacing: 0.5 }}>B) Return Detail (Item Wise)</p>

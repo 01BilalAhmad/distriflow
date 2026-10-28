@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
 import { requireUser } from '@/lib/api-auth'
 import { postLedgerEntry } from '@/lib/dms-credit'
+import { recalcSettlementRow } from '@/lib/dms-return-core'
 
 const round2 = (n: number) => Math.round(n * 100) / 100
 
@@ -60,6 +61,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const summary = await db.deliverySummary.findFirst({ where: { orders: { some: { id: orderId } } } })
     if (!summary) return jsonError('Is return ki summary nahi mili', 404)
+    // Task 101: settlement row lazmi — recalc (clamped credit) isi par hota hai
+    const st = await db.summarySettlement.findFirst({ where: { summaryId: summary.id, orderId } })
+    if (!st) return jsonError('Is return ki settlement row nahi mili', 404)
 
     const result = await db.$transaction(async (tx) => {
       // 1) Return record cancel — history mein rehta hai
@@ -87,42 +91,54 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       const gstRev = (order.gstTotal ?? 0) > 0 && order.total > 0 ? Math.min(round2((order.gstTotal ?? 0) * v / order.total), order.gstTotal ?? 0) : 0
       const toRev = (order.tradeOfferTotal ?? 0) > 0 && order.total > 0 ? Math.min(round2((order.tradeOfferTotal ?? 0) * v / order.total), order.tradeOfferTotal ?? 0) : 0
 
-      // 4) Settlement row recalc — return ke pehle wali state par wapas
-      let delta = 0
-      const st = await tx.summarySettlement.findFirst({ where: { summaryId: summary.id, orderId } })
-      if (st) {
-        const newReturn = Math.max(0, round2(st.returnAmount - v))
-        const newTax = round2(Math.min(order.advanceTax ?? 0, st.advanceTax + taxRev))
-        const newGst = round2(Math.min(order.gstTotal ?? 0, st.gstTotal + gstRev))
-        const newTo = round2(Math.min(order.tradeOfferTotal ?? 0, st.tradeOfferTotal + toRev))
-        const newNet = round2(st.billAmount - newReturn + newGst - newTo + newTax)
-        const newCredit = round2(newNet - st.cashAmount)
-        const newStatus = st.cashAmount <= 0 ? 'CREDIT' : st.cashAmount >= newNet ? 'CASH' : 'PARTIAL'
-        delta = round2(newCredit - st.creditAmount)
-        await tx.summarySettlement.update({
-          where: { id: st.id },
-          data: {
-            returnAmount: newReturn,
-            advanceTax: newTax,
-            gstTotal: newGst,
-            tradeOfferTotal: newTo,
-            creditAmount: newCredit,
-            status: newStatus,
-            notes: [st.notes, `${ret.returnNo} cancelled`].filter(Boolean).join(' • '),
-          },
+      // Task 101: ADVANCE reversal — is return ka jo advance abhi tak un-consumed bacha
+      // hai wo wapas hata do (shop ka faida khatam). Jo hissa ALREADY kharch ho chuka hai
+      // (agli bill se adjust ho gaya) wo ledger DEBIT se wapas aata hai — shop ne faida
+      // le liya tha, return undo par wo udhaar ban jata hai.
+      const advanceRemaining = Math.max(0, round2(ret.advancePosted - ret.advanceConsumed))
+      if (advanceRemaining > 0.005) {
+        const outletRow = await tx.outlet.findUnique({ where: { id: ret.outletId }, select: { advanceBalance: true } })
+        await tx.outlet.update({
+          where: { id: ret.outletId },
+          data: { advanceBalance: Math.max(0, round2((outletRow?.advanceBalance ?? 0) - advanceRemaining)) },
         })
       }
 
+      // 4) Settlement row recalc — return ke pehle wali state par wapas
+      // Task 101: recalcSettlementRow — creditAmount clamp (kabhi negative nahi) + exact delta
+      const recalc = recalcSettlementRow(
+        st,
+        { returnValue: -v, taxRev: -taxRev, gstRev: -gstRev, toRev: -toRev },
+      )
+      const delta = recalc.creditDelta
+      await tx.summarySettlement.update({
+        where: { id: st.id },
+        data: {
+          returnAmount: recalc.returnAmount,
+          advanceTax: recalc.advanceTax,
+          gstTotal: recalc.gstTotal,
+          tradeOfferTotal: recalc.tradeOfferTotal,
+          creditAmount: recalc.creditAmount,
+          status: recalc.status,
+          notes: [st.notes, `${ret.returnNo} cancelled`].filter(Boolean).join(' • '),
+        },
+      })
+
       // 5) Ledger — original RETURN credit ka exact inverse (DEBIT) — Task 98:
       // postLedgerEntry (balanceAfter + Outlet.balance transactional update)
-      const ledgerAmount = Math.max(0, round2(v + taxRev + gstRev - toRev))
+      // Task 101: advance ka hissa bhi — un-consumed advance ledger par tha hi nahi
+      // (skip hua tha), consumed hissa (agli bill se adjust) DEBIT se wapas aata hai
+      const ledgerAmount = Math.max(0, round2(v + taxRev + gstRev - toRev - ret.advancePosted + ret.advanceConsumed))
       await postLedgerEntry(tx, {
         outletId: ret.outletId,
         type: 'DEBIT',
         amount: ledgerAmount,
         refType: 'RETURN_CANCEL',
         refNo: ret.returnNo,
-        note: `Return cancelled — ghalti se return tha, stock + shop balance wapas • ${order.orderNo}`,
+        note: [
+          `Return cancelled — ghalti se return tha, stock + shop balance wapas • ${order.orderNo}`,
+          ret.advanceConsumed > 0 ? `Advance wapas Rs ${round2(ret.advanceConsumed).toFixed(2)} (udhaar bana)` : null,
+        ].filter(Boolean).join(' • '),
       })
 
       // 6) Summary totals

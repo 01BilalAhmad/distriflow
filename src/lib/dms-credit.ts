@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { r2 } from '@/lib/reports-kit-server'
-import type { Prisma } from '@prisma/client'
+import type { Prisma, PrismaClient } from '@prisma/client'
+import { planAdvanceConsumption, advanceNote, type AdvanceSource } from './dms-return-core'
 
 // ============================================================
 // Task 98 — CREDIT MANAGEMENT (Finexa mechanism, bill-driven)
@@ -115,6 +116,33 @@ interface PostLedgerArgs {
   date?: Date
 }
 
+/** Db ya transaction client — dono chalte hain (read-only helpers ke liye) */
+type AnyClient = Prisma.TransactionClient | PrismaClient
+
+/**
+ * postLedgerEntry jaisa HI base — legacy backfill logic included. Task 101: return
+ * posting se PEHLE outstanding parhne ke liye (splitReturnCredit ka input).
+ */
+export async function ledgerBase(tx: Prisma.TransactionClient, outletId: string): Promise<number> {
+  const outlet = await tx.outlet.findUnique({
+    where: { id: outletId },
+    select: { balance: true, balanceCheckedAt: true },
+  })
+  let base = r2(outlet?.balance ?? 0)
+  if (!outlet?.balanceCheckedAt) {
+    // legacy backfill — ledger hi source of truth (one-time per outlet)
+    const sums = await tx.outletLedger.groupBy({
+      by: ['type'],
+      where: { outletId },
+      _sum: { amount: true },
+    })
+    const deb = sums.find((s) => s.type === 'DEBIT')?._sum.amount ?? 0
+    const cre = sums.find((s) => s.type === 'CREDIT')?._sum.amount ?? 0
+    base = r2(deb - cre)
+  }
+  return base
+}
+
 /**
  * Ek hi jagah se ledger posting (Finexa mechanism):
  *  1. Legacy outlet (balanceCheckedAt null) → pehle poora ledger aggregate kar k
@@ -129,22 +157,7 @@ export async function postLedgerEntry(
   args: PostLedgerArgs,
 ): Promise<{ balanceAfter: number }> {
   const amount = r2(Math.max(0, args.amount))
-  const outlet = await tx.outlet.findUnique({
-    where: { id: args.outletId },
-    select: { balance: true, balanceCheckedAt: true },
-  })
-  let base = r2(outlet?.balance ?? 0)
-  if (!outlet?.balanceCheckedAt) {
-    // legacy backfill — ledger hi source of truth (one-time per outlet)
-    const sums = await tx.outletLedger.groupBy({
-      by: ['type'],
-      where: { outletId: args.outletId },
-      _sum: { amount: true },
-    })
-    const deb = sums.find((s) => s.type === 'DEBIT')?._sum.amount ?? 0
-    const cre = sums.find((s) => s.type === 'CREDIT')?._sum.amount ?? 0
-    base = r2(deb - cre)
-  }
+  const base = await ledgerBase(tx, args.outletId)
   const balanceAfter = r2(base + ledgerDelta(args.type, amount))
   await tx.outletLedger.create({
     data: {
@@ -220,4 +233,75 @@ export async function backfillBalances(distributorId: string): Promise<void> {
       data: { balance: bal.get(o.id) ?? 0, balanceCheckedAt: now },
     })
   }
+}
+
+// ============================================================
+// Task 101 — RETURN ADVANCE (no-minus guard ka shop floor)
+// Return ki credit agar shop ke outstanding se bari ho (bill pehle hi cash-paid
+// tha) to bachi raqam ledger ko MINUS karti nahi — Outlet.advanceBalance (positive)
+// mein jati hai. Agli settlement par FIFO auto-adjust (neeche consumeOutletAdvance).
+// Invariant: advanceBalance = Σ(approved returns: advancePosted − advanceConsumed)
+// ============================================================
+
+/**
+ * Shop ke un-consumed advance sources — FIFO (purana return pehle).
+ * bill-options dropdown + settlement form ki "chhoti detail" isi se aati hai.
+ */
+export async function advanceSources(client: AnyClient, outletId: string): Promise<AdvanceSource[]> {
+  const rows = await client.saleReturn.findMany({
+    where: { outletId, status: 'APPROVED', advancePosted: { gt: 0 } },
+    select: {
+      id: true, returnNo: true, advancePosted: true, advanceConsumed: true,
+      order: { select: { orderNo: true } },
+    },
+    orderBy: { createdAt: 'asc' },
+  })
+  return rows
+    .map((rw) => ({
+      returnId: rw.id,
+      returnNo: rw.returnNo,
+      orderNo: rw.order?.orderNo ?? null,
+      available: r2(Math.max(0, rw.advancePosted - rw.advanceConsumed)),
+    }))
+    .filter((rw) => rw.available > 0.005)
+}
+
+/**
+ * Advance auto-adjust — settlement ke waqt shop ke advance se utna kaato jitna
+ * naye bill par payable hai (FIFO, return-wise detail note ke sath).
+ * Effects (caller ke transaction mein):
+ *  1. SaleReturn.advanceConsumed increment (provenance — kis return ka kitna kharch)
+ *  2. Outlet.advanceBalance decrement
+ *  3. Ledger CREDIT 'ADVANCE' row (note = RET-xxx (ORD-yyy) Rs z detail)
+ * @returns used — kitna advance laga; note — sheet/form par dikhane wali detail
+ */
+export async function consumeOutletAdvance(
+  tx: Prisma.TransactionClient,
+  outletId: string,
+  upto: number,
+  refNo: string,
+): Promise<{ used: number; note: string | null }> {
+  const sources = await advanceSources(tx, outletId)
+  if (sources.length === 0) return { used: 0, note: null }
+  const plan = planAdvanceConsumption(sources, upto)
+  if (plan.used <= 0.005) return { used: 0, note: null }
+  for (const a of plan.allocations) {
+    await tx.saleReturn.update({
+      where: { id: a.returnId },
+      data: { advanceConsumed: { increment: a.amount } },
+    })
+  }
+  const outlet = await tx.outlet.findUnique({ where: { id: outletId }, select: { advanceBalance: true } })
+  const newAdvance = Math.max(0, r2((outlet?.advanceBalance ?? 0) - plan.used))
+  await tx.outlet.update({ where: { id: outletId }, data: { advanceBalance: newAdvance } })
+  const note = advanceNote(plan.allocations)
+  await postLedgerEntry(tx, {
+    outletId,
+    type: 'CREDIT',
+    amount: plan.used,
+    refType: 'ADVANCE',
+    refNo,
+    note,
+  })
+  return { used: plan.used, note }
 }

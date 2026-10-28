@@ -1,6 +1,8 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
 import { requireUser, tenantMismatch } from '@/lib/api-auth'
+import { advanceSources } from '@/lib/dms-credit'
+import { r2c } from '@/lib/dms-return-core'
 
 /** GET /api/summaries/[id] — full detail: invoices, product load summary, settlements */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -69,6 +71,26 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       returnsByOrder.set(r.orderId, list)
     }
 
+    // Task 101: shops ka un-consumed return advance — settlement form par deduction
+    // line ("kis cheez ki deduction hai") isi se dikhti hai (FIFO sources ke sath)
+    const outletIds = [...new Set(summary.orders.map((o) => o.outletId))]
+    const advanceByOutlet = new Map<string, { balance: number; sources: { returnNo: string; orderNo: string | null; available: number }[] }>()
+    if (outletIds.length > 0) {
+      const advOutlets = await db.outlet.findMany({
+        where: { id: { in: outletIds }, advanceBalance: { gt: 0.005 } },
+        select: { id: true, advanceBalance: true },
+      })
+      for (const ao of advOutlets) {
+        const sources = await advanceSources(db, ao.id)
+        if (sources.length > 0) {
+          advanceByOutlet.set(ao.id, {
+            balance: r2c(ao.advanceBalance),
+            sources: sources.map((s) => ({ returnNo: s.returnNo, orderNo: s.orderNo, available: s.available })),
+          })
+        }
+      }
+    }
+
     return Response.json({
       summary: {
         id: summary.id,
@@ -106,6 +128,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           status: o.status,
           orderDate: new Date(o.orderDate).toISOString(),
           settled: o.settlements.length > 0,
+          outletAdvance: advanceByOutlet.get(o.outlet.id) ?? null,
           items: o.items.map((it) => ({
             id: it.id,
             productId: it.productId,
@@ -139,6 +162,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           outletName: st.outlet.name,
           billAmount: st.billAmount,
           returnAmount: st.returnAmount,
+          advanceAdjusted: st.advanceAdjusted, // Task 101: advance auto-adjust (sheet print par line)
           advanceTax: st.advanceTax,
           gstTotal: st.gstTotal, // Task 80: settlement sheet Net Payable = bill − ret + GST − TO + tax
           tradeOfferTotal: st.tradeOfferTotal,

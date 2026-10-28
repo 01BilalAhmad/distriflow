@@ -322,7 +322,10 @@ export async function POST(req: Request) {
     // against: OK / NEAR (80%+) / OVER. Warning sirf UI badge ke liye — order bilkul
     // normal banta hai (creditLimit 0 = no limit).
     const currentBalance = await ensureOutletBalance(outlet.id)
-    const maxExposure = Math.round((currentBalance + payable) * 100) / 100
+    // Task 101: shop ka return advance agli settlement par is bill se khud adjust
+    // ho jata hai — warning usi hisab se (kam effective exposure)
+    const outletAdvance = Math.max(0, outlet.advanceBalance ?? 0)
+    const maxExposure = Math.max(0, Math.round((currentBalance + payable - outletAdvance) * 100) / 100)
     const cs = creditStatus(maxExposure, outlet.creditLimit)
     const creditWarning = cs.status === 'NONE' ? null : {
       status: cs.status,

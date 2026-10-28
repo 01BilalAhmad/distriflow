@@ -307,13 +307,14 @@ function LateReturnDialog({ summaryId, onClose, onDone }: {
       const items = order.items
         .map((it) => ({ productId: it.productId, qty: qtys[it.productId] ?? 0 }))
         .filter((x) => x.qty > 0)
-      const r = await api<{ return: { returnNo: string; totalValue: number; taxReversal?: number; outletName: string; creditAmount: number } }>(
+      const r = await api<{ return: { returnNo: string; totalValue: number; taxReversal?: number; outletName: string; creditAmount: number; advancePosted?: number } }>(
         `/api/summaries/${summaryId}/late-return`,
         { method: 'POST', body: JSON.stringify({ userId: user?.id, orderId: order.id, reason, items }) },
       )
       toast({
+        // Task 101: no-minus — advance bani to wo dikhao (creditAmount ab kabhi negative nahi)
         title: `Late Return ${r.return.returnNo} ✓`,
-        description: `${r.return.outletName}: ${fmtPKR(r.return.totalValue)} wapas${r.return.taxReversal ? ` + adv tax ${fmtPKR(r.return.taxReversal)} reversal` : ''} — stock warehouse mein, shop balance cum ho gaya${r.return.creditAmount < 0 ? ` (ab shop ko ${fmtPKR(Math.abs(r.return.creditAmount))} wapas karne hain)` : ''}`,
+        description: `${r.return.outletName}: ${fmtPKR(r.return.totalValue)} wapas${r.return.taxReversal ? ` + adv tax ${fmtPKR(r.return.taxReversal)} reversal` : ''} — stock warehouse mein, shop balance cum ho gaya${(r.return.advancePosted ?? 0) > 0 ? ` • Rs ${fmtPKR(r.return.advancePosted!)} shop ke ADVANCE mein (agli bill se auto-adjust)` : ''}`,
       })
       onDone(summaryId)
     } catch (e) {
@@ -569,7 +570,18 @@ export function SettlementView() {
       // default: sab full cash (bill + advance tax), koi return nahi
       const init: Record<string, SettleRow> = {}
       // Task 45: default cash = grand payable (goods − TO + GST + adv tax) — booking chain jaisa
-      for (const o of r.summary.orders) init[o.id] = { cash: String(orderNetPayable(o, 0).net) }
+      // Task 101: shop ka return advance bhi auto-adjust dikhao — default cash = net − advance
+      const advRem = new Map<string, number>()
+      for (const o of r.summary.orders) {
+        const net = orderNetPayable(o, 0).net
+        let advUse = 0
+        if (o.outletAdvance && o.outletAdvance.balance > 0.005) {
+          const rem = advRem.get(o.outletId) ?? o.outletAdvance.balance
+          advUse = Math.min(rem, net)
+          advRem.set(o.outletId, Math.max(0, rem - advUse))
+        }
+        init[o.id] = { cash: String(Math.round((net - advUse) * 100) / 100) }
+      }
       setCashInputs(init)
       setRetInputs({})
     } catch (e) {
@@ -587,6 +599,9 @@ export function SettlementView() {
 
   const rows = useMemo(() => {
     if (!detail) return []
+    // Task 101: advance FIFO preview — per outlet running balance, order sequence mein
+    // consume. (API settle par yehi authoritative karta hai — UI sirf preview/deta dikhata hai)
+    const advRem = new Map<string, { balance: number; sources: { returnNo: string; orderNo: string | null; available: number }[] }>()
     return detail.orders.map((o) => {
       const d = retInputs[o.id]
       let returnValue = 0
@@ -602,11 +617,40 @@ export function SettlementView() {
       const bill = o.total
       const parts = orderNetPayable(o, returnValue)
       const net = parts.net
-      const cash = Math.max(0, Math.min(Number(cashInputs[o.id]?.cash ?? net) || 0, net))
+
+      // Task 101: advance auto-adjust preview (FIFO, return-wise chhoti detail ke sath)
+      let advUse = 0
+      let advDetail: string | null = null
+      if (o.outletAdvance && o.outletAdvance.balance > 0.005) {
+        let st = advRem.get(o.outletId)
+        if (!st) {
+          st = { balance: o.outletAdvance.balance, sources: o.outletAdvance.sources.map((s) => ({ ...s })) }
+          advRem.set(o.outletId, st)
+        }
+        if (st.balance > 0.005 && net > 0) {
+          advUse = Math.min(st.balance, net)
+          let rem = advUse
+          const usedParts: string[] = []
+          for (const s of st.sources) {
+            if (rem <= 0.005) break
+            const take = Math.min(s.available, rem)
+            if (take <= 0.005) continue
+            usedParts.push(`${s.returnNo}${s.orderNo ? ` (${s.orderNo})` : ''} ${fmtPKR(take)}`)
+            s.available = Math.max(0, s.available - take)
+            rem = Math.max(0, rem - take)
+          }
+          advDetail = usedParts.length > 1 ? `${usedParts[0]} +${usedParts.length - 1} aur` : (usedParts[0] ?? null)
+          st.balance = Math.max(0, Math.round((st.balance - advUse) * 100) / 100)
+        }
+      }
+
+      const cash = Math.max(0, Math.min(Number(cashInputs[o.id]?.cash ?? net) || 0, Math.round((net - advUse) * 100) / 100))
       return {
-        order: o, bill, returnValue, returnQty, tax: parts.tax, taxReversal: parts.taxRev, gst: parts.gst, gstRev: parts.gstRev, to: parts.to, toRev: parts.toRev, net, cash,
-        credit: Math.round((net - cash) * 100) / 100,
-        status: cash <= 0 ? 'CREDIT' : cash >= net ? 'CASH' : 'PARTIAL',
+        order: o, bill, returnValue, returnQty, tax: parts.tax, taxReversal: parts.taxRev, gst: parts.gst, gstRev: parts.gstRev, to: parts.to, toRev: parts.toRev, net,
+        advUse, advDetail,
+        cash,
+        credit: Math.round((net - advUse - cash) * 100) / 100,
+        status: cash <= 0 && advUse <= 0 ? 'CREDIT' : cash + advUse >= net ? 'CASH' : 'PARTIAL',
       }
     })
   }, [detail, cashInputs, retInputs])
@@ -614,6 +658,7 @@ export function SettlementView() {
   const totalCash = rows.reduce((s, r) => s + r.cash, 0)
   const totalCredit = rows.reduce((s, r) => s + r.credit, 0)
   const totalReturns = rows.reduce((s, r) => s + r.returnValue, 0)
+  const totalAdvUse = rows.reduce((s, r) => s + (r.advUse ?? 0), 0)
   const totalTax = rows.reduce((s, r) => s + r.tax, 0)
   const totalPayable = rows.reduce((s, r) => s + r.net, 0)
 
@@ -820,6 +865,9 @@ export function SettlementView() {
                             {(r.returnValue > 0 || r.tax > 0 || r.gst > 0 || r.to > 0) && (
                               <p className="text-[10px] text-orange-600">Bill {fmtPKR(r.bill)}{r.returnValue > 0 ? ` − Ret ${fmtPKR(r.returnValue)}` : ''}{r.gst > 0 ? ` + GST ${fmtPKR(r.gst)}` : ''}{r.to > 0 ? ` − TO ${fmtPKR(r.to)}` : ''}{r.tax > 0 ? ` + Tax ${fmtPKR(r.tax)}` : ''}{r.taxReversal > 0 ? <span className="text-blue-500"> (−{fmtPKR(r.taxReversal)} rev)</span> : ''}</p>
                             )}
+                            {r.advUse > 0 && (
+                              <p className="text-[10px] text-emerald-600 font-semibold" title="Shop ka return advance — bill se auto-adjust (FIFO)">Advance −{fmtPKR(r.advUse)} • {r.advDetail}</p>
+                            )}
                             {r.credit > 0 && <p className="text-[10px] text-red-600 font-semibold">Udhaar {fmtPKR(r.credit)}</p>}
                           </div>
                         </div>
@@ -831,7 +879,7 @@ export function SettlementView() {
                           <Input type="number" min={0} max={r.net} value={cashInputs[r.order.id]?.cash ?? ''} onChange={(e) => setCash(r.order.id, e.target.value)} placeholder="Cash received" className="h-9 text-right text-sm flex-1 min-w-0" />
                         </div>
                         <div className="flex justify-end gap-1.5">
-                          <Button size="sm" variant="outline" className="h-7 text-[11px] px-2" onClick={() => fullCash(r.order.id, r.net)}>Full Cash</Button>
+                          <Button size="sm" variant="outline" className="h-7 text-[11px] px-2" onClick={() => fullCash(r.order.id, r.net - r.advUse)}>Full Cash</Button>
                           <Button size="sm" variant="outline" className="h-7 text-[11px] px-2 text-red-600 border-red-200 hover:bg-red-50" onClick={() => fullUdhaar(r.order.id)}>Udhaar</Button>
                         </div>
                       </div>
@@ -869,6 +917,9 @@ export function SettlementView() {
                             ) : (
                               <p className="font-semibold">{fmtPKR(r.bill)}</p>
                             )}
+                            {r.advUse > 0 && (
+                              <p className="text-[10px] text-emerald-600 font-semibold" title="Shop ka return advance — bill se auto-adjust (FIFO)">Advance −{fmtPKR(r.advUse)} • {r.advDetail}</p>
+                            )}
                           </TableCell>
                           <TableCell className="text-center">
                             {r.returnQty > 0 ? (
@@ -892,7 +943,7 @@ export function SettlementView() {
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex justify-end gap-1">
-                              <Button size="sm" variant="outline" className="h-7 text-[11px] px-2" onClick={() => fullCash(r.order.id, r.net)}>Full Cash</Button>
+                              <Button size="sm" variant="outline" className="h-7 text-[11px] px-2" onClick={() => fullCash(r.order.id, r.net - r.advUse)}>Full Cash</Button>
                               <Button size="sm" variant="outline" className="h-7 text-[11px] px-2 text-red-600 border-red-200 hover:bg-red-50" onClick={() => fullUdhaar(r.order.id)}>Udhaar</Button>
                             </div>
                           </TableCell>
@@ -909,6 +960,9 @@ export function SettlementView() {
                     <div><p className="text-[11px] text-slate-400 uppercase">Total Cash</p><p className="font-bold text-emerald-700 text-lg">{fmtPKR(totalCash)}</p></div>
                     {totalReturns > 0 && (
                       <div><p className="text-[11px] text-slate-400 uppercase">Total Return</p><p className="font-bold text-orange-600 text-lg">{fmtPKR(totalReturns)}</p></div>
+                    )}
+                    {totalAdvUse > 0 && (
+                      <div><p className="text-[11px] text-slate-400 uppercase">Advance Adjust</p><p className="font-bold text-emerald-600 text-lg">−{fmtPKR(totalAdvUse)}</p></div>
                     )}
                     <div><p className="text-[11px] text-slate-400 uppercase">Total Udhaar</p><p className="font-bold text-red-600 text-lg">{fmtPKR(totalCredit)}</p></div>
                   </div>

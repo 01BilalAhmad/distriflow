@@ -1,8 +1,7 @@
 import { db } from '@/lib/db'
 import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
 import { requireUser, tenantMismatch } from '@/lib/api-auth'
-import { restockStock } from '@/lib/dms-inventory'
-import { postLedgerEntry } from '@/lib/dms-credit'
+import { applyBillReturnEffects } from '@/lib/dms-return-effects'
 
 interface LateReturnItem { productId: string; qty: number }
 interface LateReturnBody {
@@ -20,10 +19,11 @@ const round2 = (v: number) => Math.round(v * 100) / 100
  * (ghalti se settlement ke waqt return reh gaya ho). Effects (ONE transaction):
  *  - SaleReturn (RET-, auto-APPROVED) + ReturnItems @ original bill rate
  *  - Restock into summary (van) warehouse
- *  - OutletLedger CREDIT (RETURN) — shop ka balance cum ho jata hai
+ *  - OutletLedger CREDIT (RETURN) — Task 101 NO-MINUS: credit sirf outstanding tak;
+ *    bachi raqam shop ke ADVANCE mein (Outlet.advanceBalance) — balance kabhi minus nahi
  *  - SummarySettlement (usi order ka): returnAmount/creditAmount update + status recompute
  *    => Settlement Sheet reprint par Section A/B/totals sab consistent rehte hain
- *  - Summary totals: settledReturns += value, settledCredit -= value (negative = shop ko wapasi)
+ *  - Summary totals: settledReturns += value, settledCredit += exact creditDelta
  * Cap: per product returnable = billed qty - (settlement + pichle late returns, APPROVED)
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -91,13 +91,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (lines.length === 0) return jsonError('Return qty 0 hai')
     returnValue = round2(returnValue)
 
-    // Task 95: actor cookie user se (pehle body.userId se aata tha)
     const actorName = user.name
+
+    // Task 101: settlement row lazmi — effects (pro-rata caps + no-minus split) isi par
+    const st = await db.summarySettlement.findFirst({ where: { summaryId: summary.id, orderId: order.id } })
+    if (!st) return jsonError('Is bill ki settlement row nahi mili — pehle settlement check karein')
 
     const result = await db.$transaction(async (tx) => {
       const seq = await nextSeq('return', tx)
       const returnNo = `RET-${seq}`
-      await tx.saleReturn.create({
+      const ret = await tx.saleReturn.create({
         data: {
           returnNo,
           outletId: order.outletId,
@@ -110,91 +113,35 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         },
       })
 
-      // Stock wapas summary (van) warehouse mein
-      for (const l of lines) {
-        await restockStock(summary.warehouseId, l.productId, l.qty, `Late return ${returnNo} — ${order.orderNo}`, user.id, tx)
-      }
-
-      // Task 29: settlement row pehle load — pro-rata tax reversal isi se compute hota hai
-      const st = await tx.summarySettlement.findFirst({ where: { summaryId: summary.id, orderId: order.id } })
-      // Advance tax PRO-RATA reversal — order ke ORIGINAL full tax par rate (bill total base),
-      // cap = baqi bacha hua tax (kabhi negative nahi ho sakta — discount drift se protection)
-      const taxReversal = st && st.advanceTax > 0 && order.advanceTax > 0 && order.total > 0
-        ? Math.min(round2(order.advanceTax * returnValue / order.total), st.advanceTax)
-        : 0
-      // Task 45: GST + Trade Offer — SAME pro-rata pattern. GST wapas milta hai (credit +),
-      // Trade Offer wapas LENA hai (credit −, shop TO benefit returned goods ka kho deta hai)
-      const gstReversal = st && st.gstTotal > 0 && order.gstTotal > 0 && order.total > 0
-        ? Math.min(round2(order.gstTotal * returnValue / order.total), st.gstTotal)
-        : 0
-      const toReversal = st && st.tradeOfferTotal > 0 && order.tradeOfferTotal > 0 && order.total > 0
-        ? Math.min(round2(order.tradeOfferTotal * returnValue / order.total), st.tradeOfferTotal)
-        : 0
-
-      // Shop ledger CREDIT — goods value + tax/GST reversal − TO reversal (Task 98:
-      // postLedgerEntry — balanceAfter + Outlet.balance transactional update)
-      await postLedgerEntry(tx, {
+      // Task 101: restock + pro-rata reversals + NO-MINUS ledger split (advance) +
+      // settlement row + summary totals — sab ek shared helper mein (bill-linked
+      // Return & Claims flow bhi YEHHI use karta hai — ek hi math, koi tafawat nahi)
+      const fx = await applyBillReturnEffects(tx, {
+        returnId: ret.id,
+        returnNo,
         outletId: order.outletId,
-        type: 'CREDIT',
-        amount: Math.max(0, round2(returnValue + taxReversal + gstReversal - toReversal)),
-        refType: 'RETURN',
-        refNo: returnNo,
-        note: [
-          `Late stock return after settlement (${reason})`,
-          taxReversal > 0 ? `Adv tax reversal Rs ${taxReversal.toFixed(2)}` : null,
-          gstReversal > 0 ? `GST reversal Rs ${gstReversal.toFixed(2)}` : null,
-          toReversal > 0 ? `Trade offer reversal Rs ${toReversal.toFixed(2)}` : null,
-          `• ${order.orderNo}`,
-        ].filter(Boolean).join(' • '),
+        order: { id: order.id, orderNo: order.orderNo, total: order.total, advanceTax: order.advanceTax, gstTotal: order.gstTotal, tradeOfferTotal: order.tradeOfferTotal },
+        st,
+        warehouseId: summary.warehouseId,
+        lines,
+        userId: user.id,
+        contextNote: `Late stock return after settlement (${reason})`,
       })
 
-      // Settlement row update — sheet reprint consistent rahe
-      let newCredit = 0
-      let newStatus = 'CASH'
-      if (st) {
-        const newReturn = round2(st.returnAmount + returnValue)
-        const newTax = round2(st.advanceTax - taxReversal)
-        const newGst = round2(st.gstTotal - gstReversal)
-        const newTo = round2(st.tradeOfferTotal - toReversal)
-        const newNet = round2(st.billAmount - newReturn + newGst - newTo + newTax)
-        newCredit = round2(newNet - st.cashAmount)
-        newStatus = st.cashAmount <= 0 ? 'CREDIT' : st.cashAmount >= newNet ? 'CASH' : 'PARTIAL'
-        await tx.summarySettlement.update({
-          where: { id: st.id },
-          data: {
-            returnAmount: newReturn,
-            advanceTax: newTax,
-            gstTotal: newGst,
-            tradeOfferTotal: newTo,
-            creditAmount: newCredit,
-            status: newStatus,
-            notes: [st.notes, `Late ${returnNo}`].filter(Boolean).join(' • '),
-          },
-        })
-      }
-
-      // Summary totals — return goods value; credit goods + tax reversal dono se kam
-      const updated = await tx.deliverySummary.update({
-        where: { id: summary.id },
-        data: {
-          settledReturns: round2(summary.settledReturns + returnValue),
-          settledCredit: round2(summary.settledCredit - returnValue - taxReversal),
-        },
-      })
-
-      return { returnNo, credit: newCredit, taxReversal, settledReturns: updated.settledReturns, settledCredit: updated.settledCredit }
+      return { returnNo, fx }
     }, { timeout: 20000 })
 
     return Response.json({
       return: {
         returnNo: result.returnNo,
         totalValue: returnValue,
-        taxReversal: result.taxReversal,
+        taxReversal: result.fx.taxRev,
         outletName: order.outlet.name,
         orderNo: order.orderNo,
-        creditAmount: result.credit,
-        settledReturns: result.settledReturns,
-        settledCredit: result.settledCredit,
+        // Task 101: no-minus — creditAmount kabhi negative nahi; bachi raqam advance
+        creditAmount: result.fx.newCreditAmount,
+        advancePosted: result.fx.advancePosted,
+        totalCredit: result.fx.totalCredit,
       },
     })
   } catch (e) {

@@ -2,7 +2,7 @@ import { db } from '@/lib/db'
 import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
 import { requireUser, tenantMismatch } from '@/lib/api-auth'
 import { restockStock } from '@/lib/dms-inventory'
-import { postLedgerEntry } from '@/lib/dms-credit'
+import { postLedgerEntry, consumeOutletAdvance } from '@/lib/dms-credit'
 
 interface SettleReturnItem { productId: string; qty: number }
 interface SettleReturn { reason?: string; items: SettleReturnItem[] }
@@ -144,27 +144,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
         // Grand payable = goods − return + GST − trade offer + adv tax (booking chain jaisa)
         const netPayable = Math.round((bill - returnValue + gstEff - toEff + advTax) * 100) / 100
-        const cash = Math.max(0, Math.min(Number(s.cashAmount) || 0, netPayable))
-        const credit = Math.round((netPayable - cash) * 100) / 100
-        const st = cash <= 0 ? 'CREDIT' : cash >= netPayable ? 'CASH' : 'PARTIAL'
-
-        // 1) Settlement row
-        await tx.summarySettlement.create({
-          data: {
-            summaryId: summary.id,
-            outletId: order.outletId,
-            orderId: order.id,
-            billAmount: bill,
-            returnAmount: returnValue,
-            advanceTax: advTax,
-            gstTotal: gstEff,
-            tradeOfferTotal: toEff,
-            cashAmount: cash,
-            creditAmount: credit,
-            status: st,
-            notes: [s.notes ?? null, returnNo ? `Return ${returnNo}` : null].filter(Boolean).join(' • ') || null,
-          },
-        })
 
         // 2) Ledger: DEBIT invoice (full GST − full TO + full advance tax — invoice jaisi bani),
         //    CREDIT return value + tax/GST reversal − TO reversal, CREDIT cash received
@@ -185,6 +164,36 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           refNo: order.orderNo,
           note: debitNotes,
         })
+
+        // Task 101: shop ka ADVANCE auto-adjust (FIFO, return-wise detail note) —
+        // DEBIT ke BAAD post hota hai taake balance kabhi minus na ho. Cash is se
+        // kam aata hai (shop kam deti hai), udhaar/ledger bilkul sahi banta hai.
+        const adv = await consumeOutletAdvance(tx, order.outletId, netPayable, summary.summaryNo)
+        const advUse = adv.used
+
+        const cash = Math.max(0, Math.min(Number(s.cashAmount) || 0, Math.round((netPayable - advUse) * 100) / 100))
+        const credit = Math.round((netPayable - advUse - cash) * 100) / 100
+        const st = cash <= 0 && advUse <= 0 ? 'CREDIT' : cash + advUse >= netPayable ? 'CASH' : 'PARTIAL'
+
+        // 1) Settlement row
+        await tx.summarySettlement.create({
+          data: {
+            summaryId: summary.id,
+            outletId: order.outletId,
+            orderId: order.id,
+            billAmount: bill,
+            returnAmount: returnValue,
+            advanceAdjusted: advUse,
+            advanceTax: advTax,
+            gstTotal: gstEff,
+            tradeOfferTotal: toEff,
+            cashAmount: cash,
+            creditAmount: credit,
+            status: st,
+            notes: [s.notes ?? null, returnNo ? `Return ${returnNo}` : null, adv.note ? `Advance: ${adv.note}` : null].filter(Boolean).join(' • ') || null,
+          },
+        })
+
         if (returnValue > 0 && returnNo) {
           const returnCredit = Math.round((returnValue + gstReversal + taxReversal - toReversal) * 100) / 100
           const returnNotes = [
