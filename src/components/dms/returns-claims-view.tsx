@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -20,6 +20,8 @@ import { toast } from '@/hooks/use-toast'
 
 const round2v = (n: number) => Math.round(n * 100) / 100
 const STANDALONE = '__standalone__'
+/** Task 103-b: booker dropdown ka "bina booker" option — unassigned shops ke liye */
+const UNASSIGNED = '__unassigned__'
 
 export function ReturnsClaimsView() {
   const user = useDMS((s) => s.user)
@@ -204,6 +206,8 @@ function NewReturnDialog({ open, onOpenChange, onCreated }: { open: boolean; onO
   const user = useDMS((s) => s.user)
   const [outlets, setOutlets] = useState<OutletDTO[]>([])
   const [products, setProducts] = useState<ProductDTO[]>([])
+  // Task 103-b: pehle ORDER BOOKER select — phir usi ki assigned shops (galat shop guard)
+  const [bookerId, setBookerId] = useState('')
   const [outletId, setOutletId] = useState('')
   const [type, setType] = useState('DAMAGED')
   const [reason, setReason] = useState('')
@@ -219,10 +223,31 @@ function NewReturnDialog({ open, onOpenChange, onCreated }: { open: boolean; onO
 
   useEffect(() => {
     if (!open || !user) return
-    setOutletId(''); setLines([]); setReason(''); setBillId(''); setBillQtys({}); setBillOpts(null); setFullBill(false)
+    setBookerId(''); setOutletId(''); setLines([]); setReason(''); setBillId(''); setBillQtys({}); setBillOpts(null); setFullBill(false)
     api<{ outlets: OutletDTO[] }>(`/api/outlets?userId=${user.id}`).then((r) => setOutlets(r.outlets)).catch(() => {})
     api<{ products: ProductDTO[] }>(`/api/products?userId=${user.id}`).then((r) => setProducts(r.products)).catch(() => {})
   }, [open, user])
+
+  // Task 103-b: booker list outlets se derive (OutletDTO.salesmanId/Name API se aata hai) —
+  // ek hi booker ho (e.g. SALESMAN khud) to auto-select
+  const bookers = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const o of outlets) if (o.salesmanId && o.salesmanName) m.set(o.salesmanId, o.salesmanName)
+    return [...m.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
+  }, [outlets])
+  const unassignedCount = outlets.filter((o) => !o.salesmanId).length
+  useEffect(() => {
+    if (open && bookers.length === 1 && !bookerId) setBookerId(bookers[0].id)
+  }, [open, bookers, bookerId])
+  // Sirf selected booker ki ASSIGNED shops (user rule: "galat shop main return na ho")
+  const visibleOutlets = outlets.filter((o) =>
+    bookerId === UNASSIGNED ? !o.salesmanId : bookerId ? o.salesmanId === bookerId : false,
+  )
+
+  function pickBooker(v: string) {
+    setBookerId(v)
+    setOutletId(''); setBillOpts(null); setBillId(''); setBillQtys({}); setFullBill(false)
+  }
 
   // Outlet change => settled bills + shop advance info (chhoti detail)
   useEffect(() => {
@@ -329,10 +354,34 @@ function NewReturnDialog({ open, onOpenChange, onCreated }: { open: boolean; onO
           <DialogDescription>Bill select kar ke usi bill ka maal wapas karein (full amount + taxes) — ya bina bill general return</DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
+          {/* Task 103-b: ORDER BOOKER pehle — phir usi ki assigned shops hi dropdown mein */}
+          <div className="grid gap-1.5"><Label>Order Booker (Route)</Label>
+            <Select value={bookerId} onValueChange={pickBooker}>
+              <SelectTrigger><SelectValue placeholder="Pehle order booker select karein" /></SelectTrigger>
+              <SelectContent>
+                {bookers.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                {unassignedCount > 0 && (
+                  <SelectItem value={UNASSIGNED}>Bina booker — unassigned shops ({unassignedCount})</SelectItem>
+                )}
+                {bookers.length === 0 && unassignedCount === 0 && (
+                  <SelectItem value="__nobookers__" disabled>Koi order booker/shop nahi</SelectItem>
+                )}
+              </SelectContent>
+            </Select>
+            {bookerId && bookerId !== UNASSIGNED && (
+              <p className="text-[11px] text-slate-400">{visibleOutlets.length} shop(s) is booker ke route par hain — sirf yehi select ho sakti hain</p>
+            )}
+          </div>
+
           <div className="grid gap-1.5"><Label>Outlet (Shop)</Label>
-            <Select value={outletId} onValueChange={setOutletId}>
-              <SelectTrigger><SelectValue placeholder="Select outlet" /></SelectTrigger>
-              <SelectContent>{outlets.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}</SelectContent>
+            <Select value={outletId} onValueChange={setOutletId} disabled={!bookerId}>
+              <SelectTrigger><SelectValue placeholder={bookerId ? 'Select outlet' : 'Pehle order booker select karein'} /></SelectTrigger>
+              <SelectContent>
+                {visibleOutlets.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
+                {bookerId && visibleOutlets.length === 0 && (
+                  <SelectItem value="__noshops__" disabled>Is booker ki koi assigned shop nahi</SelectItem>
+                )}
+              </SelectContent>
             </Select>
           </div>
 
