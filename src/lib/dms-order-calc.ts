@@ -15,6 +15,10 @@ export interface CalcProduct {
   gstRate?: number
   /** Task 55: category-wide scheme match — Product.category string isi se compare hota hai */
   category?: string | null
+  /** Task 26: company ka TAX MODE (product.company.taxMode se aata hai) —
+   * 'INVOICE_DISCOUNT' = Trade Offer pehle minus, GST (net − TO) par (Noms/SalesFlo style);
+   * undefined/'CLAIM' = GST line net par, TO baad me minus (purana behaviour). */
+  taxMode?: string | null
 }
 
 export interface CalcScheme {
@@ -98,6 +102,10 @@ export interface CalcLine {
   gstRate: number | null
   gstAmt: number
   lineTotal: number
+  /** Task 26: is line ke company ka tax mode (GST base rule) — applyManualMerge isi se
+   * merged net par dobara GST lagata hai. Persist NAHI hota (Order.taxMode snapshot
+   * order-level par hai); sirf calc-chain ke liye. */
+  taxMode?: string | null
   /** Task 52: manual (order-level) discount ka is line ka hissa (pro-rata by net).
    * lineTotal = gross − discount − manualShare (merged net) — order.total ka EXACT column total.
    * Pass On column = discount + manualShare (bill par scheme + manual dono dikhte hain). */
@@ -253,20 +261,30 @@ export function computeOrderLines(
       ? stack.map((s) => s.name).filter(Boolean).join(' + ')
       : applied?.name ?? null
 
+    // ---- Task 45: Trade Offer (per-SKU Rs, discount ke ilawa) ----
+    // Task 26: Mode A (INVOICE_DISCOUNT) mein GST base ke andar jata hai — is liye
+    // GST se PEHLE compute hota hai (Task 26 se pehle GST baad me tha, same result).
+    const tradeOfferAmt = Math.max(0, Math.round((Number(item.tradeOffer) || 0) * 100) / 100)
+
     // ---- Task 45: GST (purchase invoice jaisa chain) ----
     // GST base = line net (gross − scheme discount) — trade offer/manual discount base NAHI
     // badalte (purchase invoice: GST net excl. tax par, TO baad me minus). Rate snapshot:
     // existing line apna booked rate rakhti hai, nayi line product ke current rate se.
     // gstEnabled=false product par GST 0 — rate Products page se aata hai, hardcoded nahi.
+    // ---- Task 26: TAX MODE — company-level GST/Trade-Offer timing ----
+    //   CLAIM (default): GST base = net (gross − scheme) — TO baad me minus (purana rule)
+    //   INVOICE_DISCOUNT: TO pehle minus → GST base = (net − TO) — Noms/SalesFlo invoice
+    //     jaisa ladder (Gross → Offers → Net → GST). Per-line hai kyunki TO bhi per-SKU hai:
+    //     mixed order mein A-mode lines net−TO par, CLAIM lines net par GST lagti hai.
+    //     Clamp 0: TO > net ho to line GST 0 (extra TO dusri lines ka base NAHI khatata).
     const gross = Math.round(ratePerPc * qty * 100) / 100
     const gstRate = item.bookedGstRate != null
       ? Math.max(0, Number(item.bookedGstRate) || 0)
       : (p.gstEnabled === false ? 0 : Math.max(0, Number(p.gstRate) || 0))
     const netExclTax = Math.max(0, gross - discount)
-    const gstAmt = Math.round(netExclTax * (gstRate / 100) * 100) / 100
-
-    // ---- Task 45: Trade Offer (per-SKU Rs, discount ke ilawa) ----
-    const tradeOfferAmt = Math.max(0, Math.round((Number(item.tradeOffer) || 0) * 100) / 100)
+    const modeA = p.taxMode === 'INVOICE_DISCOUNT'
+    const gstBase = modeA ? Math.max(0, netExclTax - tradeOfferAmt) : netExclTax
+    const gstAmt = Math.round(gstBase * (gstRate / 100) * 100) / 100
 
     const lineTotal = gross - discount
     subtotal += gross
@@ -290,6 +308,7 @@ export function computeOrderLines(
       gstRate: gstRate > 0 ? gstRate : null,
       gstAmt,
       lineTotal,
+      taxMode: modeA ? 'INVOICE_DISCOUNT' : 'CLAIM',
       manualShare,
     })
   }
@@ -420,8 +439,14 @@ export function applyManualMerge(lines: CalcLine[], manualDiscount: number): num
   lines.forEach((l, i) => {
     l.manualShare = shares[i]
     l.lineTotal = Math.round(Math.max(0, l.lineTotal - shares[i]) * 100) / 100
+    // Task 26: GST recompute bhi tax-mode aware — INVOICE_DISCOUNT line ka base merged
+    // net − TO hai (computeOrderLines jaisa hi rule, warna manual discount Mode A ka
+    // GST base toor deta). Clamp 0 same.
+    const base = l.taxMode === 'INVOICE_DISCOUNT'
+      ? Math.max(0, l.lineTotal - Math.max(0, l.tradeOfferAmt))
+      : l.lineTotal
     l.gstAmt = l.gstRate && l.gstRate > 0
-      ? Math.round(l.lineTotal * (l.gstRate / 100) * 100) / 100
+      ? Math.round(base * (l.gstRate / 100) * 100) / 100
       : 0
   })
   return Math.round(lines.reduce((s, l) => s + l.gstAmt, 0) * 100) / 100

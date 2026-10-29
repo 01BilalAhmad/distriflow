@@ -293,3 +293,70 @@ describe('aggregateSchemePromos — per-scheme rows (Task 57)', () => {
     expect(rows[0].amount).toBeCloseTo(12, 2)
   })
 })
+
+describe('Task 26 — TAX MODE: INVOICE_DISCOUNT (GST on net − Trade Offer)', () => {
+  // Noms/SalesFlo ladder: Gross → Offers → Net → GST. TO pehle minus hota hai,
+  // GST baqi (net − TO) par lagta hai. CLAIM (default) = purana rule (GST net par).
+  const PA: CalcProduct = { ...P1, taxMode: 'INVOICE_DISCOUNT' } // gross 100/ctn, GST 18%
+
+  it('CLAIM (default, no taxMode) keeps the old GST base = net — TO baad me minus', () => {
+    const r = computeOrderLines([P1], [], [{ productId: 'p1', ctn: 2, tradeOffer: 40 }], 'KIRYANA')
+    expect(r.lines[0].gstAmt).toBeCloseTo(200 * 0.18, 2) // 36 — base untouched by TO
+    expect(r.lines[0].taxMode).toBe('CLAIM')
+    expect(r.tradeOfferTotal).toBe(40)
+  })
+
+  it('INVOICE_DISCOUNT: GST base = net − per-line TO (SalesFlo/Noms style)', () => {
+    const r = computeOrderLines([PA], [], [{ productId: 'p1', ctn: 2, tradeOffer: 40 }], 'KIRYANA')
+    expect(r.lines[0].gstAmt).toBeCloseTo((200 - 40) * 0.18, 2) // 28.8
+    expect(r.lines[0].taxMode).toBe('INVOICE_DISCOUNT')
+  })
+
+  it('zero TO par dono modes SAME GST (regression guard)', () => {
+    const claim = computeOrderLines([P1], [], [{ productId: 'p1', ctn: 2 }], 'KIRYANA')
+    const inv = computeOrderLines([PA], [], [{ productId: 'p1', ctn: 2 }], 'KIRYANA')
+    expect(inv.lines[0].gstAmt).toBe(claim.lines[0].gstAmt)
+    expect(claim.lines[0].gstAmt).toBeCloseTo(36, 2)
+  })
+
+  it('TO > net line par clamp 0 — extra TO dusri lines ka base NAHI khatata (mixed order)', () => {
+    const claimP: CalcProduct = { ...P1, id: 'pclaim' } // CLAIM line: gross 100
+    const r = computeOrderLines(
+      [PA, claimP],
+      [],
+      [
+        { productId: 'p1', ctn: 1, tradeOffer: 150 }, // mode A: net 100, TO 150 → GST base 0
+        { productId: 'pclaim', ctn: 1, tradeOffer: 0 }, // CLAIM: net 100 → GST base 100
+      ],
+      'KIRYANA',
+    )
+    expect(r.lines[0].gstAmt).toBe(0) // clamped
+    expect(r.lines[1].gstAmt).toBeCloseTo(18, 2) // unaffected by p1 ka extra TO
+    // Mixed order — do modes ek bill mein, har line apne rule par
+    expect(r.lines[0].taxMode).toBe('INVOICE_DISCOUNT')
+    expect(r.lines[1].taxMode).toBe('CLAIM')
+  })
+
+  it('applyManualMerge re-computes Mode A GST on (merged net − TO)', () => {
+    const r = computeOrderLines([PA], [], [{ productId: 'p1', ctn: 2, tradeOffer: 40 }], 'KIRYANA')
+    const gst = applyManualMerge(r.lines, 20) // manual 20 → merged net 180, base 180−40=140
+    expect(r.lines[0].lineTotal).toBe(180)
+    expect(gst).toBeCloseTo(140 * 0.18, 2) // 25.2
+  })
+
+  it('applyManualMerge CLAIM lines unchanged (merged net × rate)', () => {
+    const r = computeOrderLines([P1], [], [{ productId: 'p1', ctn: 2, tradeOffer: 40 }], 'KIRYANA')
+    const gst = applyManualMerge(r.lines, 20) // merged net 180 — TO base se bahar
+    expect(gst).toBeCloseTo(180 * 0.18, 2) // 32.4
+  })
+
+  it('236H base chain (total − TO + GST) Mode A par SalesFlo-exact rahta hai', () => {
+    // Gross 217,330.40 jaisa structure — chhota example: total 200, TO 40, GST 28.8
+    const r = computeOrderLines([PA], [], [{ productId: 'p1', ctn: 2, tradeOffer: 40 }], 'KIRYANA')
+    const total = r.subtotal - r.schemeDiscount // 200
+    const advBase = total - r.tradeOfferTotal + r.gstTotal // 200 − 40 + 28.8 = 188.8
+    expect(advBase).toBeCloseTo(188.8, 2)
+    // orderGrandPayable formula unchanged — dono modes par wahi chain
+    expect(orderGrandPayable({ total, tradeOfferTotal: r.tradeOfferTotal, gstTotal: r.gstTotal, advanceTax: 0 })).toBe(188.8)
+  })
+})

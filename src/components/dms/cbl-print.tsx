@@ -512,6 +512,9 @@ export interface InvoiceData {
   advanceApplied?: number
   /** Task 102: chhoti detail — "RET-12 (ORD-45) Rs 2,000.00 • ..." (kis return ka deduction) */
   advanceAppliedNote?: string | null
+  /** Task 26: booking waqt items ka tax-mode snapshot — INVOICE_DISCOUNT par summary
+   * ladder Noms-style banta hai (Trade Offer GST se PEHLE minus dikhta hai) */
+  taxMode?: string | null
   items: InvoiceItemData[]
 }
 
@@ -600,6 +603,8 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
   const advAdjust = Math.min(Math.max(0, Math.round((inv.advanceApplied ?? 0) * 100) / 100), netInvoice)
   const hasAccountRows = prevBal > 0.005 || advAdjust > 0.005
   const grandNet = Math.round((netInvoice + prevBal - advAdjust) * 100) / 100
+  // Task 26: INVOICE_DISCOUNT order → Noms/SalesFlo ladder (TO pehle kaata gaya, GST net−TO par)
+  const modeAInv = inv.taxMode === 'INVOICE_DISCOUNT'
 
   // ---- Task 34: DATA-AWARE column widths (water-filling) — Task 59: portrait TABLE_W par ----
   const colSpecs: { key?: string; hw: number; vl: number; min: number; d: number; need: number }[] = []
@@ -788,11 +793,16 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
           <div style={{ width: '30%' }}>
             <table className="cbl-break-avoid" style={{ fontSize: 10 }}>
               <tbody>
+                {/* Task 26: ladder tax-mode par depend — amounts dono modes mein SAME chain
+                 * (Net Invoice = Gross − Disc − TO + GST + Adv), sirf presentation ka farq:
+                 *   CLAIM (default):    Gross → Disc → GST → Adv → TO(−) → Net Invoice
+                 *   INVOICE_DISCOUNT:   Gross → Disc → TO(−) → GST → Adv → Net Invoice (Noms style) */}
                 <tr><td style={{ textAlign: 'center' }}>Gross Amount:</td><td className="num" style={{ width: 96 }}>{fmt2(S.gross)}</td></tr>
                 <tr><td style={{ textAlign: 'center' }}>Total Discount:</td><td className="num" style={{ fontWeight: 'bold' }}>{fmt2(totalDiscount)}</td></tr>
-                <tr><td style={{ textAlign: 'center' }}>GST:</td><td className="num">{fmt2(S.gst)}</td></tr>
+                {modeAInv && S.to > 0 && <tr><td style={{ textAlign: 'center' }}>Less: Trade Offer:</td><td className="num">- {fmt2(S.to)}</td></tr>}
+                <tr><td style={{ textAlign: 'center' }}>{modeAInv ? 'Sales Tax (GST):' : 'GST:'}</td><td className="num">{fmt2(S.gst)}</td></tr>
                 <tr><td style={{ textAlign: 'center' }}>Advance Tax 236H:</td><td className="num">{fmt2(S.adv)}</td></tr>
-                {S.to > 0 && <tr><td style={{ textAlign: 'center' }}>Trade Offer:</td><td className="num">- {fmt2(S.to)}</td></tr>}
+                {!modeAInv && S.to > 0 && <tr><td style={{ textAlign: 'center' }}>Trade Offer:</td><td className="num">- {fmt2(S.to)}</td></tr>}
                 <tr><td style={{ textAlign: 'right', fontWeight: 'bold' }}>Net Invoice Amount:</td><td className="num" style={{ fontWeight: 'bold' }}>{fmtI(Math.round(netInvoice))}</td></tr>
                 {/* Task 102: shop ka khata — purana udhaar + return advance auto-adjust */}
                 {prevBal > 0.005 && (

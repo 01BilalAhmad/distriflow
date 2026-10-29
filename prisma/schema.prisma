@@ -95,6 +95,12 @@ model Company {
   address          String?
   notes            String?
   logo             String? // base64 data URL (uploaded logo)
+  // Task 26: TAX MODE — GST ka Trade Offer ke saath timing (company-level policy,
+  // Companies page ke form se set hota hai). Per-line resolve hota hai (product.company):
+  //   CLAIM (default)            = GST line net (gross − scheme) par, Trade Offer BAAD me minus
+  //   INVOICE_DISCOUNT (Noms/SalesFlo style) = Trade Offer PEHLE minus, GST (net − TO) par
+  // Mixed order (dono mode ke products) natural support — har line apni company ka mode.
+  taxMode          String               @default("CLAIM")
   isActive         Boolean              @default(true)
   createdAt        DateTime             @default(now())
   products         Product[]
@@ -461,6 +467,10 @@ model Order {
   // Grand Payable = total − tradeOfferTotal + gstTotal + advanceTax
   tradeOfferTotal Float               @default(0) // Σ line trade offer (per-SKU Rs snapshot)
   gstTotal        Float               @default(0) // Σ line GST (product gstRate × line net)
+  // Task 26: booking waqt ke items ka tax-mode snapshot (CLAIM | INVOICE_DISCOUNT | MIXED).
+  // Company ka mode baad me badle to purane bill ki GST presentation waisi hi rahe (snapshot
+  // principle — gstTotals pehle se frozen hain, ye sirf print-ladder/labels ke liye hai).
+  taxMode         String?
   // Task 102 — INVOICE ACCOUNT SNAPSHOT (print par Previous Balance + Advance Adjust + Grand Net Total)
   prevBalance     Float               @default(0) // booking waqt shop ka purana udhaar (outlet.balance snapshot — is bill se pehle ka)
   advanceApplied  Float               @default(0) // is bill par lagne wala return advance (projection — settlement par live consume hota hai)

@@ -14,6 +14,13 @@ interface CompanyBody {
   notes?: string
   logo?: string | null
   isActive?: boolean
+  /** Task 26: TAX MODE — CLAIM (GST pehle, TO baad me) | INVOICE_DISCOUNT (TO pehle, GST net−TO par) */
+  taxMode?: string
+}
+
+/** Task 26: sirf ye 2 modes valid — kuch aur aaye to CLAIM (default) */
+function validTaxMode(v: string | undefined): 'CLAIM' | 'INVOICE_DISCOUNT' {
+  return v === 'INVOICE_DISCOUNT' ? 'INVOICE_DISCOUNT' : 'CLAIM'
 }
 
 // Task 95: tenantProfileId(userId) helper ki jagah cookie-user se tenant resolve
@@ -72,6 +79,8 @@ export async function GET(req: Request) {
           address: c.address,
           notes: c.notes,
           logo: c.logo,
+          // Task 26: tax mode — UI badge + form toggle isi se
+          taxMode: c.taxMode,
           productCount: c._count.products,
           salesmanCount: c._count.salesmen,
           invoiceCount: c._count.purchaseInvoices,
@@ -123,6 +132,8 @@ export async function POST(req: Request) {
         address: b.address?.trim() || null,
         notes: b.notes?.trim() || null,
         logo: b.logo ?? null,
+        // Task 26: company-level tax mode (default CLAIM — purani behaviour)
+        taxMode: validTaxMode(b.taxMode),
       },
     })
     return Response.json({ company: { id: company.id, name: company.name, shortCode: company.shortCode } })

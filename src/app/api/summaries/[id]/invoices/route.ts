@@ -61,6 +61,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       distributorAddress,
       summaryNo: summary.summaryNo,
       status: o.status,
+      taxMode: o.taxMode, // Task 26: print ladder Noms-style for INVOICE_DISCOUNT orders
       subtotal: o.subtotal,
       schemeDiscount: o.schemeDiscount,
       manualDiscount: o.manualDiscount,

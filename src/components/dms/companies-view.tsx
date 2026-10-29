@@ -172,6 +172,8 @@ export function CompaniesView() {
                     <button className="text-left w-full group" onClick={() => setDetailId(c.id)}>
                       <p className="font-bold text-slate-900 leading-tight truncate group-hover:text-emerald-700">{c.name}</p>
                       {c.shortCode && <Badge variant="outline" className="mt-1 text-[9px] border-violet-200 bg-violet-50 text-violet-700">{c.shortCode}</Badge>}
+                      {/* Task 26: Invoice Discount company pehchan — default (Claim) par koi badge nahi */}
+                      {c.taxMode === 'INVOICE_DISCOUNT' && <Badge variant="outline" className="mt-1 ml-1 text-[9px] border-amber-200 bg-amber-50 text-amber-700">Invoice Discount Tax</Badge>}
                     </button>
                     <div className="mt-1.5 space-y-0.5 text-[11px] text-slate-500">
                       {c.contactPerson && <p className="truncate flex items-center gap-1"><User className="h-3 w-3 shrink-0" /> {c.contactPerson}</p>}
@@ -243,6 +245,8 @@ function CompanyFormDialog({ company, onClose, onSaved }: {
   const [address, setAddress] = useState(company?.address ?? '')
   const [notes, setNotes] = useState(company?.notes ?? '')
   const [logo, setLogo] = useState(company?.logo ?? '')
+  // Task 26: TAX MODE — company-level GST/Trade-Offer timing (Noms/SalesFlo style toggle)
+  const [taxMode, setTaxMode] = useState(company?.taxMode === 'INVOICE_DISCOUNT' ? 'INVOICE_DISCOUNT' : 'CLAIM')
   const [saving, setSaving] = useState(false)
 
   function handleLogoFile(file: File) {
@@ -275,7 +279,7 @@ function CompanyFormDialog({ company, onClose, onSaved }: {
     setSaving(true)
     try {
       const user = JSON.parse(localStorage.getItem('dms_session') ?? 'null')
-      const body = { name, shortCode, contactPerson, phone, email, address, notes, logo, userId: user?.id }
+      const body = { name, shortCode, contactPerson, phone, email, address, notes, logo, taxMode, userId: user?.id }
       if (isEdit) await api(`/api/companies/${company!.id}`, { method: 'PATCH', body: JSON.stringify(body) })
       else await api('/api/companies', { method: 'POST', body: JSON.stringify(body) })
       toast({ title: isEdit ? 'Company update ho gayi' : 'Company add ho gayi', description: name })
@@ -328,6 +332,23 @@ function CompanyFormDialog({ company, onClose, onSaved }: {
           <div className="space-y-1"><Label>Email</Label><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="orders@company.pk" /></div>
           <div className="space-y-1"><Label>Address</Label><Textarea rows={2} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Company ka office / warehouse address" /></div>
           <div className="space-y-1"><Label>Notes</Label><Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Payment terms, order cycle waghera..." /></div>
+
+          {/* Task 26: TAX MODE — bill ka GST Trade Offer se pehle ya baad mein lage */}
+          <div className="space-y-1.5 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <Label className="text-[11px] font-semibold">Tax Mode — GST kis tarah lage?</Label>
+            <Select value={taxMode} onValueChange={(v) => setTaxMode(v === 'INVOICE_DISCOUNT' ? 'INVOICE_DISCOUNT' : 'CLAIM')}>
+              <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="CLAIM">Claim / Rebate — GST pehle (net par), Trade Offer baad mein</SelectItem>
+                <SelectItem value="INVOICE_DISCOUNT">Invoice Discount — Trade Offer pehle minus, GST baad mein (Noms style)</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-[10px] leading-snug text-slate-500">
+              {taxMode === 'INVOICE_DISCOUNT'
+                ? 'Is company ke bills par Trade Offer Net se kaat kar GST baqi amount par lagegi (SalesFlo/Noms invoice jaisa — GST kam aati hai).'
+                : 'Default — GST poore net par lagti hai, Trade Offer baad mein minus hota hai (offer claim/rebate ki tarah).'}
+            </p>
+          </div>
         </div>
 
         <div className="flex justify-end gap-2 pt-1">

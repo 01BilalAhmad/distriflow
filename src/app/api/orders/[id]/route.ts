@@ -55,6 +55,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         summaryNo: order.summary?.summaryNo ?? null,
         summaryDeliveryDate: order.summary ? new Date(order.summary.deliveryDate).toISOString() : null,
         status: order.status,
+        // Task 26: tax-mode snapshot — print Mode-A ladder isi se (CLAIM/INVOICE_DISCOUNT/MIXED)
+        taxMode: order.taxMode,
         // Task 86: CONFIRMED par LIVE totals (current schemes) — processed frozen stored
         subtotal: live?.subtotal ?? order.subtotal,
         schemeDiscount: live?.schemeDiscount ?? order.schemeDiscount,
@@ -187,9 +189,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
       // Task 23: tenant scope — order jis distributor ka, products/schemes usi ke
       const tenantId = order.distributorId
+      // Task 26: company taxMode bhi chahiye (per-line GST base rule)
       const products = await db.product.findMany({
         where: { isActive: true, distributorId: tenantId, OR: [{ id: { in: incoming.map((i) => i.productId) } }, { id: { in: order.items.map((i) => i.productId) } }] },
+        include: { company: { select: { taxMode: true } } },
       })
+      const calcProducts = products.map((p) => ({ ...p, taxMode: p.company?.taxMode ?? 'CLAIM' }))
       // Task 55: category-wide scheme — category NAME join, aur outlet ke filer status se
       // filerScope match. Order ka BOOKED filer status pehle (snapshot rule), legacy (null)
       // par outlet ka current status.
@@ -201,7 +206,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       const outletFiler = order.filerStatus
         ?? (await db.outlet.findUnique({ where: { id: order.outletId }, select: { filerStatus: true } }))?.filerStatus
         ?? null
-      const { lines, subtotal, schemeDiscount, tradeOfferTotal } = computeOrderLines(products, schemes, withSnapshots, order.channel, outletFiler)
+      const { lines, subtotal, schemeDiscount, tradeOfferTotal } = computeOrderLines(calcProducts, schemes, withSnapshots, order.channel, outletFiler)
       if (lines.length === 0) return jsonError('Kam az kam 1 item qty ke saath chahiye')
 
       // ---- Task 26: STOCK LIMIT — allocation edit bhi available ke andar ----
@@ -273,7 +278,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       await db.$transaction(async (tx) => {
         await tx.orderItem.deleteMany({ where: { orderId: id } })
         await tx.orderItem.createMany({
-          data: lines.map((l) => ({ orderId: id, ...l })),
+          // Task 26: CalcLine.taxMode calc-chain field hai — OrderItem column NAHI, strip
+          data: lines.map(({ taxMode: _tm, ...l }) => ({ orderId: id, ...l })),
         })
         await tx.order.update({
           where: { id },
@@ -286,6 +292,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
             total,
             tradeOfferTotal,
             gstTotal,
+            // Task 26: tax-mode snapshot bhi naye lines ke modes se refresh
+            taxMode: new Set(lines.map((l) => l.taxMode ?? 'CLAIM')).size === 1
+              ? ([...new Set(lines.map((l) => l.taxMode ?? 'CLAIM'))][0])
+              : 'MIXED',
             filerStatus: taxStatus,
             advanceTaxRate: tax.rate,
             advanceTax: tax.amount,

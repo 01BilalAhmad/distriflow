@@ -57,7 +57,7 @@ export async function GET(req: Request) {
 
     const products = await db.product.findMany({
       where,
-      include: { brand: { select: { name: true } }, company: { select: { id: true, name: true, shortCode: true } }, stockBatches: stockFilter },
+      include: { brand: { select: { name: true } }, company: { select: { id: true, name: true, shortCode: true, taxMode: true } }, stockBatches: stockFilter },
       orderBy: { name: 'asc' },
     })
 
@@ -69,7 +69,8 @@ export async function GET(req: Request) {
       sku: p.sku,
       name: p.name,
       brand: p.brand.name,
-      company: p.company ? { id: p.company.id, name: p.company.name, shortCode: p.company.shortCode } : null,
+      // Task 26: taxMode client mirror ke liye (booking preview = booked bill ka GST rule)
+      company: p.company ? { id: p.company.id, name: p.company.name, shortCode: p.company.shortCode, taxMode: p.company.taxMode } : null,
       category: p.category,
       unitsPerCarton: p.unitsPerCarton,
       boxesPerCarton: p.boxesPerCarton,

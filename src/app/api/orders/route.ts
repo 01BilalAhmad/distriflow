@@ -42,7 +42,8 @@ export async function GET(req: Request) {
         distributor: { select: { businessName: true } },
         // Task 86: live scheme recalc ke liye product ka pack/GST/category data bhi chahiye
         // (Product.category string column hai — relation nahi)
-        items: { include: { product: { select: { unitsPerCarton: true, pcsPerBox: true, tradePrice: true, gstEnabled: true, gstRate: true, category: true } } } },
+        // Task 26: company taxMode bhi (per-line GST base rule — live recalc booked jaisa)
+        items: { include: { product: { select: { unitsPerCarton: true, pcsPerBox: true, tradePrice: true, gstEnabled: true, gstRate: true, category: true, company: { select: { taxMode: true } } } } } },
       },
       orderBy: { orderDate: 'desc' },
       take: 100,
@@ -67,7 +68,9 @@ export async function GET(req: Request) {
         manualDiscValue: o.manualDiscValue,
         items: o.items.map((it) => ({
           id: it.id, productId: it.productId, qty: it.qty, rate: it.rate,
-          tradeOfferAmt: it.tradeOfferAmt, gstRate: it.gstRate, product: it.product,
+          tradeOfferAmt: it.tradeOfferAmt, gstRate: it.gstRate,
+          // Task 26: company taxMode CalcProduct shape mein resolve
+          product: { ...it.product, taxMode: it.product.company?.taxMode ?? 'CLAIM' },
         })),
       }
       const live = liveRecalcFromParts(parts, schemes)
@@ -208,7 +211,10 @@ export async function POST(req: Request) {
     }
 
     const productIds = items.map((i) => i.productId)
-    const products = await db.product.findMany({ where: { id: { in: productIds }, distributorId: tenantId } })
+    // Task 26: company ka taxMode bhi chahiye (per-line GST base rule) — company include
+    const products = await db.product.findMany({ where: { id: { in: productIds }, distributorId: tenantId }, include: { company: { select: { taxMode: true } } } })
+    // CalcProduct shape: product ke company se taxMode resolve (default CLAIM — legacy safe)
+    const calcProducts = products.map((p) => ({ ...p, taxMode: p.company?.taxMode ?? 'CLAIM' }))
     // Task 55: category-wide scheme — category ka NAME join kar ke CalcScheme mein daala
     const schemesRaw = await db.scheme.findMany({
       where: { isActive: true, distributorId: tenantId, OR: [{ endDate: null }, { endDate: { gte: new Date() } }] },
@@ -219,7 +225,7 @@ export async function POST(req: Request) {
     // Shared calc (stock-allocation edit bhi yehi math use karta hai)
     // Task 45: items[].tradeOffer = per-SKU Trade Offer Rs (discount ke ilawa, kuch SKUs par)
     // Task 55: outlet filer status — filerScope wali schemes sirf matching shops par
-    const { lines: itemsData, subtotal, schemeDiscount, tradeOfferTotal } = computeOrderLines(products, schemes, items, outlet.channel, outlet.filerStatus)
+    const { lines: itemsData, subtotal, schemeDiscount, tradeOfferTotal } = computeOrderLines(calcProducts, schemes, items, outlet.channel, outlet.filerStatus)
 
     if (itemsData.length === 0) return jsonError('Koi valid item nahi mila')
 
@@ -273,6 +279,12 @@ export async function POST(req: Request) {
       }
     }
 
+    // ---- Task 26: ORDER TAX-MODE SNAPSHOT ----
+    // Items ke distinct modes: single-mode order = wo mode, mixed = MIXED. Print/labels
+    // isi se — company ka mode baad me badle to purane bill ki presentation waisi hi rahe.
+    const modeSet = new Set(itemsData.map((l) => l.taxMode ?? 'CLAIM'))
+    const orderTaxMode = modeSet.size === 1 ? [...modeSet][0] : 'MIXED'
+
     const seq = await nextSeq('order')
 
     // ---- Advance Tax — shop ke filer status + DISTRIBUTOR ke apne settings rate par snapshot (bill par add) ----
@@ -312,6 +324,7 @@ export async function POST(req: Request) {
         total: orderTotal,
         tradeOfferTotal,
         gstTotal,
+        taxMode: orderTaxMode,
         filerStatus: outlet.filerStatus,
         advanceTaxRate: tax.rate,
         advanceTax: tax.amount,
@@ -323,7 +336,8 @@ export async function POST(req: Request) {
         unplanned: isUnplanned,
         clientRef: clientRef || null,
         notes: notes ?? null,
-        items: { create: itemsData },
+        // Task 26: CalcLine.taxMode calc-chain ka field hai — OrderItem par column NAHI, strip
+        items: { create: itemsData.map(({ taxMode: _tm, ...l }) => l) },
       },
       include: { items: true },
     })

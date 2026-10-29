@@ -465,11 +465,11 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
   }
 
   const computed = useMemo(() => {
-    if (!outlet) return { subtotal: 0, discount: 0, gstTotal: 0, toTotal: 0, rows: [] as { name: string; qtyPcs: number; freeQty: number; discount: number; total: number; gross: number; stack: PreviewStackEntry[]; ratePc: number; upc: number; pcsPerBox: number; tradeOffer: number; gstRate: number; gstAmt: number }[] }
+    if (!outlet) return { subtotal: 0, discount: 0, gstTotal: 0, toTotal: 0, rows: [] as { name: string; qtyPcs: number; freeQty: number; discount: number; total: number; gross: number; stack: PreviewStackEntry[]; ratePc: number; upc: number; pcsPerBox: number; tradeOffer: number; gstRate: number; gstAmt: number; modeA: boolean }[] }
     let subtotal = 0, discount = 0, gstTotal = 0, toTotal = 0
     const rows = lines.map((l) => {
       const p = products.find((x) => x.id === l.productId)
-      if (!p) return { name: '', qtyPcs: l.qtyPcs, freeQty: 0, discount: 0, total: 0, gross: 0, stack: [] as PreviewStackEntry[], ratePc: 0, upc: 1, pcsPerBox: 0, tradeOffer: 0, gstRate: 0, gstAmt: 0 }
+      if (!p) return { name: '', qtyPcs: l.qtyPcs, freeQty: 0, discount: 0, total: 0, gross: 0, stack: [] as PreviewStackEntry[], ratePc: 0, upc: 1, pcsPerBox: 0, tradeOffer: 0, gstRate: 0, gstAmt: 0, modeA: false }
       const upc = Math.max(1, p.unitsPerCarton)
       const pcsPerBox = p.pcsPerBox > 0 ? p.pcsPerBox : 0
       const ratePc = p.tradePrice / upc
@@ -507,15 +507,18 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
         })
       const gross = Math.round(ratePc * l.qtyPcs * 100) / 100
       // Task 45: GST per product (Products page ka rate — hardcoded nahi); TO discount ke ILAWA
-      const gstRate = p.gstEnabled === false ? 0 : Math.max(0, Number(p.gstRate) || 0)
-      const gstAmt = Math.round(Math.max(0, gross - disc) * (gstRate / 100) * 100) / 100
+      // Task 26 MIRROR: company INVOICE_DISCOUNT ho to Trade Offer pehle minus — GST (net − TO)
+      // par (server computeOrderLines ka same rule — preview == booked bill)
+      const modeA = p.company?.taxMode === 'INVOICE_DISCOUNT'
       const tradeOffer = Math.max(0, Math.round((parseFloat(l.tradeOffer) || 0) * 100) / 100)
+      const gstRate = p.gstEnabled === false ? 0 : Math.max(0, Number(p.gstRate) || 0)
+      const gstAmt = Math.round(Math.max(0, gross - disc - (modeA ? tradeOffer : 0)) * (gstRate / 100) * 100) / 100
       const lineTotal = gross - disc
       subtotal += gross
       discount += disc
       gstTotal += gstAmt
       toTotal += tradeOffer
-      return { name: p.name, qtyPcs: l.qtyPcs, freeQty, discount: disc, total: lineTotal, gross, stack: stackAgg, ratePc, upc, pcsPerBox, tradeOffer, gstRate, gstAmt }
+      return { name: p.name, qtyPcs: l.qtyPcs, freeQty, discount: disc, total: lineTotal, gross, stack: stackAgg, ratePc, upc, pcsPerBox, tradeOffer, gstRate, gstAmt, modeA }
     })
     return { subtotal, discount, gstTotal: Math.round(gstTotal * 100) / 100, toTotal: Math.round(toTotal * 100) / 100, rows }
   }, [lines, products, schemes, outlet])
@@ -556,7 +559,9 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
     const rows = computed.rows.map((r, i) => {
       const manualShare = shares[i]
       const total = Math.round(Math.max(0, r.total - manualShare) * 100) / 100
-      const gstAmt = r.gstRate > 0 ? Math.round(total * (r.gstRate / 100) * 100) / 100 : 0
+      // Task 26 mirror: INVOICE_DISCOUNT line ka GST base = merged net − TO (server applyManualMerge jaisa)
+      const base = r.modeA ? Math.max(0, total - r.tradeOffer) : total
+      const gstAmt = r.gstRate > 0 ? Math.round(base * (r.gstRate / 100) * 100) / 100 : 0
       gstTotal += gstAmt
       return { ...r, manualShare, total, gstAmt }
     })

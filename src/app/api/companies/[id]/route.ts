@@ -14,6 +14,8 @@ interface CompanyBody {
   notes?: string
   logo?: string | null
   isActive?: boolean
+  /** Task 26: TAX MODE — CLAIM (GST pehle, TO baad me) | INVOICE_DISCOUNT (TO pehle, GST net−TO par) */
+  taxMode?: string
 }
 
 // Task 95: distributorTenant(userId) helper ki jagah cookie-user par direct checks (same semantics)
@@ -51,6 +53,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         id: c.id, name: c.name, shortCode: c.shortCode,
         contactPerson: c.contactPerson, phone: c.phone, email: c.email,
         address: c.address, notes: c.notes, logo: c.logo, isActive: c.isActive,
+        taxMode: c.taxMode, // Task 26
         productCount: c._count.products, salesmanCount: c._count.salesmen,
         invoiceCount: c._count.purchaseInvoices,
         balance: Math.round(balance * 100) / 100,
@@ -96,6 +99,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (b.notes !== undefined) data.notes = b.notes?.trim() || null
     if (b.logo !== undefined) data.logo = b.logo || null
     if (b.isActive !== undefined) data.isActive = b.isActive
+    // Task 26: tax mode toggle (invalid value par CLAIM fallback)
+    if (b.taxMode !== undefined) data.taxMode = b.taxMode === 'INVOICE_DISCOUNT' ? 'INVOICE_DISCOUNT' : 'CLAIM'
 
     const company = await db.company.update({ where: { id }, data })
     return Response.json({ company: { id: company.id, name: company.name, shortCode: company.shortCode } })

@@ -117,6 +117,8 @@ export interface OrderDTO {
   unplanned?: boolean
   orderLat?: number | null
   orderLng?: number | null
+  /** Task 26: booking waqt items ka tax-mode snapshot (CLAIM | INVOICE_DISCOUNT | MIXED) */
+  taxMode?: string | null
   items?: OrderItemDTO[]
 }
 
@@ -126,6 +128,9 @@ export interface CompanyDTO {
   shortCode: string | null
   productCount?: number
   salesmanCount?: number
+  /** Task 26: TAX MODE — CLAIM (GST pehle, TO baad me) | INVOICE_DISCOUNT (TO pehle, GST net−TO par).
+   * Optional: purana client-cache safe. */
+  taxMode?: string | null
 }
 
 // Task 53: per-tenant product categories (naya category banane ka option)

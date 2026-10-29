@@ -59,6 +59,8 @@ export interface LiveRecalcOrderParts {
       gstRate: number | null
       /** Product.category STRING column hai (relation nahi) — scheme category-match isi se */
       category?: string | null
+      /** Task 26: company ka tax mode (product.company.taxMode) — per-line GST base rule */
+      taxMode?: string | null
     }
   }[]
 }
@@ -95,6 +97,7 @@ export function liveRecalcFromParts(
     gstEnabled: it.product.gstEnabled ?? undefined,
     gstRate: it.product.gstRate ?? undefined,
     category: it.product.category ?? null,
+    taxMode: it.product.taxMode ?? 'CLAIM',
   }))
   // LIVE PATH: koi scheme/schemeStack attach nahi — current schemes se full stack (Task 58)
   const incoming: CalcIncomingItem[] = order.items.map((it) => ({
@@ -156,7 +159,8 @@ export async function liveRecalcOrder(orderId: string): Promise<LiveRecalcFull |
     where: { id: orderId },
     include: {
       outlet: { select: { filerStatus: true } },
-      items: { include: { product: true } },
+      // Task 26: company taxMode include — live recalc booked GST-base rule par chale
+      items: { include: { product: { include: { company: { select: { taxMode: true } } } } } },
     },
   })
   if (!order || order.status !== 'CONFIRMED') return null
@@ -170,7 +174,9 @@ export async function liveRecalcOrder(orderId: string): Promise<LiveRecalcFull |
       manualDiscValue: order.manualDiscValue,
       items: order.items.map((it) => ({
         id: it.id, productId: it.productId, qty: it.qty, rate: it.rate,
-        tradeOfferAmt: it.tradeOfferAmt, gstRate: it.gstRate, product: it.product,
+        tradeOfferAmt: it.tradeOfferAmt, gstRate: it.gstRate,
+        // Task 26: company taxMode CalcProduct shape mein resolve
+        product: { ...it.product, taxMode: it.product.company?.taxMode ?? 'CLAIM' },
       })),
     },
     schemes,
