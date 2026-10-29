@@ -16,7 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Separator } from '@/components/ui/separator'
 import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR, fmtDate, STATUS_STYLES, statusLabel } from '@/lib/dms-api'
-import type { OrderDTO, OrderItemDTO, OutletDTO, ProductDTO, SchemeDTO, SalesmanPerfDTO } from '@/lib/dms-types'
+import type { OrderDTO, OrderItemDTO, OutletDTO, ProductDTO, SchemeDTO, SalesmanPerfDTO, CompanyFullDTO } from '@/lib/dms-types'
 import { UnitQtyInputs, splitPcs, fmtQty, packHint } from '@/components/dms/unit-qty'
 import { ProductCombobox } from '@/components/dms/product-combobox'
 import { PrintFrame, CblInvoiceDoc, keepDialogBehind, type InvoiceData } from '@/components/dms/cbl-print'
@@ -414,11 +414,15 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
   const [outletPickerOpen, setOutletPickerOpen] = useState(false)
   const [outletsLoaded, setOutletsLoaded] = useState(false)
   const [salesmenLoaded, setSalesmenLoaded] = useState(false)
+  // Task 27: COMPANY-FIRST cascade — booking kis company ke products ka hai (isi se
+  // bookers/shops/SKUs filter hote hain + company ka tax mode is bill par apply hota hai)
+  const [companies, setCompanies] = useState<CompanyFullDTO[]>([])
+  const [companyId, setCompanyId] = useState('')
   const prefillDone = useRef<string | null>(null)
 
   useEffect(() => {
     if (!open || !user) return
-    setOutletId(''); setBookerId(''); setLines([]); setNotes('')
+    setOutletId(''); setBookerId(''); setLines([]); setNotes(''); setCompanyId('')
     setDiscType('NONE'); setDiscValue('')
     setOutletsLoaded(false)
     setSalesmenLoaded(false)
@@ -428,6 +432,7 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
     api<{ products: ProductDTO[] }>(`/api/products?userId=${user.id}`).then((r) => setProducts(r.products)).catch(() => {})
     api<{ schemes: SchemeDTO[] }>(`/api/schemes?userId=${user.id}`).then((r) => setSchemes(r.schemes.filter((s) => s.isActive))).catch(() => {})
     api<{ salesmen: SalesmanPerfDTO[] }>(`/api/field-force?userId=${user.id}`).then((r) => { setSalesmen(r.salesmen); setSalesmenLoaded(true) }).catch(() => {})
+    api<{ companies: CompanyFullDTO[] }>(`/api/companies?userId=${user.id}`).then((r) => setCompanies(r.companies)).catch(() => {})
     api<{ settings: { filerTaxRate: number; nonFilerTaxRate: number } }>(`/api/settings?userId=${user.id}`).then((r) => setTaxRates({ filer: r.settings.filerTaxRate, nonFiler: r.settings.nonFilerTaxRate })).catch(() => {})
   }, [open, user])
 
@@ -441,7 +446,11 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
     if (o) {
       setOutletId(o.id)
       const match = o.salesmanId ? salesmen.find((s) => s.id === o.salesmanId) : null
-      if (match) setBookerId(match.id)
+      if (match) {
+        setBookerId(match.id)
+        // Task 27: shop→booker→company auto — prefill par company bhi booker ki wali set
+        if (match.companyId) setCompanyId(match.companyId)
+      }
     } else {
       toast({ title: 'Shop nahi mili', description: 'Jo shop aayi thi wo ab mojood nahi — dobara select karein', variant: 'destructive' })
     }
@@ -451,12 +460,25 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
   const outlet = outlets.find((o) => o.id === outletId)
   const booker = salesmen.find((s) => s.id === bookerId)
 
-  // Task 68: CASCADING FILTER — booker select hua to shop picker mein sirf USI ki assigned shops.
-  // Booker khali = saari shops (unassigned shops bhi). Shop jis booker ki hai wo doosre ki list mein kabhi nahi.
-  const visibleOutlets = useMemo(
-    () => (bookerId ? outlets.filter((o) => o.salesmanId === bookerId) : outlets),
-    [outlets, bookerId]
+  // Task 27: COMPANY-FIRST CASCADING FILTER — company pehle, phir usi ke bookers, phir shops, phir SKUs.
+  // Company khali = kuch select nahi hota (strict tarteeb: Company → Booker → Shop → Products).
+  const selectedCompany = companies.find((c) => c.id === companyId)
+  const salesmanCompany = useMemo(() => new Map(salesmen.map((s) => [s.id, s.companyId ?? null])), [salesmen])
+  const visibleSalesmen = useMemo(
+    () => (companyId ? salesmen.filter((s) => s.companyId === companyId) : []),
+    [salesmen, companyId]
   )
+  const visibleProducts = useMemo(
+    () => (companyId ? products.filter((p) => p.company?.id === companyId) : []),
+    [products, companyId]
+  )
+  // Task 68: booker select hua to sirf USI ki assigned shops — warna (Task 27) company ke
+  // bookers ki saari shops. Shop jis booker ki hai wo doosri company ki list mein kabhi nahi.
+  const visibleOutlets = useMemo(() => {
+    if (bookerId) return outlets.filter((o) => o.salesmanId === bookerId)
+    if (companyId) return outlets.filter((o) => (o.salesmanId ? salesmanCompany.get(o.salesmanId) === companyId : false))
+    return []
+  }, [outlets, bookerId, companyId, salesmanCompany])
 
   // Outlet select hote hi uska default order booker auto-fill — LEKIN sirf jab booker manually
   // chuna na gaya ho (bookerTouched): shop badla to booker bhi shop ke route par shift hota hai
@@ -470,9 +492,31 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
     if (match) setBookerId(match.id)
   }
 
+  // Task 27: company badli to poora cascade dobara — booker/shop/lines jo naye company se
+  // match na karein wo reset (single-company order guarantee + tax mode unambiguous)
+  function selectCompany(id: string) {
+    if (id === companyId) return
+    setCompanyId(id)
+    const b = salesmen.find((s) => s.id === bookerId)
+    if (b && b.companyId !== id) { setBookerId(''); setBookerTouched(false) }
+    const o = outlets.find((x) => x.id === outletId)
+    if (o) {
+      const sComp = o.salesmanId ? salesmen.find((s) => s.id === o.salesmanId)?.companyId ?? null : null
+      if (sComp !== id) setOutletId('')
+    }
+    if (lines.length > 0) {
+      setLines([])
+      toast({ title: 'Order lines reset ho gayin', description: 'Nayi company ke products dobara add karein — ek order sirf ek company ke SKUs ka hota hai' })
+    }
+  }
+
   function addLine() {
+    if (!companyId) {
+      toast({ title: 'Pehle company select karein', description: 'Order lines usi company ke SKUs mein add hoti hain jo upar select ki hai', variant: 'destructive' })
+      return
+    }
     const used = new Set(lines.map((l) => l.productId))
-    const avail = products.find((p) => !used.has(p.id) && p.available > 0) // Task 26: out-of-stock pehle hi select na ho
+    const avail = visibleProducts.find((p) => !used.has(p.id) && p.available > 0) // Task 26: out-of-stock pehle hi select na ho
     if (avail) setLines([...lines, { productId: avail.id, qtyPcs: Math.max(1, avail.unitsPerCarton), tradeOffer: '' }]) // default 1 ctn
   }
 
@@ -604,6 +648,11 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
   }
 
   async function save() {
+    // Task 27: company lazmi — cascade (bookers/shops/SKUs) isi par chalta hai
+    if (!companyId) {
+      toast({ title: 'Company select karein', description: 'Order kis company ke products ka hai — pehle company select karein', variant: 'destructive' })
+      return
+    }
     if (!outletId || lines.length === 0) {
       toast({ title: 'Missing info', description: 'Shop (Outlet) aur kam az kam 1 product select karein', variant: 'destructive' })
       return
@@ -684,10 +733,29 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
       <DialogContent className="max-w-[calc(100%-2rem)] sm:max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><ShoppingCart className="h-5 w-5 text-emerald-600" /> New Order Booking</DialogTitle>
-          <DialogDescription>Order booker select karein — usi ki assigned shops list mein aayengi. Schemes order time par auto-apply hongi</DialogDescription>
+          <DialogDescription>Company → order booker → shop — har step par sirf mutaliqa options nazar aayenge. Schemes order time par auto-apply hongi</DialogDescription>
         </DialogHeader>
         <div className="grid gap-3 overflow-y-auto pr-1">
           <div className="grid sm:grid-cols-2 gap-3">
+            {/* Task 27: COMPANY-FIRST — company pehle, phir usi ke bookers/shops/SKUs + tax mode hint */}
+            <div className="sm:col-span-2 grid gap-1.5">
+              <Label>Company <span className="text-red-500">*</span></Label>
+              <Select value={companyId} onValueChange={selectCompany}>
+                <SelectTrigger className={companyId ? 'border-emerald-300' : 'border-amber-300'}><SelectValue placeholder="Kis company ka order book ho raha hai?" /></SelectTrigger>
+                <SelectContent>
+                  {companies.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}{c.shortCode ? ` (${c.shortCode})` : ''}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedCompany?.taxMode === 'INVOICE_DISCOUNT' ? (
+                <p className="text-[11px] leading-snug text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">⚡ <b>Invoice Discount mode</b> — is bill par Trade Offer pehle minus hoga, GST baad mein (Noms/SalesFlo style — GST kam aati hai)</p>
+              ) : selectedCompany ? (
+                <p className="text-[11px] text-slate-500">Claim/Rebate mode — GST pehle net par lagti hai, Trade Offer baad mein minus (default mechanism)</p>
+              ) : (
+                <p className="text-[11px] text-slate-500">Pehle company select karein — <b>usi ke order bookers</b> aur <b>usi ke products</b> list hongi</p>
+              )}
+            </div>
             <div className="grid gap-1.5">
               <Label>Order Booker <span className="text-red-500">*</span></Label>
               <Select value={bookerId} onValueChange={(v) => {
@@ -702,7 +770,9 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
               }}>
                 <SelectTrigger className={bookerId ? 'border-emerald-300' : 'border-amber-300'}><SelectValue placeholder="Bill kis order booker ka?" /></SelectTrigger>
                 <SelectContent>
-                  {salesmen.map((s) => (
+                  {visibleSalesmen.length === 0 ? (
+                    <div className="px-3 py-2 text-xs text-slate-500">{companyId ? 'Is company ka koi order booker assign nahi — Field Force page se booker ko company assign karein' : 'Pehle company select karein'}</div>
+                  ) : visibleSalesmen.map((s) => (
                     <SelectItem key={s.id} value={s.id}>{s.name}{s.region ? ` — ${s.region}` : ''}</SelectItem>
                   ))}
                 </SelectContent>
@@ -710,7 +780,7 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
               {booker ? (
                 <p className="text-[11px] text-emerald-700 font-medium">✓ Ye bill <b>{booker.name}</b> ke booker account par book ho raha hai</p>
               ) : (
-                <p className="text-[11px] text-slate-500">Pehle booker select karein — <b>usi ki shops</b> shop list mein aayengi</p>
+                <p className="text-[11px] text-slate-500">{companyId ? 'Pehle booker select karein — usi ki shops shop list mein aayengi' : 'Pehle company select karein — phir usi ke bookers yahan aayenge'}</p>
               )}
             </div>
             <div className="grid gap-1.5">
@@ -735,7 +805,9 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
                       <CommandEmpty>
                         {bookerId && outlets.length > 0 && visibleOutlets.length === 0
                           ? `${booker?.name ?? 'Is booker'} ki koi shop assign nahi — Outlets page se shop Edit kar ke assign karein`
-                          : 'Koi shop nahi mili — Outlets page se add karein'}
+                          : companyId && outlets.length > 0 && visibleOutlets.length === 0
+                            ? 'Is company ke bookers ki koi shop assign nahi — Outlets page se shop assign karein'
+                            : 'Koi shop nahi mili — Outlets page se add karein'}
                       </CommandEmpty>
                       {visibleOutlets.map((o) => (
                         <CommandItem key={o.id} value={`${o.name} ${o.code} ${o.channel} ${o.salesmanName ?? ''}`}
@@ -777,7 +849,7 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
             </div>
             {lines.length === 0 && (
               <div className="rounded-lg border border-dashed p-6 text-center text-sm text-slate-400">
-                &quot;Add Product&quot; se order lines shuru karein
+                {companyId ? '"Add Product" se order lines shuru karein' : 'Pehle company select karein — phir "Add Product" se lines shuru hongi'}
               </div>
             )}
             {computed.rows.map((r, i) => {
@@ -791,7 +863,7 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
                       (plain dropdown mein products scroll karna mushkil tha) */}
                   <div className="flex-1 min-w-[180px]">
                     <ProductCombobox
-                      products={products.map((p) => {
+                      products={visibleProducts.map((p) => {
                         const used = lines.some((l, j) => j !== i && l.productId === p.id)
                         const availCtn = p.available / Math.max(1, p.unitsPerCarton)
                         return {
