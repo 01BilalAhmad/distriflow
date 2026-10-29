@@ -5,6 +5,7 @@ import {
   returnCreditOf,
   splitReturnCredit,
   recalcSettlementRow,
+  restockEligible,
 } from './dms-return-core'
 import { restockStock } from './dms-inventory'
 import { postLedgerEntry, ledgerBase } from './dms-credit'
@@ -62,6 +63,12 @@ export interface ApplyBillReturnArgs {
   userId?: string | null
   /** note prefix — "Late stock return after settlement (UNSOLD)" waghera */
   contextNote?: string
+  /**
+   * Task 29: return ki category — SIRF UNSOLD stock warehouse mein wapas jata hai.
+   * DAMAGED/EXPIRED becha nahi ja sakta => inventory nahi, floor claim stock
+   * (Damage & Expiry report mein count). Ledger/financial effects har category par.
+   */
+  type?: string | null
 }
 
 export interface BillReturnEffectResult {
@@ -75,6 +82,8 @@ export interface BillReturnEffectResult {
   outstandingBefore: number
   newCreditAmount: number
   newStatus: string
+  /** Task 29: stock wapas gaya (UNSOLD) ya nahi (DAMAGED/EXPIRED — floor claim) */
+  restocked: boolean
 }
 
 /**
@@ -89,15 +98,21 @@ export async function applyBillReturnEffects(
   const returnValue = r2c(args.lines.reduce((t, l) => t + l.value, 0))
 
   // 1) Stock wapas summary (van) warehouse mein — FEFO latest-expiry batch
-  for (const l of args.lines) {
-    await restockStock(
-      args.warehouseId,
-      l.productId,
-      l.qty,
-      `Stock return ${args.returnNo} — ${order.orderNo}`,
-      args.userId ?? null,
-      tx,
-    )
+  //    Task 29: SIRF UNSOLD par — Damage/Expired maal inventory mein NAHI jata
+  //    (user: "wo fresh hota hai dobara sale ho sakta hai, lekin expired/damage
+  //    inventory main add nai hona chahiye") — floor claim report mein count hota hai.
+  const restocked = restockEligible(args.type)
+  if (restocked) {
+    for (const l of args.lines) {
+      await restockStock(
+        args.warehouseId,
+        l.productId,
+        l.qty,
+        `Stock return ${args.returnNo} — ${order.orderNo}`,
+        args.userId ?? null,
+        tx,
+      )
+    }
   }
 
   // 2) Pro-rata reversals — settlement row ki bachti raqam par capped (BILL FLOOR)
@@ -184,5 +199,6 @@ export async function applyBillReturnEffects(
     outstandingBefore,
     newCreditAmount: recalc.creditAmount,
     newStatus: recalc.status,
+    restocked,
   }
 }

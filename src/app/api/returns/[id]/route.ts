@@ -1,8 +1,9 @@
 import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
 import { requireUser, outletScopeError } from '@/lib/api-auth'
-import { computeReturnLines } from '@/lib/dms-return-core'
+import { computeReturnLines, restockEligible } from '@/lib/dms-return-core'
 import { applyBillReturnEffects } from '@/lib/dms-return-effects'
+import { restockStock } from '@/lib/dms-inventory'
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -73,12 +74,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
           lines: ret.items.map((it) => ({ productId: it.productId, qty: it.qty, rate: it.rate, value: it.value })),
           userId: user.id,
           contextNote: `Stock return (${ret.type}) — approved`,
+          type: ret.type, // Task 29: category-gated restock
         })
         return fx
       }, { timeout: 20000 })
 
       return Response.json({
         status: 'APPROVED',
+        restocked: result.restocked,
         effects: {
           totalValue: ret.totalValue,
           ledgerCredit: result.ledgerCredit,
@@ -87,11 +90,73 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       })
     }
 
-    // ---------------- Standalone return — purana behavior (status flip only) ----------------
+    // ---------------- Task 29: STANDALONE approve — UNSOLD par inventory restock ----------------
+    // User: "UnSold select karo to inventory main add ho jayega (fresh stock, dobara
+    // sale ho sakta hai) — expired/damage inventory main add nai hona chahiye."
+    // Standalone return ka apna summary/van nahi hota => distributor ke PRIMARY
+    // warehouse mein restock hota hai (DAMAGED/EXPIRED par koi stock effect nahi).
+    if (action === 'APPROVE' && !ret.orderId) {
+      const wh = restockEligible(ret.type)
+        ? await db.warehouse.findFirst({
+            where: { distributorId: ret.outlet.distributorId },
+            orderBy: [{ isPrimary: 'desc' }],
+          })
+        : null
+      await db.$transaction(async (tx) => {
+        await tx.saleReturn.update({ where: { id: ret.id }, data: { status: 'APPROVED' } })
+        if (wh) {
+          for (const it of ret.items) {
+            await restockStock(wh.id, it.productId, it.qty, `Stock return ${ret.returnNo} — UNSOLD (standalone)`, user.id, tx)
+          }
+        }
+      })
+      return Response.json({ status: 'APPROVED', restocked: !!wh })
+    }
+
+    // ---------------- Standalone return — DAMAGED/EXPIRED ya legacy: status flip only ----------------
     await db.saleReturn.update({ where: { id }, data: { status } })
-    return Response.json({ status })
+    return Response.json({ status, restocked: false })
   } catch (e) {
     console.error(e)
     return jsonError('Return update failed', 500)
+  }
+}
+
+/**
+ * Task 29 — DELETE /api/returns/[id] — galti se banayi hui return entry ko MITANA
+ * (user: "kabhi puri return delete krni ho to wo bhi option add kro ta k galti sy
+ * add hoi wi return ko delet kr skin").
+ *
+ * Sirf PENDING/REJECTED delete ho sakti hain — in par KABHI koi effect (stock/ledger/
+ * settlement) apply nahi hua hota, is liye hard-delete bilkul safe hai. Approved
+ * return delete NAHI hoti — usay UNDO (cancel) karein jo stock + khata wapas lata hai.
+ */
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const user = auth.user
+    if (user.role === 'MEGA_ADMIN') return jsonError('Tenant data scope nahi')
+
+    const { id } = await params
+    const ret = await db.saleReturn.findUnique({
+      where: { id },
+      include: { outlet: { select: { distributorId: true, salesmanId: true } } },
+    })
+    if (!ret) return jsonError('Return not found', 404)
+    const ose = await outletScopeError(user, { distributorId: ret.outlet.distributorId, salesmanId: ret.outlet.salesmanId })
+    if (ose) return ose
+    if (ret.status !== 'PENDING' && ret.status !== 'REJECTED') {
+      return jsonError('Approved return delete nahi hoti — usay UNDO karein (stock + khata wapas ho jayega)')
+    }
+
+    await db.$transaction(async (tx) => {
+      await tx.returnItem.deleteMany({ where: { returnId: ret.id } })
+      await tx.saleReturn.delete({ where: { id: ret.id } })
+    })
+    return Response.json({ deleted: ret.returnNo })
+  } catch (e) {
+    console.error(e)
+    return jsonError('Return delete failed', 500)
   }
 }

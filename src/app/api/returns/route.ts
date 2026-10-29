@@ -146,6 +146,7 @@ export async function POST(req: Request) {
           lines,
           userId: user.id,
           contextNote: `Stock return (${type}) — Return & Claims se`,
+          type, // Task 29: category-gated restock — sirf UNSOLD inventory mein wapas
         })
         return { ret, fx }
       }, { timeout: 20000 })
@@ -153,6 +154,10 @@ export async function POST(req: Request) {
       const advanceMsg = result.fx.advancePosted > 0
         ? ` Rs ${result.fx.advancePosted.toFixed(2)} shop ke ADVANCE mein (agli bill se auto-adjust)`
         : ''
+      // Task 29: category-aware message — user ko foran pata ho stock kahan gaya
+      const stockMsg = result.fx.restocked
+        ? 'stock inventory (van warehouse) mein wapas'
+        : 'damage/expired stock inventory mein NAHI gaya — floor claim report mein counted'
       return Response.json({
         return: {
           id: result.ret.id,
@@ -162,7 +167,8 @@ export async function POST(req: Request) {
           orderNo: order.orderNo,
           ledgerCredit: result.fx.ledgerCredit,
           advancePosted: result.fx.advancePosted,
-          message: `Return ${returnNo} approved — stock wapas, shop ka khata update. Total credit Rs ${result.fx.totalCredit.toFixed(2)}.${advanceMsg}`,
+          restocked: result.fx.restocked,
+          message: `Return ${returnNo} approved — ${stockMsg}, shop ka khata update. Total credit Rs ${result.fx.totalCredit.toFixed(2)}.${advanceMsg}`,
         },
       })
     }

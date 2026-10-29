@@ -115,6 +115,36 @@ export async function GET(req: Request) {
     const approvedValue = r2(returns.filter((r) => r.status === 'APPROVED').reduce((t, r) => t + r.totalValue, 0))
     const totalReturnsValue = r2(returns.filter((r) => r.status !== 'REJECTED').reduce((t, r) => t + r.totalValue, 0))
     const grandSales = r2([...salesByShop.values()].reduce((t, v) => t + v, 0))
+
+    // ---------------- Task 29 — DAMAGE & EXPIRY FLOOR STOCK ----------------
+    // User: "expired ya damage select karo to inventory main add nai hona chahiye...
+    // uski bhi ek report banti jaye alag sy k floor pr itna damage aur expired stock
+    // jama ho gaya hai." Sirf APPROVED DAMAGED/EXPIRED returns — ye maal inventory
+    // mein NAHI gaya (category-gated restock), floor par claim stock ke tor par para hai.
+    const floorRets = returns.filter((r) => r.status === 'APPROVED' && (r.type === 'DAMAGED' || r.type === 'EXPIRED'))
+    type FA = { productId: string; name: string; sku: string; qty: number; value: number; damagedQty: number; expiredQty: number; lastDate: string }
+    const floorAgg = new Map<string, FA>()
+    for (const r of floorRets) {
+      const d = r.createdAt.toISOString()
+      for (const it of r.items) {
+        const f = floorAgg.get(it.productId) ?? { productId: it.productId, name: it.product.name, sku: it.product.sku, qty: 0, value: 0, damagedQty: 0, expiredQty: 0, lastDate: d }
+        f.qty += it.qty
+        f.value = r2(f.value + it.value)
+        if (r.type === 'DAMAGED') f.damagedQty += it.qty
+        else f.expiredQty += it.qty
+        if (d > f.lastDate) f.lastDate = d
+        floorAgg.set(it.productId, f)
+      }
+    }
+    const floorStock = [...floorAgg.values()].sort((a, b) => b.value - a.value)
+    const floorSummary = {
+      qty: floorStock.reduce((t, f) => t + f.qty, 0),
+      value: r2(floorStock.reduce((t, f) => t + f.value, 0)),
+      damagedValue: r2(floorRets.filter((r) => r.type === 'DAMAGED').reduce((t, r) => t + r.totalValue, 0)),
+      expiredValue: r2(floorRets.filter((r) => r.type === 'EXPIRED').reduce((t, r) => t + r.totalValue, 0)),
+      returnsCount: floorRets.length,
+    }
+
     return Response.json({
       range: { from: from.toISOString(), to: to.toISOString() },
       summary: {
@@ -129,6 +159,8 @@ export async function GET(req: Request) {
       typeSummary: [...typeAgg.entries()].map(([type, x]) => ({ type, ...x })),
       shopWise,
       productWise,
+      floorStock, // Task 29
+      floorSummary, // Task 29
       claimsByType,
       claimsList: claims.slice(0, 100).map((c) => ({ ...c, createdAt: c.createdAt.toISOString(), amount: r2(c.amount) })),
     })

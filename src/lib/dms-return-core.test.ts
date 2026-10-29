@@ -9,6 +9,7 @@ import {
   advanceNote,
   claimAdjustTitle,
   returnTypeLabel,
+  restockEligible,
   advanceAllocParts,
   recalcSettlementRow,
 } from './dms-return-core'
@@ -150,6 +151,26 @@ describe('returnTypeLabel — Task 103 (user ki zubaan)', () => {
     expect(
       advanceAllocParts([{ returnId: 'r1', returnNo: 'RET-1', orderNo: 'ORD-2', type: 'DAMAGED', amount: 1500 }]),
     ).toBe('RET-1 (ORD-2) Rs 1500.00 — Damage & Expiry Claim')
+  })
+})
+
+describe('restockEligible — Task 29 (user ki zubaan: unsold inventory mein wapas, damage/expired NAHI)', () => {
+  it('UNSOLD => true (fresh stock, dobara sale ho sakta hai)', () => {
+    expect(restockEligible('UNSOLD')).toBe(true)
+  })
+  it('DAMAGED/EXPIRED => false (inventory mein nahi — floor claim stock)', () => {
+    expect(restockEligible('DAMAGED')).toBe(false)
+    expect(restockEligible('EXPIRED')).toBe(false)
+  })
+  it('unknown/legacy null/undefined => true (purana behavior — returnTypeLabel bhi Return Stock maanta hai)', () => {
+    expect(restockEligible(null)).toBe(true)
+    expect(restockEligible(undefined)).toBe(true)
+    expect(restockEligible('SOMETHING_ELSE')).toBe(true)
+  })
+  it('returnTypeLabel ke sath consistent — jo Return Stock kehlaya wohi restock hota hai', () => {
+    for (const t of ['UNSOLD', 'DAMAGED', 'EXPIRED', null, undefined]) {
+      expect(restockEligible(t)).toBe(returnTypeLabel(t) === 'Return Stock')
+    }
   })
 })
 

@@ -14,8 +14,9 @@ import { Separator } from '@/components/ui/separator'
 import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR, fmtDate, STATUS_STYLES, statusLabel } from '@/lib/dms-api'
 import { UnitQtyInputs, fmtQty } from '@/components/dms/unit-qty'
+import { ProductCombobox } from '@/components/dms/product-combobox'
 import type { ReturnDTO, ClaimDTO, OutletDTO, ProductDTO, BillReturnOptionsDTO } from '@/lib/dms-types'
-import { Check, X, Undo2, FileText, Plus, Loader2, ReceiptText } from 'lucide-react'
+import { Check, X, Undo2, FileText, Plus, Loader2, ReceiptText, Trash2 } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
 const round2v = (n: number) => Math.round(n * 100) / 100
@@ -49,10 +50,37 @@ export function ReturnsClaimsView() {
 
   async function returnAction(id: string, action: 'APPROVE' | 'REJECT') {
     try {
-      await api<{ status: string; effects?: { advancePosted?: number } }>(`/api/returns/${id}`, { method: 'PATCH', body: JSON.stringify({ action, approvedBy: user?.name }) })
-      toast({ title: action === 'APPROVE' ? 'Return Approved ✓' : 'Return Rejected', description: action === 'APPROVE' ? 'Stock wapas, shop ka khata update ho gaya' : 'Status update ho gaya' })
+      const res = await api<{ status: string; restocked?: boolean; effects?: { advancePosted?: number } }>(`/api/returns/${id}`, { method: 'PATCH', body: JSON.stringify({ action, approvedBy: user?.name }) })
+      toast({
+        title: action === 'APPROVE' ? 'Return Approved ✓' : 'Return Rejected',
+        description: action === 'APPROVE'
+          ? res.restocked === false
+            ? 'Khata update ho gaya — damage/expired stock inventory mein NAHI gaya (floor claim report mein count hoga)'
+            : 'Stock inventory mein wapas add ho gaya, shop ka khata update ho gaya'
+          : 'Status update ho gaya',
+      })
       load()
     } catch (e) { toast({ title: 'Error', description: e instanceof Error ? e.message : 'Failed', variant: 'destructive' }) }
+  }
+
+  // Task 29 — UNDO: galti se approved return wapas lena (stock + khata dono revert)
+  async function undoReturn(r: ReturnDTO) {
+    if (!window.confirm(`${r.returnNo} UNDO karein?\n\n${r.outletName} — ${fmtPKR(r.totalValue)} ka return cancel hoga. Stock aur shop ka khata wapas pehle wali state par chale jayenge.`)) return
+    try {
+      const res = await api<{ result: { returnNo: string; cancelledValue: number; outletName: string } }>(`/api/returns/${r.id}/cancel`, { method: 'POST' })
+      toast({ title: `Return ${res.result.returnNo} Cancelled ✓`, description: `${res.result.outletName}: ${fmtPKR(res.result.cancelledValue)} ka return wapas liya — stock + khata pehle wali state par aa gaya` })
+      load()
+    } catch (e) { toast({ title: 'Undo failed', description: e instanceof Error ? e.message : 'Failed', variant: 'destructive' }) }
+  }
+
+  // Task 29 — DELETE: galti se banayi PENDING/REJECTED entry mitana (koi effect nahi tha)
+  async function deleteReturn(r: ReturnDTO) {
+    if (!window.confirm(`${r.returnNo} DELETE karein?\n\n${r.outletName} — ${fmtPKR(r.totalValue)} ki ${r.status === 'PENDING' ? 'pending' : 'rejected'} return entry hamesha ke liye mit jayegi. Is par koi stock/khata effect nahi hua tha.`)) return
+    try {
+      await api<{ deleted: string }>(`/api/returns/${r.id}`, { method: 'DELETE' })
+      toast({ title: `Return ${r.returnNo} deleted ✓`, description: 'Galti wali entry mit gayi — koi stock/khata asar nahi hua tha' })
+      load()
+    } catch (e) { toast({ title: 'Delete failed', description: e instanceof Error ? e.message : 'Failed', variant: 'destructive' }) }
   }
 
   async function claimAction(id: string, action: 'APPROVE' | 'REJECT') {
@@ -123,6 +151,18 @@ export function ReturnsClaimsView() {
                     <Button size="sm" onClick={() => returnAction(r.id, 'APPROVE')} className="h-8 bg-emerald-600 hover:bg-emerald-700"><Check className="h-3.5 w-3.5 mr-1" /> Approve</Button>
                     <Button size="sm" variant="outline" onClick={() => returnAction(r.id, 'REJECT')} className="h-8 text-red-500 border-red-200 hover:bg-red-50"><X className="h-3.5 w-3.5 mr-1" /> Reject</Button>
                   </div>
+                )}
+                {/* Task 29: UNDO — galti se approved return wapas (stock + khata revert) */}
+                {r.status === 'APPROVED' && canApprove && (
+                  <Button size="sm" variant="outline" title="Galti se return tha? Undo karein — stock + khata wapas chale jayenge" onClick={() => undoReturn(r)} className="h-8 text-orange-600 border-orange-200 hover:bg-orange-50 shrink-0">
+                    <Undo2 className="h-3.5 w-3.5 mr-1" /> Undo
+                  </Button>
+                )}
+                {/* Task 29: DELETE — galti se banayi PENDING/REJECTED entry mitana */}
+                {(r.status === 'PENDING' || r.status === 'REJECTED') && (
+                  <Button size="sm" variant="ghost" title="Galti se banayi entry — delete karein" onClick={() => deleteReturn(r)} className="h-8 w-8 p-0 text-red-400 hover:bg-red-50 hover:text-red-600 shrink-0">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
                 )}
               </CardContent>
             </Card>
@@ -336,7 +376,7 @@ function NewReturnDialog({ open, onOpenChange, onCreated }: { open: boolean; onO
         method: 'POST',
         body: JSON.stringify({ outletId, type, reason, items: lines.map((l) => ({ productId: l.productId, qty: l.qtyPcs })) }),
       })
-      toast({ title: `Return ${r.return.returnNo} Created ✓`, description: 'Approval ke liye pending hai' })
+      toast({ title: `Return ${r.return.returnNo} Created ✓`, description: 'Approval ke liye pending hai — approve par unsold stock inventory mein add hoga (damage/expired nahi hoga)' })
       onOpenChange(false)
       onCreated()
     } catch (e) {
@@ -489,6 +529,16 @@ function NewReturnDialog({ open, onOpenChange, onCreated }: { open: boolean; onO
                 <SelectItem value="UNSOLD">Unsold</SelectItem>
               </SelectContent>
             </Select>
+            {/* Task 29: category ka INVENTORY asar pehle se nazar aaye — galti se galat category na chune */}
+            {type === 'UNSOLD' ? (
+              <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-md px-2 py-1.5">
+                Unsold maal <b>fresh</b> hota hai — approve hote hi <b>inventory</b> (warehouse) mein wapas add ho jayega aur dobara sale ho sakta hai
+              </p>
+            ) : (
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-md px-2 py-1.5">
+                {type === 'DAMAGED' ? 'Damaged' : 'Expired'} maal inventory mein <b>wapas NAHI</b> jayega — ye floor par claim stock banega aur <b>Damage &amp; Expiry report</b> mein count hoga
+              </p>
+            )}
           </div>
 
           {!isBillMode && (
@@ -502,10 +552,13 @@ function NewReturnDialog({ open, onOpenChange, onCreated }: { open: boolean; onO
                 const lp = products.find((x) => x.id === l.productId)
                 return (
                   <div key={i} className="flex gap-2 items-start">
-                    <Select value={l.productId} onValueChange={(v) => { const n = [...lines]; n[i] = { ...n[i], productId: v }; setLines(n) }}>
-                      <SelectTrigger className="flex-1 h-9"><SelectValue /></SelectTrigger>
-                      <SelectContent>{products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
-                    </Select>
+                    {/* Task 29: SKU SEARCH — naam/SKU likh kar dhoondo (sainkdon products scroll karna mushkil tha) */}
+                    <ProductCombobox
+                      products={products.map((p) => ({ id: p.id, name: p.name, sku: p.sku, brand: p.brand, meta: `${p.unitsPerCarton}/ctn • trade ${fmtPKR(p.tradePrice)}` }))}
+                      value={l.productId}
+                      onSelect={(v) => { const n = [...lines]; n[i] = { ...n[i], productId: v }; setLines(n) }}
+                      triggerClassName="flex-1 h-9"
+                    />
                     <UnitQtyInputs
                       pcs={l.qtyPcs}
                       upc={Math.max(1, lp?.unitsPerCarton ?? 1)}

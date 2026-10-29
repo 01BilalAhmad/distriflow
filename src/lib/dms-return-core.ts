@@ -166,6 +166,22 @@ export function returnTypeLabel(type?: string | null): string {
 }
 
 /**
+ * Task 29 — CATEGORY-GATED RESTOCK (user ki zubaan):
+ * "UnSold category select karo to inventory main add ho jayega kyunke wo fresh stock
+ * hai, dobara sale ho sakta hai — lekin Expired ya Damage select karo to inventory
+ * main add NAHI hona chahiye."
+ *
+ * Sirf UNSOLD maal warehouse mein wapas jata hai (fresh/resellable). DAMAGED/EXPIRED
+ * becha nahi ja sakta — wo floor par claim stock hota hai (Damage & Expiry report
+ * mein count hota hai, inventory nahi). Unknown/legacy type => restock (purana
+ * behavior — returnTypeLabel bhi unknown ko 'Return Stock' hi maanta hai, dono
+ * consistent rakhe hain).
+ */
+export function restockEligible(type?: string | null): boolean {
+  return type !== 'DAMAGED' && type !== 'EXPIRED'
+}
+
+/**
  * FIFO consumption plan — sab se PURANA advance pehle kharch hota hai (khate ki tarah).
  * Note bhi isi order mein banta hai => user ki "chhoti detail": deduction kis return ki hai.
  */

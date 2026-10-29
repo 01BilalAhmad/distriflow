@@ -2,7 +2,7 @@ import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
 import { requireUser } from '@/lib/api-auth'
 import { postLedgerEntry } from '@/lib/dms-credit'
-import { recalcSettlementRow } from '@/lib/dms-return-core'
+import { recalcSettlementRow, restockEligible } from '@/lib/dms-return-core'
 
 const round2 = (n: number) => Math.round(n * 100) / 100
 
@@ -39,15 +39,57 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     })
     if (!ret) return jsonError('Return not found', 404)
     if (ret.status !== 'APPROVED') return jsonError('Ye return already cancelled/rejected hai')
-    if (!ret.orderId || !ret.order) return jsonError('Standalone return is route se cancel nahi hota')
-    const orderId: string = ret.orderId
-    const order = ret.order
+    const orderId: string | null = ret.orderId
     const v = round2(ret.totalValue)
 
     // Tenant scope — return usi distributor ka hona chahiye jo login hai
     if (!user.profile || ret.outlet.distributorId !== user.profile.id) {
       return jsonError('Ye return aap ke scope mein nahi hai', 403)
     }
+
+    // ---------------- Task 29: STANDALONE return UNDO (simple path) ----------------
+    // User: "kabhi galti sy category galat select ho jay aur entry kr di to masla ban
+    // jayega" — standalone APPROVED return par effects sirf restock (UNSOLD) tha, is
+    // liye undo simple hai: status CANCELLED + stock wapas nikalna (UNSOLD hi).
+    if (!orderId || !ret.order) {
+      const wh = restockEligible(ret.type)
+        ? await db.warehouse.findFirst({
+            where: { distributorId: ret.outlet.distributorId },
+            orderBy: [{ isPrimary: 'desc' }],
+          })
+        : null
+      await db.$transaction(async (tx) => {
+        await tx.saleReturn.update({
+          where: { id: ret.id },
+          data: { status: 'CANCELLED', reason: `${ret.reason ?? ''} — cancelled (ghalti se return thi, wapas liya)`.trim() },
+        })
+        if (wh) {
+          for (const it of ret.items) {
+            const batch = await tx.stockBatch.findFirst({
+              where: { warehouseId: wh.id, productId: it.productId },
+              orderBy: [{ expDate: 'desc' }, { receivedAt: 'desc' }],
+            })
+            if (batch) {
+              await tx.stockBatch.update({ where: { id: batch.id }, data: { qty: Math.max(0, batch.qty - it.qty) } })
+            }
+            await tx.stockAdjustment.create({
+              data: { warehouseId: wh.id, productId: it.productId, type: 'OUT', qty: it.qty, reason: `Return cancel ${ret.returnNo} — UNSOLD wapas nikala`, userId: user.id },
+            })
+          }
+        }
+      })
+      return Response.json({
+        result: {
+          returnNo: ret.returnNo,
+          cancelledValue: v,
+          orderNo: null,
+          outletName: ret.outlet.name,
+          standalone: true,
+        },
+      })
+    }
+
+    const order = ret.order
 
     // Sirf latest approved return undo ho sakta hai
     const approved = await db.saleReturn.findMany({
@@ -73,17 +115,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       })
 
       // 2) Stock reverse — restock ka ulta (latest-expiry batch se minus + OUT adjustment)
-      for (const it of ret.items) {
-        const batch = await tx.stockBatch.findFirst({
-          where: { warehouseId: summary.warehouseId, productId: it.productId },
-          orderBy: [{ expDate: 'desc' }, { receivedAt: 'desc' }],
-        })
-        if (batch) {
-          await tx.stockBatch.update({ where: { id: batch.id }, data: { qty: Math.max(0, batch.qty - it.qty) } })
+      //    Task 29: sirf UNSOLD par — DAMAGED/EXPIRED kabhi restock hue hi nahi (category-gated)
+      if (restockEligible(ret.type)) {
+        for (const it of ret.items) {
+          const batch = await tx.stockBatch.findFirst({
+            where: { warehouseId: summary.warehouseId, productId: it.productId },
+            orderBy: [{ expDate: 'desc' }, { receivedAt: 'desc' }],
+          })
+          if (batch) {
+            await tx.stockBatch.update({ where: { id: batch.id }, data: { qty: Math.max(0, batch.qty - it.qty) } })
+          }
+          await tx.stockAdjustment.create({
+            data: { warehouseId: summary.warehouseId, productId: it.productId, type: 'OUT', qty: it.qty, reason: `Return cancel ${ret.returnNo} — ${order.orderNo}`, userId: user.id },
+          })
         }
-        await tx.stockAdjustment.create({
-          data: { warehouseId: summary.warehouseId, productId: it.productId, type: 'OUT', qty: it.qty, reason: `Return cancel ${ret.returnNo} — ${order.orderNo}`, userId: user.id },
-        })
       }
 
       // 3) Pro-rata undo amounts — usi formula se jo return ne lagaya tha (full % of bill)
