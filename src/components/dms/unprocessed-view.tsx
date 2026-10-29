@@ -166,6 +166,9 @@ export function UnprocessedBillsView() {
   // ---- Stock allocation editor state ----
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [expandedOrder, setExpandedOrder] = useState<OrderDTO | null>(null)
+  // Task 26-b: preview ladder print (cbl-print) jaisa mode-aware — INVOICE_DISCOUNT order par
+  // Noms/SalesFlo ladder (Less: Trade Offer GST se pehle), CLAIM par GST pehle (print jaisa).
+  const previewModeA = expandedOrder?.taxMode === 'INVOICE_DISCOUNT'
   const [detail, setDetail] = useState<OrderDetailDTO | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [lines, setLines] = useState<EditLine[]>([])
@@ -631,14 +634,18 @@ export function UnprocessedBillsView() {
                       <div className="flex justify-between gap-8"><span className="text-slate-500">Manual Discount</span><span className="tabular-nums text-rose-600">− {fmtPKR(preview!.manualDiscount)}</span></div>
                     )}
                     <div className="flex justify-between gap-8 border-t border-slate-200 pt-1"><span className="font-medium text-slate-700">Net Payable</span><span className="tabular-nums font-bold text-emerald-700">{preview ? fmtPKR(preview.total) : '…'}</span></div>
-                    {(preview?.tradeOfferTotal ?? 0) > 0 && (
-                      <div className="flex justify-between gap-8"><span className="text-violet-600">Trade Offer (booked snapshot)</span><span className="tabular-nums text-violet-600">− {fmtPKR(preview!.tradeOfferTotal ?? 0)}</span></div>
+                    {/* Task 26-b: ladder mode-aware (print jaisa) — INVOICE_DISCOUNT = Noms ladder */}
+                    {previewModeA && (preview?.tradeOfferTotal ?? 0) > 0 && (
+                      <div className="flex justify-between gap-8"><span className="text-violet-600">Less: Trade Offer (GST se pehle)</span><span className="tabular-nums text-violet-600">− {fmtPKR(preview!.tradeOfferTotal ?? 0)}</span></div>
                     )}
                     {(preview?.gstTotal ?? 0) > 0 && (
-                      <div className="flex justify-between gap-8"><span className="text-blue-600">GST (Sales Tax)</span><span className="tabular-nums text-blue-600">+ {fmtPKR(preview!.gstTotal ?? 0)}</span></div>
+                      <div className="flex justify-between gap-8"><span className="text-blue-600">{previewModeA ? 'Sales Tax (GST)' : 'GST (Sales Tax)'}</span><span className="tabular-nums text-blue-600">+ {fmtPKR(preview!.gstTotal ?? 0)}</span></div>
                     )}
                     {(preview?.advanceTax ?? 0) > 0 && (
                       <div className="flex justify-between gap-8"><span className="text-blue-600">Advance Tax ({preview!.filerStatus === 'FILER' ? 'Filer' : 'Non-Filer'}{preview!.advanceTaxRate != null ? ` ${preview!.advanceTaxRate}%` : ''})</span><span className="tabular-nums text-blue-600">+ {fmtPKR(preview!.advanceTax ?? 0)}</span></div>
+                    )}
+                    {!previewModeA && (preview?.tradeOfferTotal ?? 0) > 0 && (
+                      <div className="flex justify-between gap-8"><span className="text-violet-600">Trade Offer</span><span className="tabular-nums text-violet-600">− {fmtPKR(preview!.tradeOfferTotal ?? 0)}</span></div>
                     )}
                     {((preview?.tradeOfferTotal ?? 0) > 0 || (preview?.gstTotal ?? 0) > 0) && (preview?.payable ?? 0) > 0 && (
                       <div className="flex justify-between gap-8 border-t border-slate-200 pt-1"><span className="font-medium text-slate-700">Grand Total Payable</span><span className="tabular-nums font-semibold text-slate-900">{fmtPKR(preview!.payable ?? 0)}</span></div>

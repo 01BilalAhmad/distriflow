@@ -482,6 +482,9 @@ function InvoiceDialog({ invoiceId, returns = [], onClose }: { invoiceId: string
   const [data, setData] = useState<InvoiceData | null>(null)
   const [printing, setPrinting] = useState(false)
   const [gst, setGst] = useState<{ enabled: boolean; rate: number } | null>(null)
+  // Task 26-b: screen ladder print (cbl-print) jaisa mode-aware — INVOICE_DISCOUNT par
+  // Noms/SalesFlo ladder (Less: Trade Offer GST se pehle), CLAIM par GST pehle (print jaisa).
+  const invModeA = data?.taxMode === 'INVOICE_DISCOUNT'
 
   useEffect(() => {
     if (!invoiceId) return
@@ -543,15 +546,16 @@ function InvoiceDialog({ invoiceId, returns = [], onClose }: { invoiceId: string
                 </div>
               )}
               <div className="flex justify-between gap-3 font-bold text-lg text-slate-900"><span>Payable</span><span className="whitespace-nowrap tabular-nums">{fmtPKR(data.total)}</span></div>
-              {(data.tradeOfferTotal ?? 0) > 0 && (
+              {/* Task 26-b: ladder mode-aware (print jaisa) — INVOICE_DISCOUNT = Noms ladder */}
+              {invModeA && (data.tradeOfferTotal ?? 0) > 0 && (
                 <div className="flex justify-between gap-3 text-sm text-violet-600">
-                  <span>Trade Offer</span>
+                  <span>Less: Trade Offer (GST se pehle)</span>
                   <span className="whitespace-nowrap tabular-nums">- {fmtPKR(data.tradeOfferTotal ?? 0)}</span>
                 </div>
               )}
               {(data.gstTotal ?? 0) > 0 && (
                 <div className="flex justify-between gap-3 text-sm text-blue-600">
-                  <span>GST (Sales Tax)</span>
+                  <span>{invModeA ? 'Sales Tax (GST)' : 'GST (Sales Tax)'}</span>
                   <span className="whitespace-nowrap tabular-nums">+ {fmtPKR(data.gstTotal ?? 0)}</span>
                 </div>
               )}
@@ -559,6 +563,12 @@ function InvoiceDialog({ invoiceId, returns = [], onClose }: { invoiceId: string
                 <div className="flex justify-between gap-3 text-sm text-blue-600">
                   <span>Advance Tax ({data.advanceTaxRate != null ? `${data.advanceTaxRate}%` : ''}{data.filerStatus ? ` — ${data.filerStatus === 'FILER' ? 'Filer' : 'Non-Filer'}` : ''})</span>
                   <span className="whitespace-nowrap tabular-nums">+ {fmtPKR(data.advanceTax ?? 0)}</span>
+                </div>
+              )}
+              {!invModeA && (data.tradeOfferTotal ?? 0) > 0 && (
+                <div className="flex justify-between gap-3 text-sm text-violet-600">
+                  <span>Trade Offer</span>
+                  <span className="whitespace-nowrap tabular-nums">- {fmtPKR(data.tradeOfferTotal ?? 0)}</span>
                 </div>
               )}
               {((data.tradeOfferTotal ?? 0) > 0 || (data.gstTotal ?? 0) > 0) ? (

@@ -239,6 +239,11 @@ function OrderDetailDialog({ order, items, onClose }: { order: OrderDTO | null; 
   // ISI shared helper se). Purani orders (stack nahi) helper khud legacy fallback use karta hai.
   const detailPromos = useMemo(() => aggregateSchemePromos(items ?? []), [items])
 
+  // Task 26-b: screen ladder bhi print (cbl-print) jaisa mode-aware — INVOICE_DISCOUNT order
+  // par Noms/SalesFlo ladder (Trade Offer GST se PEHLE minus dikhta hai). Numbers pehle se
+  // sahi the (Task 26 calc) — sirf presentation ka tarteeb yahan fix ho rahi hai.
+  const detailModeA = order?.taxMode === 'INVOICE_DISCOUNT'
+
   return (
     <>
     <Dialog open={!!order} onOpenChange={(v) => !v && onClose()}>
@@ -305,13 +310,20 @@ function OrderDetailDialog({ order, items, onClose }: { order: OrderDTO | null; 
                 </div>
               )}
               <div className="flex justify-between gap-3 font-bold text-lg text-slate-900"><span>Total</span><span className="whitespace-nowrap tabular-nums">{fmtPKR(order.total)}</span></div>
+              {/* Task 26-b: ladder mode-aware (print jaisa) — INVOICE_DISCOUNT = Noms ladder */}
+              {detailModeA && (order.tradeOfferTotal ?? 0) > 0 && (
+                <div className="flex justify-between gap-3 text-sm text-violet-600">
+                  <span>Less: Trade Offer (GST se pehle)</span>
+                  <span className="whitespace-nowrap tabular-nums">- {fmtPKR(order.tradeOfferTotal ?? 0)}</span>
+                </div>
+              )}
               {(order.gstTotal ?? 0) > 0 && (
                 <div className="flex justify-between gap-3 text-sm text-blue-600">
-                  <span>GST (Sales Tax)</span>
+                  <span>{detailModeA ? 'Sales Tax (GST)' : 'GST (Sales Tax)'}</span>
                   <span className="whitespace-nowrap tabular-nums">+ {fmtPKR(order.gstTotal ?? 0)}</span>
                 </div>
               )}
-              {(order.tradeOfferTotal ?? 0) > 0 && (
+              {!detailModeA && (order.tradeOfferTotal ?? 0) > 0 && (
                 <div className="flex justify-between gap-3 text-sm text-violet-600">
                   <span>Trade Offer</span>
                   <span className="whitespace-nowrap tabular-nums">- {fmtPKR(order.tradeOfferTotal ?? 0)}</span>
@@ -582,6 +594,10 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
   // Task 52: GST merged (manual ke baad wale) net par — jaisa server book karta hai
   const grandPayable = Math.round((netTotal - toTotal + merged.gstTotal + advTaxPreview) * 100) / 100
 
+  // Task 26-b: preview ladder mode-aware — SAARI lines Mode A (INVOICE_DISCOUNT companies)
+  // hon to Noms/SalesFlo ladder (Less: Trade Offer GST se pehle). Mixed = print jaisa purana ladder.
+  const previewModeA = computed.rows.length > 0 && computed.rows.every((r) => r.modeA)
+
   function deleteDiscount() {
     setDiscType('NONE')
     setDiscValue('')
@@ -837,12 +853,14 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
                   ))}
                   {(mr?.manualShare ?? 0) > 0 && <span className="text-amber-600 font-medium whitespace-nowrap">Manual − {fmtPKR(mr!.manualShare)}</span>}
                   <span className="text-slate-500 whitespace-nowrap">Net <b className="text-slate-700">{fmtPKR(mr?.total ?? r.total)}</b></span>
+                  {/* Task 26-b: Mode A line par TO chip GST se PEHLE (Noms ladder — print jaisa) */}
+                  {r.modeA && r.tradeOffer > 0 && <span className="text-violet-600 font-semibold whitespace-nowrap">Less TO − {fmtPKR(r.tradeOffer)}</span>}
                   {(mr?.gstAmt ?? r.gstAmt) > 0 ? (
                     <span className="text-blue-600 font-medium whitespace-nowrap">GST {r.gstRate}% + {fmtPKR(mr?.gstAmt ?? r.gstAmt)}</span>
                   ) : (
                     <span className="text-slate-400 whitespace-nowrap">GST nahi lagta</span>
                   )}
-                  {r.tradeOffer > 0 && <span className="text-violet-600 font-semibold whitespace-nowrap">TO − {fmtPKR(r.tradeOffer)}</span>}
+                  {!r.modeA && r.tradeOffer > 0 && <span className="text-violet-600 font-semibold whitespace-nowrap">TO − {fmtPKR(r.tradeOffer)}</span>}
                   <span className="text-slate-500 ml-auto whitespace-nowrap">Line payable: <b className="text-slate-700">{fmtPKR(Math.max(0, Math.round(((mr?.total ?? r.total) - r.tradeOffer + (mr?.gstAmt ?? r.gstAmt)) * 100) / 100))}</b></span>
                 </div>
                 {/* Task 26: available stock guard — requested qty available se bara ho to red warning */}
@@ -913,13 +931,21 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
             ))}
             {manualDiscount > 0 && <div className="flex justify-between text-emerald-600 font-medium"><span>Manual Discount</span><span>- {fmtPKR(manualDiscount)}</span></div>}
             <div className="flex justify-between font-bold text-slate-900"><span>Net Total</span><span>{fmtPKR(netTotal)}</span></div>
-            {merged.gstTotal > 0 && <div className="flex justify-between text-blue-600 font-medium"><span>GST (Sales Tax)</span><span>+ {fmtPKR(merged.gstTotal)}</span></div>}
-            {computed.toTotal > 0 && <div className="flex justify-between text-violet-600 font-medium"><span>Trade Offer</span><span>- {fmtPKR(computed.toTotal)}</span></div>}
+            {/* Task 26-b: booking ladder mode-aware (print cbl-print jaisa) —
+                INVOICE_DISCOUNT = Noms/SalesFlo ladder: Less: Trade Offer GST se PEHLE */}
+            {previewModeA && computed.toTotal > 0 && (
+              <div className="flex justify-between text-violet-600 font-medium"><span>Less: Trade Offer (GST se pehle)</span><span>- {fmtPKR(computed.toTotal)}</span></div>
+            )}
+            {merged.gstTotal > 0 && <div className="flex justify-between text-blue-600 font-medium"><span>{previewModeA ? 'Sales Tax (GST)' : 'GST (Sales Tax)'}</span><span>+ {fmtPKR(merged.gstTotal)}</span></div>}
+            {!previewModeA && computed.toTotal > 0 && <div className="flex justify-between text-violet-600 font-medium"><span>Trade Offer</span><span>- {fmtPKR(computed.toTotal)}</span></div>}
             {outlet && taxRates && advTaxPreview > 0 && (
               <div className="flex justify-between text-blue-600"><span>Advance Tax ({outlet.filerStatus === 'FILER' ? `Filer ${taxRates.filer}` : `Non-Filer ${taxRates.nonFiler}`}%)</span><span>+ {fmtPKR(advTaxPreview)}</span></div>
             )}
             {(computed.toTotal > 0 || merged.gstTotal > 0 || advTaxPreview > 0) && (
               <div className="flex justify-between font-bold text-emerald-700 border-t border-slate-200 pt-1"><span>Total Payable</span><span>{fmtPKR(grandPayable)}</span></div>
+            )}
+            {previewModeA && computed.toTotal > 0 && (
+              <p className="text-[11px] text-amber-600 font-medium">Invoice Discount mode active — is company ka Trade Offer GST se PEHLE kata gaya (Noms/SalesFlo style)</p>
             )}
           </div>
           <Button onClick={save} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700">
