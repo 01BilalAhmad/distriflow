@@ -14,7 +14,7 @@ import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR } from '@/lib/dms-api'
 import type { OutletDTO, SalesmanPerfDTO, ShopCategoryDTO } from '@/lib/dms-types'
 import { BulkImportDialog, type BulkColumn, type ParseOutcome } from '@/components/dms/bulk-import-dialog'
-import { Plus, Search, MapPin, Loader2, Phone, Store, Pencil, Settings2, FileText, CalendarDays, Upload, ShoppingCart, UserCheck, Tags, Check, X, Trash2 } from 'lucide-react'
+import { Plus, Search, MapPin, Loader2, Phone, Store, Pencil, Settings2, FileText, CalendarDays, Upload, ShoppingCart, UserCheck, Tags, Check, X, Trash2, UserCog } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
 export const DAY_LIST = [
@@ -62,6 +62,22 @@ export const OUTLET_SAMPLE_ROWS = [
   ['Madina Wholesale', 'Sheikh Imran', '0345-1122334', 'Sabzi Mandi Road', 'Faisalabad', 'WHOLESALE', '21', '', '', '', '', ''],
 ]
 
+// Task 103-c — UPDATE import: mojooda shops par sirf NTN/CNIC/Owner/Phone update
+export const OUTLET_UPDATE_COLUMNS: BulkColumn[] = [
+  { key: 'code', label: 'Shop Code', hint: 'Shop ka code (1015 ya OUT-1015) — sab se pakka match' },
+  { key: 'name', label: 'Shop Name', hint: 'Code khali ho to exact naam se match hoga' },
+  { key: 'ownerName', label: 'Owner', hint: 'Khali cell = koi tabdeeli nahi' },
+  { key: 'phone', label: 'Phone', hint: 'Khali cell = koi tabdeeli nahi' },
+  { key: 'ntn', label: 'NTN', hint: 'NTN dene par shop FILER ban jayegi — khali = no change' },
+  { key: 'cnic', label: 'CNIC', hint: '13 digits (00000-0000000-0) — khali = no change' },
+]
+
+export const OUTLET_UPDATE_SAMPLE_ROWS = [
+  ['1015', 'Irfan K/S', 'Muhammad Irfan', '0300-1112223', '', '31301-0409967-1'],
+  ['', 'Al-Karam Super Mart', 'Nadeem Ahmed', '0321-9876543', '1234567-8', ''],
+  ['1022', 'Madina Wholesale', '', '', '9876543-2', ''],
+]
+
 export function OutletsView() {
   const user = useDMS((s) => s.user)
   const setFocusOrderOutlet = useDMS((s) => s.setFocusOrderOutlet)
@@ -74,6 +90,8 @@ export function OutletsView() {
   const [editOutlet, setEditOutlet] = useState<OutletDTO | null>(null)
   const [taxOpen, setTaxOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  // Task 103-c: existing shops ka NTN/CNIC/Owner/Phone bulk update
+  const [updateOpen, setUpdateOpen] = useState(false)
   // Task 92: per-tenant shop categories — manager dialog + form selects isi list se
   const [shopCats, setShopCats] = useState<ShopCategoryDTO[]>([])
   const [catsOpen, setCatsOpen] = useState(false)
@@ -119,6 +137,9 @@ export function OutletsView() {
             </Button>
             <Button variant="outline" onClick={() => setImportOpen(true)} className="border-emerald-300 text-emerald-700 hover:bg-emerald-50">
               <Upload className="h-4 w-4 mr-1.5" /> Bulk Import
+            </Button>
+            <Button variant="outline" onClick={() => setUpdateOpen(true)} className="border-blue-300 text-blue-700 hover:bg-blue-50" title="Mojooda shops ka NTN / CNIC / Owner / Phone Excel se update karein">
+              <UserCog className="h-4 w-4 mr-1.5" /> Update Shops
             </Button>
             <Button variant="outline" onClick={() => setCatsOpen(true)} className="border-emerald-300 text-emerald-700 hover:bg-emerald-50" title="Shop categories add / rename / delete karein">
               <Tags className="h-4 w-4 mr-1.5" /> Categories
@@ -238,6 +259,26 @@ export function OutletsView() {
         }}
         onDone={load}
       />
+      {/* Task 103-c: UPDATE import — match pehle Shop Code (OUT-1015 ya 1015) phir exact naam; khali cell = no change */}
+      <BulkImportDialog
+        open={updateOpen}
+        onOpenChange={setUpdateOpen}
+        title="Update Shops (NTN / CNIC / Owner / Phone)"
+        description="Mojooda shops ko Excel/CSV se update karein — pehle Shop Code se match, warna exact naam se. Khali cell = us field par koi tabdeeli nahi. Nayi shop yahan NAHI banti (us ke liye Bulk Import)."
+        accent="bg-blue-600 hover:bg-blue-700"
+        columns={OUTLET_UPDATE_COLUMNS}
+        sampleRows={OUTLET_UPDATE_SAMPLE_ROWS}
+        parseRow={parseOutletUpdateRow}
+        importRequest={async (rows) => {
+          const r = await api<{ imported: number; skipped: { row: number; name: string; reason: string }[]; warnings?: { row: number; name: string; reason: string }[] }>('/api/outlets/update-import', {
+            method: 'POST',
+            body: JSON.stringify({ rows }),
+          })
+          toast({ title: `${r.imported} shops update hui ✓`, description: r.skipped.length ? `${r.skipped.length} skip hui — wajah dialog mein dekhein` : 'Sab shops update ho gayin' })
+          return r
+        }}
+        onDone={load}
+      />
     </div>
   )
 }
@@ -250,6 +291,17 @@ function parseOutletRow(r: Record<string, string>): ParseOutcome<Record<string, 
   if (cd && !Number.isFinite(Number(cd))) return { ok: false, error: `Credit days ghalat: "${cd}"` }
   const fs = (r.filerStatus ?? '').trim().toUpperCase()
   if (fs && fs !== 'FILER' && fs !== 'NON_FILER') return { ok: false, error: 'Filer Status FILER ya NON_FILER likhein (ya khali chhorein)' }
+  return { ok: true, value: r }
+}
+
+/** Task 103-c: UPDATE row validate — code/naam mein se koi ek + kam az kam ek update-field */
+function parseOutletUpdateRow(r: Record<string, string>): ParseOutcome<Record<string, string>> {
+  const code = (r.code ?? '').trim()
+  const name = (r.name ?? '').trim()
+  if (!code && !name) return { ok: false, error: 'Shop Code ya Shop Name — koi ek zaroori hai (match isi se hoga)' }
+  if (!['ownerName', 'phone', 'ntn', 'cnic'].some((k) => (r[k] ?? '').trim())) {
+    return { ok: false, error: 'Owner/Phone/NTN/CNIC — kam az kam ek value dein (khali cell = no change)' }
+  }
   return { ok: true, value: r }
 }
 
