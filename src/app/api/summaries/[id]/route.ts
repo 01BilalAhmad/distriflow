@@ -128,6 +128,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           status: o.status,
           orderDate: new Date(o.orderDate).toISOString(),
           settled: o.settlements.length > 0,
+          // Task 28: load form/settlement sheet Amount after-adjustment ke liye (booking snapshot)
+          advanceApplied: o.advanceApplied,
+          advanceAppliedNote: o.advanceAppliedNote,
           outletAdvance: advanceByOutlet.get(o.outlet.id) ?? null,
           items: o.items.map((it) => ({
             id: it.id,

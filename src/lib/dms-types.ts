@@ -580,6 +580,11 @@ export interface SummaryOrderDTO {
    * par deduction line ("kis cheez ki deduction hai") isi se dikhti hai.
    */
   outletAdvance?: OutletAdvanceInfoDTO | null
+  /** Task 28: is bill par lagne wala return claim adjustment (booking snapshot) —
+   * load form/settlement sheet Amount isi se BAAD mein (after adjustment) nikalta hai */
+  advanceApplied?: number
+  /** Task 28: chhoti detail — "RET-12 (ORD-45) Rs 2,000.00 — Damage & Expiry Claim • ..." */
+  advanceAppliedNote?: string | null
 }
 
 export interface OutletAdvanceSourceDTO {

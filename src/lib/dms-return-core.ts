@@ -199,13 +199,29 @@ export function advanceAllocParts(allocations: AdvanceAllocation[]): string {
     .join(' • ')
 }
 
-/** Consumption note — settlement sheet/ledger par yehi "chhoti detail" dikhti hai */
+/** Consumption note — settlement sheet/ledger par yehi "chhoti detail" dikhti hai.
+ * Task 28: "Advance adjust:" prefix ab "Claim adjust:" — user: adjustment ka title
+ * "Advance Adjustment" nahi, "Claim Adjustment" hona chahiye (return claim ki wajah se). */
 export function advanceNote(
   allocations: AdvanceAllocation[],
   orderNo?: string | null,
 ): string {
-  const base = `Advance adjust: ${advanceAllocParts(allocations)}`
+  const base = `Claim adjust: ${advanceAllocParts(allocations)}`
   return orderNo ? `${base} • ${orderNo}` : base
+}
+
+/**
+ * Task 28 — Claim Adjustment ka TITLE (bill/settlement/load form par row/column ka naam).
+ * Category-aware: sab allocations ek hi qism ke hon to qism bhi title mein —
+ * "Claim Adjustment (Damage & Expiry)" / "Claim Adjustment (Return Stock)";
+ * mixed/legacy/unknown par generic "Claim Adjustment" (per-RET qism note mein hai hi).
+ * User: "title advance adjustment nai likhan plz Claim Adjustment likhna hy ya Jo bhi
+ * hm category select krin gy return ki ya expired stock ki"
+ */
+export function claimAdjustTitle(allocations: AdvanceAllocation[]): string {
+  const cats = [...new Set(allocations.map((a) => returnTypeLabel(a.type)))]
+  if (cats.length === 1) return `Claim Adjustment (${cats[0]})`
+  return 'Claim Adjustment'
 }
 
 // ---------------- SETTLEMENT ROW RECALC ----------------

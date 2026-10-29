@@ -867,7 +867,7 @@ export function SettlementView() {
                               <p className="text-[10px] text-orange-600">Bill {fmtPKR(r.bill)}{r.returnValue > 0 ? ` − Ret ${fmtPKR(r.returnValue)}` : ''}{r.gst > 0 ? ` + GST ${fmtPKR(r.gst)}` : ''}{r.to > 0 ? ` − TO ${fmtPKR(r.to)}` : ''}{r.tax > 0 ? ` + Tax ${fmtPKR(r.tax)}` : ''}{r.taxReversal > 0 ? <span className="text-blue-500"> (−{fmtPKR(r.taxReversal)} rev)</span> : ''}</p>
                             )}
                             {r.advUse > 0 && (
-                              <p className="text-[10px] text-emerald-600 font-semibold" title="Shop ka return advance — bill se auto-adjust (FIFO)">Advance −{fmtPKR(r.advUse)} • {r.advDetail}</p>
+                              <p className="text-[10px] text-emerald-600 font-semibold" title="Shop ka return claim — bill se auto-adjust (FIFO)">Claim −{fmtPKR(r.advUse)} • {r.advDetail}</p>
                             )}
                             {r.credit > 0 && <p className="text-[10px] text-red-600 font-semibold">Udhaar {fmtPKR(r.credit)}</p>}
                           </div>
@@ -919,7 +919,7 @@ export function SettlementView() {
                               <p className="font-semibold">{fmtPKR(r.bill)}</p>
                             )}
                             {r.advUse > 0 && (
-                              <p className="text-[10px] text-emerald-600 font-semibold" title="Shop ka return advance — bill se auto-adjust (FIFO)">Advance −{fmtPKR(r.advUse)} • {r.advDetail}</p>
+                              <p className="text-[10px] text-emerald-600 font-semibold" title="Shop ka return claim — bill se auto-adjust (FIFO)">Claim −{fmtPKR(r.advUse)} • {r.advDetail}</p>
                             )}
                           </TableCell>
                           <TableCell className="text-center">
@@ -963,7 +963,7 @@ export function SettlementView() {
                       <div><p className="text-[11px] text-slate-400 uppercase">Total Return</p><p className="font-bold text-orange-600 text-lg">{fmtPKR(totalReturns)}</p></div>
                     )}
                     {totalAdvUse > 0 && (
-                      <div><p className="text-[11px] text-slate-400 uppercase">Advance Adjust</p><p className="font-bold text-emerald-600 text-lg">−{fmtPKR(totalAdvUse)}</p></div>
+                      <div><p className="text-[11px] text-slate-400 uppercase">Claim Adjustment</p><p className="font-bold text-emerald-600 text-lg">−{fmtPKR(totalAdvUse)}</p></div>
                     )}
                     <div><p className="text-[11px] text-slate-400 uppercase">Total Udhaar</p><p className="font-bold text-red-600 text-lg">{fmtPKR(totalCredit)}</p></div>
                   </div>

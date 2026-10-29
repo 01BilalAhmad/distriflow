@@ -7,6 +7,7 @@ import {
   splitReturnCredit,
   planAdvanceConsumption,
   advanceNote,
+  claimAdjustTitle,
   returnTypeLabel,
   advanceAllocParts,
   recalcSettlementRow,
@@ -128,7 +129,7 @@ describe('planAdvanceConsumption — FIFO', () => {
   it('note mein returnNo + orderNo + TYPE label (user ki chhoti detail) hoti hai', () => {
     const p = planAdvanceConsumption(sources, 600)
     expect(advanceNote(p.allocations, 'ORD-900')).toBe(
-      'Advance adjust: RET-101 (ORD-1) Rs 500.00 — Damage & Expiry Claim • RET-102 Rs 100.00 — Return Stock • ORD-900',
+      'Claim adjust: RET-101 (ORD-1) Rs 500.00 — Damage & Expiry Claim • RET-102 Rs 100.00 — Return Stock • ORD-900',
     )
   })
 })
@@ -149,6 +150,34 @@ describe('returnTypeLabel — Task 103 (user ki zubaan)', () => {
     expect(
       advanceAllocParts([{ returnId: 'r1', returnNo: 'RET-1', orderNo: 'ORD-2', type: 'DAMAGED', amount: 1500 }]),
     ).toBe('RET-1 (ORD-2) Rs 1500.00 — Damage & Expiry Claim')
+  })
+})
+
+describe('claimAdjustTitle — Task 28 (user ki zubaan: Advance Adjustment nahi, Claim Adjustment)', () => {
+  it('sab allocations Damage & Expiry => title mein bhi wahi qism', () => {
+    expect(
+      claimAdjustTitle([
+        { returnId: 'r1', returnNo: 'RET-1', orderNo: null, type: 'DAMAGED', amount: 500 },
+        { returnId: 'r2', returnNo: 'RET-2', orderNo: null, type: 'EXPIRED', amount: 100 },
+      ]),
+    ).toBe('Claim Adjustment (Damage & Expiry Claim)')
+  })
+  it('sab Return Stock => Claim Adjustment (Return Stock)', () => {
+    expect(
+      claimAdjustTitle([{ returnId: 'r1', returnNo: 'RET-1', orderNo: null, type: 'UNSOLD', amount: 200 }]),
+    ).toBe('Claim Adjustment (Return Stock)')
+  })
+  it('mixed qism => generic Claim Adjustment (per-RET qism note mein hai)', () => {
+    expect(
+      claimAdjustTitle([
+        { returnId: 'r1', returnNo: 'RET-1', orderNo: null, type: 'DAMAGED', amount: 500 },
+        { returnId: 'r2', returnNo: 'RET-2', orderNo: null, type: 'UNSOLD', amount: 100 },
+      ]),
+    ).toBe('Claim Adjustment')
+  })
+  it('khali/legacy => generic Claim Adjustment', () => {
+    expect(claimAdjustTitle([])).toBe('Claim Adjustment')
+    expect(claimAdjustTitle([{ returnId: 'r1', returnNo: 'RET-1', orderNo: null, type: null, amount: 50 }])).toBe('Claim Adjustment (Return Stock)')
   })
 })
 

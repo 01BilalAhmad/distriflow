@@ -358,7 +358,7 @@ function OrderDetailDialog({ order, items, onClose }: { order: OrderDTO | null; 
               {invData && (invData.advanceApplied ?? 0) > 0.005 && (
                 <div className="text-sm text-emerald-600">
                   <div className="flex justify-between gap-3">
-                    <span>Advance Adjust (return ka advance is bill se)</span>
+                    <span>Claim Adjustment (return ka claim is bill se)</span>
                     <span className="whitespace-nowrap tabular-nums">- {fmtPKR(invData.advanceApplied ?? 0)}</span>
                   </div>
                   {invData.advanceAppliedNote && (
@@ -712,7 +712,7 @@ function CreateOrderDialog({ open, onOpenChange, onCreated, prefillOutletId, onP
       const cw = res.order.creditWarning
       // Task 102: booking par return advance auto-adjust foran dikhao (amount + kis return ki)
       const advMsg = (res.order.advanceApplied ?? 0) > 0.005
-        ? ` • Advance −${fmtPKR(res.order.advanceApplied!)} (return)${res.order.advanceAppliedNote ? ` — ${res.order.advanceAppliedNote}` : ''}`
+        ? ` • Claim Adj −${fmtPKR(res.order.advanceApplied!)} (return)${res.order.advanceAppliedNote ? ` — ${res.order.advanceAppliedNote}` : ''}`
         : ''
       toast({
         title: `Order ${res.order.orderNo} Booked ✓${cw ? ' — Credit Warning!' : ''}`,

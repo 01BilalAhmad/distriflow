@@ -256,7 +256,13 @@ export function CblLoadFormDoc({ detail, onInvoiceClick }: { detail: SummaryDeta
   )
   // Task 79: Amount ab FINAL PAYABLE (total − TO + GST + AdvTax) — wahi jo bill par chapta hai.
   // Pehle goods net (o.total) tha — load form/invoice/print par amount match nahi karta tha.
-  const totAmount = detail.orders.reduce((s, o) => s + orderGrandPayable(o), 0)
+  // Task 28: Amount AB CLAIM ADJUSTMENT KE BAAD ka hai (Grand Net — bill ke Grand Net Total
+  // se match) — van/supplier ko confusion na ho: misal STM-6015 Irfan KS — bill 3426,
+  // claim 2054, wasooli sirf 1382. Claim Adj column deduction saaf dikhata hai.
+  const custAdj = detail.orders.map((o) => Math.min(o.advanceApplied ?? 0, orderGrandPayable(o)))
+  const custNet = detail.orders.map((o, i) => Math.round((orderGrandPayable(o) - custAdj[i]) * 100) / 100)
+  const totAmount = custNet.reduce((s, n) => s + n, 0) // Total = wasooli yogy (after adjustment)
+  const totAdj = Math.round(custAdj.reduce((s, a) => s + a, 0) * 100) / 100
   const custUnits = detail.orders.map((o) => ({
     issued: o.items.reduce((s, it) => s + it.qty, 0), // PIECES
     free: o.items.reduce((s, it) => s + it.freeQty, 0),
@@ -367,9 +373,10 @@ export function CblLoadFormDoc({ detail, onInvoiceClick }: { detail: SummaryDeta
       <div className="cbl-page bg-white px-7 py-6">
         <table style={{ fontSize: 10.5 }}>
           <colgroup>
-            <col style={{ width: '4%' }} /><col style={{ width: '11%' }} /><col style={{ width: '24%' }} /><col style={{ width: '9%' }} />
-            <col style={{ width: '7%' }} /><col style={{ width: '7%' }} /><col style={{ width: '6%' }} />
-            <col style={{ width: '7%' }} /><col style={{ width: '9%' }} /><col style={{ width: '7%' }} /><col style={{ width: '9%' }} />
+            <col style={{ width: '4%' }} /><col style={{ width: '10%' }} /><col style={{ width: '22%' }} /><col style={{ width: '8%' }} />
+            <col style={{ width: '6%' }} /><col style={{ width: '7%' }} /><col style={{ width: '6%' }} />
+            <col style={{ width: '7%' }} /><col style={{ width: '9%' }} /><col style={{ width: '7%' }} />
+            <col style={{ width: '7%' }} /><col style={{ width: '7%' }} />
           </colgroup>
           <thead>
             <tr>
@@ -383,6 +390,7 @@ export function CblLoadFormDoc({ detail, onInvoiceClick }: { detail: SummaryDeta
               <th>Total Issued Units</th>
               <th>( Returned - Extra ) Units</th>
               <th>Sales</th>
+              <th>Claim Adj</th>
               <th>Amount</th>
             </tr>
           </thead>
@@ -409,8 +417,10 @@ export function CblLoadFormDoc({ detail, onInvoiceClick }: { detail: SummaryDeta
                 <Num v={custUnits[i].issued + custUnits[i].free} />
                 {dash}
                 <Num v={custUnits[i].issued} />
-                {/* Task 79: Amount = Total Payable (Net − TO + GST + AdvTax) — bill ke Grand Total se EXACT match */}
-                <Num v={orderGrandPayable(o)} />
+                {/* Task 28: Claim Adj = is bill par kata return claim — deduction khud column mein */}
+                <Num v={custAdj[i] > 0.005 ? -custAdj[i] : 0} />
+                {/* Task 28: Amount = Payable − Claim Adj (bill ke Grand Net Total se EXACT match) */}
+                <Num v={custNet[i]} />
               </tr>
             ))}
             <tr style={{ fontWeight: 'bold', backgroundColor: '#f7f7f7' }}>
@@ -420,6 +430,7 @@ export function CblLoadFormDoc({ detail, onInvoiceClick }: { detail: SummaryDeta
               <Num v={custIssuedTotal + custFreeTotal} />
               {dash}
               <Num v={custIssuedTotal} />
+              <Num v={totAdj > 0.005 ? -totAdj : 0} />
               <Num v={totAmount} />
             </tr>
           </tbody>
@@ -809,7 +820,7 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
                   <tr><td style={{ textAlign: 'center' }}>Previous Balance:</td><td className="num">{fmt2(prevBal)}</td></tr>
                 )}
                 {advAdjust > 0.005 && (
-                  <tr><td style={{ textAlign: 'center' }}>Advance Adjust:</td><td className="num">- {fmt2(advAdjust)}</td></tr>
+                  <tr><td style={{ textAlign: 'center' }}>Claim Adjustment:</td><td className="num">- {fmt2(advAdjust)}</td></tr>
                 )}
                 {hasAccountRows && (
                   <tr><td style={{ textAlign: 'right', fontWeight: 'bold', borderTop: '1.5px solid #000' }}>Grand Net Total:</td><td className="num" style={{ fontWeight: 'bold', borderTop: '1.5px solid #000' }}>{fmtI(Math.round(grandNet))}</td></tr>
@@ -819,7 +830,7 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
             {/* Task 102: user ki "chhoti detail" — deduction kis return ki hai (RET-xxx (ORD-yyy) Rs z) */}
             {advAdjust > 0.005 && inv.advanceAppliedNote ? (
               <p className="mt-1 text-[8.5px] leading-snug" style={{ textAlign: 'right', color: '#333' }}>
-                Advance adjust: {inv.advanceAppliedNote}
+                Claim adjust: {inv.advanceAppliedNote}
               </p>
             ) : null}
           </div>
@@ -890,9 +901,12 @@ export function CblSettlementDoc({ detail }: { detail: SummaryDetailDTO }) {
     const tax = s?.advanceTax ?? o.advanceTax ?? 0
     const cash = s?.cashAmount ?? 0
     const credit = s?.creditAmount ?? 0
+    // Task 28: Claim Adj = settlement par kata return claim (advanceAdjusted) — Net Payable
+    // AB iske BAAD ka (grand net): Cash + Udhaar + Claim Adj = purana due — seedha reconciliation
+    const adj = s?.advanceAdjusted ?? 0
     return {
-      i, o, bill, ret, gst, to, tax, cash, credit,
-      net: Math.round((bill - ret + gst - to + tax) * 100) / 100,
+      i, o, bill, ret, gst, to, tax, adj, cash, credit,
+      net: Math.round((bill - ret + gst - to + tax - adj) * 100) / 100,
       type: s?.status ?? 'CASH',
     }
   })
@@ -903,6 +917,7 @@ export function CblSettlementDoc({ detail }: { detail: SummaryDetailDTO }) {
     gst: rows.reduce((a, r) => a + r.gst, 0),
     to: rows.reduce((a, r) => a + r.to, 0),
     tax: rows.reduce((a, r) => a + r.tax, 0),
+    adj: rows.reduce((a, r) => a + r.adj, 0),
     net: rows.reduce((a, r) => a + r.net, 0),
     cash: rows.reduce((a, r) => a + r.cash, 0),
     credit: rows.reduce((a, r) => a + r.credit, 0),
@@ -946,10 +961,11 @@ export function CblSettlementDoc({ detail }: { detail: SummaryDetailDTO }) {
           <colgroup>
             {/* Type col 8% — "Udhaar" label 4% mein "Udha/ar" break ho raha tha */}
             {/* Task 80: GST column add — Net Payable ab bill−ret+GST−TO+tax hai, breakup nazar aaye */}
-            <col style={{ width: '4%' }} /><col style={{ width: '9%' }} /><col style={{ width: '17%' }} />
-            <col style={{ width: '10%' }} /><col style={{ width: '8%' }} /><col style={{ width: '8%' }} />
-            <col style={{ width: '7%' }} /><col style={{ width: '11%' }} /><col style={{ width: '10%' }} />
-            <col style={{ width: '7%' }} /><col style={{ width: '9%' }} />
+            {/* Task 28: Claim Adj column — Net Payable ab adjustment ke BAAD ka (grand net) */}
+            <col style={{ width: '4%' }} /><col style={{ width: '8%' }} /><col style={{ width: '15%' }} />
+            <col style={{ width: '9%' }} /><col style={{ width: '7%' }} /><col style={{ width: '7%' }} />
+            <col style={{ width: '6%' }} /><col style={{ width: '7%' }} /><col style={{ width: '9%' }} />
+            <col style={{ width: '9%' }} /><col style={{ width: '9%' }} /><col style={{ width: '10%' }} />
           </colgroup>
           <thead>
             <tr>
@@ -960,6 +976,7 @@ export function CblSettlementDoc({ detail }: { detail: SummaryDetailDTO }) {
               <th>Stock Return</th>
               <th>GST</th>
               <th>Adv Tax</th>
+              <th>Claim Adj</th>
               <th>Net Payable</th>
               <th>Cash Received</th>
               <th>Udhaar</th>
@@ -976,6 +993,7 @@ export function CblSettlementDoc({ detail }: { detail: SummaryDetailDTO }) {
                 <Num v={r.ret} dec={2} />
                 <Num v={r.gst} dec={2} />
                 <Num v={r.tax} dec={2} />
+                <Num v={r.adj > 0.005 ? -r.adj : 0} dec={2} />
                 <Num v={r.net} dec={2} />
                 <Num v={r.cash} dec={2} />
                 <Num v={r.credit} dec={2} />
@@ -988,6 +1006,7 @@ export function CblSettlementDoc({ detail }: { detail: SummaryDetailDTO }) {
               <Num v={T.ret} dec={2} />
               <Num v={T.gst} dec={2} />
               <Num v={T.tax} dec={2} />
+              <Num v={T.adj > 0.005 ? -T.adj : 0} dec={2} />
               <Num v={T.net} dec={2} />
               <Num v={T.cash} dec={2} />
               <Num v={T.credit} dec={2} />
@@ -995,9 +1014,9 @@ export function CblSettlementDoc({ detail }: { detail: SummaryDetailDTO }) {
             </tr>
           </tbody>
         </table>
-        {(T.gst > 0 || T.to > 0) && (
+        {(T.gst > 0 || T.to > 0 || T.adj > 0) && (
           <p style={{ fontSize: 7.5, marginTop: 2, textAlign: 'right', fontStyle: 'italic' }}>
-            Net Payable = Bill − Stock Return + GST − Trade Offer + Adv Tax (Trade Offer breakup niche summary mein)
+            Net Payable = Bill − Stock Return + GST − Trade Offer + Adv Tax − Claim Adj (Trade Offer breakup niche summary mein)
           </p>
         )}
         {/* Task 101: Advance Adjust note — kis shop ka return advance is bill se kata
@@ -1007,8 +1026,8 @@ export function CblSettlementDoc({ detail }: { detail: SummaryDetailDTO }) {
             {detail.settlements.filter((s) => (s.advanceAdjusted ?? 0) > 0.005).map((s) => (
               <tr key={s.id} className="cbl-break-avoid">
                 <td style={{ border: 'none', textAlign: 'left' }}>
-                  <b>Advance Adjust:</b> {s.outletName} — Rs {(s.advanceAdjusted ?? 0).toFixed(2)}{' '}
-                  (shop ka return advance is bill se auto-adjust — cash isi se kam){s.notes ? ` • ${s.notes}` : ''}
+                  <b>Claim Adjustment:</b> {s.outletName} — Rs {(s.advanceAdjusted ?? 0).toFixed(2)}{' '}
+                  (shop ka return claim is bill se auto-adjust — cash isi se kam){s.notes ? ` • ${s.notes}` : ''}
                 </td>
               </tr>
             ))}
