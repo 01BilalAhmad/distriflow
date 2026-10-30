@@ -35,10 +35,11 @@ export function ZeroPurchaseTab() {
   const [booker, setBooker] = useState('')
   const fopts = useFilterOptions(user?.id)
 
-  // Task 67: zero shop par foran action — /orders par New Order dialog isi shop ke sath khulega
+  // Task 67: zero shop par foran action — /orders/new full-page form isi shop ke sath
+  // prefill hota hai (Task 31: dialog ki jagah ab poora page)
   function bookForShop(outletId: string) {
     setFocusOrderOutlet(outletId)
-    router.push('/orders')
+    router.push('/orders/new')
   }
 
   // Task 74 — filter-first: data sirf "Report Load Karein" par load hota hai

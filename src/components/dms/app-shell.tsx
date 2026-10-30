@@ -223,7 +223,7 @@ function SidebarBrand({ collapsed }: { collapsed: boolean }) {
 }
 
 export function DMSApp({ children }: { children: React.ReactNode }) {
-  const { user, setUser, purchaseDraftDirty } = useDMS()
+  const { user, setUser, purchaseDraftDirty, orderDraftDirty } = useDMS()
   const router = useRouter()
   const pathname = usePathname()
   const [mounted, setMounted] = useState(false)
@@ -238,7 +238,8 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
   const activeView = viewFromPath(pathname ?? '/')
   // Task 70: purchase-entry full-page form hai — nav highlight uske parent module
   // (Stock & Catalog) par rakhein, warna koi tab active nazar nahi aata.
-  const highlightView = activeView === 'purchase-entry' ? 'products' : activeView
+  // Task 31: /orders/new (order booking full page) bhi wahi — parent 'orders' module.
+  const highlightView = activeView === 'purchase-entry' ? 'products' : activeView === 'orders-new' ? 'orders' : activeView
   // Task 72: active page ka module folder — NAV ke group field se (hooks ke pehle
   // chahiye kyunki early returns ke baad wala activeModule effects mein allowed nahi)
   const activeModuleName = useMemo(
@@ -317,14 +318,19 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [drawerOpen])
 
-  // Task 65-b: Link ke sath navigation khud <a href> karta hai — onClick sirf Task 49
-  // ka purchase-draft confirm guard hai. Sirf plain left-click par chalta hai; Ctrl/Cmd
-  // click, middle-click, right-click → native browser behavior (new tab / context menu).
+  // Task 65-b: Link ke sath navigation khud <a href> karta hai — onClick sirf Task 49/31
+  // ke draft confirm guards hain (purchase-entry + orders-new). Sirf plain left-click par
+  // chalta hai; Ctrl/Cmd click, middle-click, right-click → native browser behavior.
   function guardNavClick(target: string) {
     return (e: React.MouseEvent) => {
       if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
       if (activeView === 'purchase-entry' && target !== 'purchase-entry' && purchaseDraftDirty) {
         const ok = window.confirm('Purchase invoice form mein adhoora data hai — draft auto-save ho chuka hai, wapas aaoge to poora milega.\n\nPhir bhi page chhorein?')
+        if (!ok) e.preventDefault()
+      }
+      // Task 31: order booking full page ka draft guard (purchase-entry jaisa hi)
+      if (activeView === 'orders-new' && target !== 'orders-new' && orderDraftDirty) {
+        const ok = window.confirm('Order form mein adhoora data hai — draft auto-save ho chuka hai, wapas aaoge to poora milega.\n\nPhir bhi page chhorein?')
         if (!ok) e.preventDefault()
       }
     }
@@ -338,10 +344,15 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
     }
   }
 
-  // QuickNav (⌘K) navigation — router.push wala rasta; yahan bhi wahi draft guard.
+  // QuickNav (⌘K) navigation — router.push wala rasta; yahan bhi wahi draft guards.
   function quickNavigate(key: string) {
     if (activeView === 'purchase-entry' && key !== 'purchase-entry' && purchaseDraftDirty) {
       const ok = window.confirm('Purchase invoice form mein adhoora data hai — draft auto-save ho chuka hai, wapas aaoge to poora milega.\n\nPhir bhi page chhorein?')
+      if (!ok) return
+    }
+    // Task 31: order booking full page ka draft guard
+    if (activeView === 'orders-new' && key !== 'orders-new' && orderDraftDirty) {
+      const ok = window.confirm('Order form mein adhoora data hai — draft auto-save ho chuka hai, wapas aaoge to poora milega.\n\nPhir bhi page chhorein?')
       if (!ok) return
     }
     setQuickOpen(false)
@@ -407,13 +418,13 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
   }, [])
 
   // Task 22: activeView role ke hisab se allowed nahi to allowed view par redirect
-  // Task 49: 'purchase-entry' NAV mein nahi (full-page form hai) — DISTRIBUTOR ke liye
-  // allowed list mein manually add.
+  // Task 49/31: 'purchase-entry' aur 'orders-new' NAV mein nahi (full-page forms hain) —
+  // DISTRIBUTOR ke liye allowed list mein manually add.
   // Task 65: redirect ab router.replace se (URL bhi sahi rehta hai).
   const allowedViews = useMemo(() => {
     if (!user) return []
     const base = NAV.filter((n) => n.roles.includes(user.role)).map((n) => n.key)
-    return user.role === 'DISTRIBUTOR' ? [...base, 'purchase-entry'] : base
+    return user.role === 'DISTRIBUTOR' ? [...base, 'purchase-entry', 'orders-new'] : base
   }, [user])
   useEffect(() => {
     if (user && allowedViews.length > 0 && (activeView === null || !allowedViews.includes(activeView))) {
@@ -576,7 +587,7 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
             </Link>
             <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />
             <span className="truncate font-semibold text-slate-900">
-              {activeItem?.label ?? (activeView === 'purchase-entry' ? 'Purchase Entry' : 'Dashboard')}
+              {activeItem?.label ?? (activeView === 'purchase-entry' ? 'Purchase Entry' : activeView === 'orders-new' ? 'New Order' : 'Dashboard')}
             </span>
           </nav>
           {/* Right — theme toggle + quick search + date */}

@@ -15,6 +15,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR, fmtDate, fmtNum } from '@/lib/dms-api'
 import { fmtQty, packHint } from '@/components/dms/unit-qty'
+import { ProductCombobox } from '@/components/dms/product-combobox'
 import type { InventoryData, StockRowDTO, WarehouseDTO } from '@/lib/dms-types'
 import { Plus, Minus, AlertTriangle, Warehouse as WhIcon, PackageSearch, Loader2, ChevronDown, ChevronRight, Printer, Building2, Pencil, Trash2, X } from 'lucide-react'
 import { StockReportDoc } from './stock-print'
@@ -295,14 +296,17 @@ function AdjustDialog({ open, onOpenChange, onSaved }: { open: boolean; onOpenCh
           </div>
           <div className="grid gap-1.5">
             <Label>Product</Label>
-            <Select value={productId} onValueChange={setProductId}>
-              <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
-              <SelectContent>
-                {productOptions.map((r) => (
-                  <SelectItem key={r.productId} value={r.productId}>{r.productName} ({fmtQty(r.totalQty, r.unitsPerCarton, r.pcsPerBox)})</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {/* Task 32: SEARCHABLE product picker — pehla plain Select tha jo sainkron SKUs mein
+                scroll karna parta tha (Task 67/81 jaisa ProductCombobox ab yahan bhi) */}
+            <ProductCombobox
+              products={productOptions.map((r) => ({
+                id: r.productId, name: r.productName, sku: r.sku, brand: r.brand,
+                meta: `stock ${fmtQty(r.totalQty, r.unitsPerCarton, r.pcsPerBox)}`,
+              }))}
+              value={productId}
+              onSelect={setProductId}
+              placeholder="Select product"
+            />
             {selected && (
               <p className="text-xs text-slate-400">
                 Available: {fmtQty(selected.totalQty, selected.unitsPerCarton, selected.pcsPerBox)} • {packHint(selected.unitsPerCarton, selected.boxesPerCarton, selected.pcsPerBox)}

@@ -624,10 +624,11 @@ export function RecoveryView() {
                               />
                               {r.over && <p className="text-[10px] text-red-500 mt-0.5">Udhaar sirf {fmtPKR(r.shop.balance)} hai</p>}
                               <div className="mt-1 flex flex-wrap gap-1">
-                                <button type="button" onClick={() => fillFull(r.shop.outletId, r.shop.balance)} className="h-5 rounded border border-slate-200 bg-white px-1.5 text-[9px] font-bold text-slate-600 hover:border-emerald-400 hover:text-emerald-700 transition-colors" title="Poora udhaar">Full</button>
-                                <button type="button" onClick={() => addAmount(r.shop.outletId, 1000)} className="h-5 rounded border border-slate-200 bg-white px-1.5 text-[9px] font-bold text-slate-600 hover:border-emerald-400 hover:text-emerald-700 transition-colors" title="Rs 1000 add (partial allowed)">+1000</button>
-                                <button type="button" onClick={() => addAmount(r.shop.outletId, 5000)} className="h-5 rounded border border-slate-200 bg-white px-1.5 text-[9px] font-bold text-slate-600 hover:border-emerald-400 hover:text-emerald-700 transition-colors" title="Rs 5000 add (partial allowed)">+5000</button>
-                                <button type="button" onClick={() => fillRound100(r.shop.outletId, r.shop.balance)} className="h-5 rounded border border-slate-200 bg-white px-1.5 text-[9px] font-bold text-slate-600 hover:border-emerald-400 hover:text-emerald-700 transition-colors" title="100 ke round mein (neeche wala)">Round-100</button>
+                                {/* Task 32: h-5 → h-8 — 20px touch targets phone par dabana mushkil tha */}
+                                <button type="button" onClick={() => fillFull(r.shop.outletId, r.shop.balance)} className="h-8 rounded border border-slate-200 bg-white px-2.5 text-[11px] font-bold text-slate-600 hover:border-emerald-400 hover:text-emerald-700 transition-colors" title="Poora udhaar">Full</button>
+                                <button type="button" onClick={() => addAmount(r.shop.outletId, 1000)} className="h-8 rounded border border-slate-200 bg-white px-2.5 text-[11px] font-bold text-slate-600 hover:border-emerald-400 hover:text-emerald-700 transition-colors" title="Rs 1000 add (partial allowed)">+1000</button>
+                                <button type="button" onClick={() => addAmount(r.shop.outletId, 5000)} className="h-8 rounded border border-slate-200 bg-white px-2.5 text-[11px] font-bold text-slate-600 hover:border-emerald-400 hover:text-emerald-700 transition-colors" title="Rs 5000 add (partial allowed)">+5000</button>
+                                <button type="button" onClick={() => fillRound100(r.shop.outletId, r.shop.balance)} className="h-8 rounded border border-slate-200 bg-white px-2.5 text-[11px] font-bold text-slate-600 hover:border-emerald-400 hover:text-emerald-700 transition-colors" title="100 ke round mein (neeche wala)">Round-100</button>
                               </div>
                             </TableCell>
                             <TableCell>
@@ -649,7 +650,7 @@ export function RecoveryView() {
                               {r.needRef && <p className="text-[10px] text-red-500 mt-0.5">Reference zaroori</p>}
                             </TableCell>
                             <TableCell className="text-center">
-                              <Button size="sm" variant="outline" className="h-7 px-2 text-[11px] text-slate-400 hover:text-red-600 hover:border-red-300" onClick={() => clearRow(r.shop.outletId)} title="Row clear karein">Clear</Button>
+                              <Button size="sm" variant="outline" className="h-8 px-2.5 text-[11px] text-slate-400 hover:text-red-600 hover:border-red-300" onClick={() => clearRow(r.shop.outletId)} title="Row clear karein">Clear</Button>
                             </TableCell>
                           </TableRow>
                         ))}

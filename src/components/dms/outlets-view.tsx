@@ -96,10 +96,11 @@ export function OutletsView() {
   const [shopCats, setShopCats] = useState<ShopCategoryDTO[]>([])
   const [catsOpen, setCatsOpen] = useState(false)
 
-  // Task 67: is shop ka foran order book karo — /orders par New Order dialog isi shop ke sath khulega
+  // Task 67: is shop ka foran order book karo — /orders/new full-page form isi shop ke
+  // sath prefill hota hai (Task 31: dialog ki jagah ab poora page)
   function bookOrderFor(outletId: string) {
     setFocusOrderOutlet(outletId)
-    router.push('/orders')
+    router.push('/orders/new')
   }
 
   async function load() {

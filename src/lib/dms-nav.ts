@@ -9,6 +9,8 @@ export const VIEW_PATH: Record<ViewKey, string> = {
   backup: '/backup',
   dashboard: '/',
   orders: '/orders',
+  // Task 31 — order booking apna poora page (dialog nahi)
+  'orders-new': '/orders/new',
   unprocessed: '/unprocessed',
   summaries: '/summaries',
   settlement: '/settlement',
@@ -59,6 +61,9 @@ export function viewFromPath(pathname: string): ViewKey | null {
     const sub = ('reports-' + parts[1]) as ViewKey
     if (sub !== 'reports' && VIEW_PATH[sub]) return sub
   }
+  // Task 31: /orders/new — full-page booking form apna view key (orders list se alag,
+  // ta ke shell nav guard is page ka draft alag se protect kare)
+  if (seg === '/orders' && parts[1] === 'new') return 'orders-new'
   for (const key of Object.keys(VIEW_PATH) as ViewKey[]) {
     const p = VIEW_PATH[key]
     if (p !== '/' && p === seg) return key

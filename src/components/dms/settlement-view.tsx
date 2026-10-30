@@ -9,7 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { useDMS } from '@/lib/dms-store'
@@ -540,6 +540,10 @@ export function SettlementView() {
   const [retInputs, setRetInputs] = useState<Record<string, ReturnDraft>>({})
   const [retDlgOrder, setRetDlgOrder] = useState<string | null>(null)
   const [settling, setSettling] = useState(false)
+  // Task 32: settle par CONFIRM — irreversibly ledgers update hote hain, recovery page jaisa guard
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  // Task 32: detail fetch ka loading state — pehle placeholder dikhta tha jab tak fetch chal raha tha
+  const [detailLoading, setDetailLoading] = useState(false)
   // Post-settlement sheet preview — settle hote hi khulti hai + history se bhi (RET numbers fresh detail se aate hain)
   const [postPrint, setPostPrint] = useState<SummaryDetailDTO | null>(null)
   // Late stock return — SETTLED summary ke bill par (ghalti se return reh gaya ho)
@@ -565,6 +569,7 @@ export function SettlementView() {
   async function loadDetail(id: string) {
     setActiveId(id)
     setDetail(null)
+    setDetailLoading(true)
     try {
       const r = await api<{ summary: SummaryDetailDTO }>(`/api/summaries/${id}`)
       setDetail(r.summary)
@@ -587,7 +592,7 @@ export function SettlementView() {
       setRetInputs({})
     } catch (e) {
       toast({ title: 'Error', description: e instanceof Error ? e.message : 'Failed', variant: 'destructive' })
-    }
+    } finally { setDetailLoading(false) }
   }
 
   // Focus se auto-select (summaries view se "Go to Settlement")
@@ -759,8 +764,10 @@ export function SettlementView() {
       </div>
 
       <div className="grid lg:grid-cols-[320px_1fr] gap-4 flex-1 min-h-0">
-        {/* LEFT: summaries to post/settle */}
-        <div className="space-y-4">
+        {/* RIGHT wala form mobile par PEHLE (order-1) — Task 32: pehle lambi list scroll
+            kar ke form tak jana parta tha, ab form upar aur list neeche */}
+        {/* LEFT: summaries to post/settle (desktop left / mobile neeche) */}
+        <div className="space-y-4 order-2 lg:order-1">
           <Card className="border-slate-200 shadow-sm">
             <CardContent className="p-3">
               <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Unsettled Summaries ({unsettled.length})</p>
@@ -799,13 +806,13 @@ export function SettlementView() {
                         <span className="font-semibold text-slate-700 text-sm">{s.summaryNo}</span>
                         <div className="flex items-center gap-1">
                           <Badge variant="outline" className={`${STATUS_STYLES.SETTLED} text-[9px]`}>Settled</Badge>
-                          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-slate-400 hover:text-orange-600" title="Late Stock Return — ghalti se return reh gaya tha? Ab items wapas karein, shop ka balance cum ho jayega"
+                          <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-slate-400 hover:text-orange-600" title="Late Stock Return — ghalti se return reh gaya tha? Ab items wapas karein, shop ka balance cum ho jayega"
                             onClick={() => setLateRetId(s.id)}>
-                            <PackageOpen className="h-3.5 w-3.5" />
+                            <PackageOpen className="h-4 w-4" />
                           </Button>
-                          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-slate-400 hover:text-violet-700" title="Settlement Sheet print karein — cash + return detail"
+                          <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-slate-400 hover:text-violet-700" title="Settlement Sheet print karein — cash + return detail"
                             onClick={() => printSettled(s.id)}>
-                            <ReceiptText className="h-3.5 w-3.5" />
+                            <ReceiptText className="h-4 w-4" />
                           </Button>
                         </div>
                       </div>
@@ -829,14 +836,22 @@ export function SettlementView() {
           </Card>
         </div>
 
-        {/* RIGHT: settlement form */}
-        <Card className="border-slate-200 shadow-sm">
+        {/* RIGHT: settlement form (mobile par pehle) */}
+        <Card className="border-slate-200 shadow-sm order-1 lg:order-2">
           <CardContent className="p-0">
             {!detail ? (
-              <div className="py-20 text-center">
-                <Wallet className="h-10 w-10 text-slate-200 mx-auto mb-3" />
-                <p className="text-sm text-slate-400">Left side se unsettled summary select karein</p>
-              </div>
+              detailLoading ? (
+                <div className="p-4 space-y-3">
+                  <Skeleton className="h-10 w-full" />
+                  {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-14" />)}
+                  <p className="text-xs text-slate-400 text-center flex items-center justify-center gap-1.5"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Summary load ho rahi hai...</p>
+                </div>
+              ) : (
+                <div className="py-20 text-center">
+                  <Wallet className="h-10 w-10 text-slate-200 mx-auto mb-3" />
+                  <p className="text-sm text-slate-400">Unsettled summary select karein — desktop par left side, mobile par neeche list mein</p>
+                </div>
+              )
             ) : (
               <>
                 <div className="px-4 py-3 border-b bg-slate-50/70 flex flex-wrap items-center justify-between gap-2">
@@ -877,11 +892,11 @@ export function SettlementView() {
                             onClick={() => setRetDlgOrder(r.order.id)}>
                             <PackageOpen className="h-3 w-3 mr-1" />{r.returnQty > 0 ? `${r.returnQty} pcs • ${fmtPKR(r.returnValue)}` : 'Return'}
                           </Button>
-                          <Input type="number" min={0} max={r.net} value={cashInputs[r.order.id]?.cash ?? ''} onChange={(e) => setCash(r.order.id, e.target.value)} placeholder="Cash received" className="h-9 text-right text-sm flex-1 min-w-0" />
+                          <Input type="number" min={0} max={r.net} inputMode="decimal" value={cashInputs[r.order.id]?.cash ?? ''} onChange={(e) => setCash(r.order.id, e.target.value)} placeholder="Cash received" className="h-9 text-right text-sm flex-1 min-w-0" />
                         </div>
                         <div className="flex justify-end gap-1.5">
-                          <Button size="sm" variant="outline" className="h-7 text-[11px] px-2" onClick={() => fullCash(r.order.id, r.net - r.advUse)}>Full Cash</Button>
-                          <Button size="sm" variant="outline" className="h-7 text-[11px] px-2 text-red-600 border-red-200 hover:bg-red-50" onClick={() => fullUdhaar(r.order.id)}>Udhaar</Button>
+                          <Button size="sm" variant="outline" className="h-9 text-[11px] px-3" onClick={() => fullCash(r.order.id, r.net - r.advUse)}>Full Cash</Button>
+                          <Button size="sm" variant="outline" className="h-9 text-[11px] px-3 text-red-600 border-red-200 hover:bg-red-50" onClick={() => fullUdhaar(r.order.id)}>Udhaar</Button>
                         </div>
                       </div>
                     ))}
@@ -936,7 +951,7 @@ export function SettlementView() {
                             )}
                           </TableCell>
                           <TableCell className="text-right">
-                            <Input type="number" min={0} max={r.net} value={cashInputs[r.order.id]?.cash ?? ''} onChange={(e) => setCash(r.order.id, e.target.value)} className="h-8 text-right" />
+                            <Input type="number" min={0} max={r.net} inputMode="decimal" value={cashInputs[r.order.id]?.cash ?? ''} onChange={(e) => setCash(r.order.id, e.target.value)} className="h-9 text-right" />
                           </TableCell>
                           <TableCell className={`text-right font-semibold ${r.credit > 0 ? 'text-red-600' : 'text-slate-400'}`}>{r.credit > 0 ? fmtPKR(r.credit) : '—'}</TableCell>
                           <TableCell className="text-center">
@@ -957,7 +972,8 @@ export function SettlementView() {
 
                 <Separator />
                 <div className="px-4 py-3 flex flex-col sm:flex-row items-center justify-between gap-3">
-                  <div className="flex gap-6 text-sm">
+                  {/* Task 32: flex-wrap — 4 totals narrow screen par overflow nahi karte */}
+                  <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
                     <div><p className="text-[11px] text-slate-400 uppercase">Total Cash</p><p className="font-bold text-emerald-700 text-lg">{fmtPKR(totalCash)}</p></div>
                     {totalReturns > 0 && (
                       <div><p className="text-[11px] text-slate-400 uppercase">Total Return</p><p className="font-bold text-orange-600 text-lg">{fmtPKR(totalReturns)}</p></div>
@@ -967,7 +983,8 @@ export function SettlementView() {
                     )}
                     <div><p className="text-[11px] text-slate-400 uppercase">Total Udhaar</p><p className="font-bold text-red-600 text-lg">{fmtPKR(totalCredit)}</p></div>
                   </div>
-                  <Button onClick={settle} disabled={settling} className="bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto">
+                  {/* Task 32: seedha settle band — pehle confirm dialog (totals dikha kar) */}
+                  <Button onClick={() => setConfirmOpen(true)} disabled={settling || rows.length === 0} className="bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto">
                     {settling ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <CheckCircle2 className="h-4 w-4 mr-1.5" />}
                     ✓ Settle Summary & Update Ledgers
                   </Button>
@@ -989,6 +1006,33 @@ export function SettlementView() {
           onClear={retDlgDraft ? () => clearReturn(retDlgRow.order.id) : undefined}
         />
       )}
+
+      {/* Task 32: SETTLE CONFIRM — recovery page jaisa guard; ledgers irreversibly update
+          hote hain is liye totals dikha kar poochte hain. Confirm par hi settle() chalta hai. */}
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-1.5"><CheckCircle2 className="h-5 w-5 text-emerald-600" /> Settlement confirm karein</DialogTitle>
+            <DialogDescription>
+              {detail ? `${detail.summaryNo} — ${detail.salesmanName}: ` : ''}Confirm ke baad <b>shop ledgers foran update</b> ho jayenge (cash wasooli, udhaar, returns stock wapas) — ye action wapas nahi hota.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2.5 text-sm space-y-1">
+            <div className="flex justify-between"><span className="text-slate-500">Cash wasooli</span><b className="text-emerald-700">{fmtPKR(totalCash)}</b></div>
+            {totalReturns > 0 && <div className="flex justify-between"><span className="text-slate-500">Stock return</span><b className="text-orange-600">{fmtPKR(totalReturns)}</b></div>}
+            {totalAdvUse > 0 && <div className="flex justify-between"><span className="text-slate-500">Claim Adjustment (return se)</span><b className="text-emerald-600">−{fmtPKR(totalAdvUse)}</b></div>}
+            <div className="flex justify-between"><span className="text-slate-500">Udhaar (ledger)</span><b className="text-red-600">{fmtPKR(totalCredit)}</b></div>
+          </div>
+          <p className="text-[11px] text-slate-400">{rows.length} invoice{rows.length !== 1 ? 's' : ''} settle hongi — ghalat cash amount ho to pehle theek karein.</p>
+          <DialogFooter className="flex gap-2">
+            <Button variant="outline" className="flex-1" onClick={() => setConfirmOpen(false)} disabled={settling}>Wapas</Button>
+            <Button className="flex-1 bg-emerald-600 hover:bg-emerald-700" disabled={settling} onClick={async () => { await settle(); setConfirmOpen(false) }}>
+              {settling ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <CheckCircle2 className="h-4 w-4 mr-1.5" />}
+              Confirm Settlement
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Late stock return — settled summary ke bill par */}
       {lateRetId && (

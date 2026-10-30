@@ -8,6 +8,7 @@ export type ViewKey =
   | 'backup'
   | 'dashboard'
   | 'orders'
+  | 'orders-new'
   | 'unprocessed'
   | 'summaries'
   | 'settlement'
@@ -55,8 +56,10 @@ interface DMSState {
   focusSummaryId: string | null
   /** Task 49: purchase entry full page — kis company ki invoice book karni hai (null = free select) */
   purchaseCompanyId: string | null
-  /** Task 49: purchase entry form mein adhoora data mojood hai — nav guard isko dekhta hai */
+  /** Task 67: purchase entry form mein adhoora data mojood hai — nav guard isko dekhta hai */
   purchaseDraftDirty: boolean
+  /** Task 31: /orders/new full-page form ka adhoora draft — nav guard isko dekhta hai */
+  orderDraftDirty: boolean
   /** Task 67: shop se order book karna — Outlets/Zero-Purchase par "Order Book" dabate hi
    * ye set hota hai, /orders mount par New Order dialog is outlet ke sath khulta hai */
   focusOrderOutletId: string | null
@@ -64,6 +67,7 @@ interface DMSState {
   setFocusSummary: (id: string | null) => void
   setPurchaseCompanyId: (id: string | null) => void
   setPurchaseDraftDirty: (d: boolean) => void
+  setOrderDraftDirty: (d: boolean) => void
   setFocusOrderOutlet: (id: string | null) => void
 }
 
@@ -72,11 +76,13 @@ export const useDMS = create<DMSState>((set) => ({
   focusSummaryId: null,
   purchaseCompanyId: null,
   purchaseDraftDirty: false,
+  orderDraftDirty: false,
   focusOrderOutletId: null,
   setUser: (u) => set({ user: u }),
   setFocusSummary: (id) => set({ focusSummaryId: id }),
   setPurchaseCompanyId: (id) => set({ purchaseCompanyId: id }),
   setPurchaseDraftDirty: (d) => set({ purchaseDraftDirty: d }),
+  setOrderDraftDirty: (d) => set({ orderDraftDirty: d }),
   setFocusOrderOutlet: (id) => set({ focusOrderOutletId: id }),
 }))
 
