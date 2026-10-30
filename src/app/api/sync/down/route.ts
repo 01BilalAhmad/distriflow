@@ -3,6 +3,7 @@ import { jsonError, tenantProfileId } from '@/lib/dms-scope'
 import { requireUser } from '@/lib/api-auth'
 import { getAvailableToPromise } from '@/lib/dms-inventory'
 import { getPjpSettings, getTenantIdForSalesman } from '@/lib/dms-pjp'
+import { dayMatches, karachiDayCode } from '@/lib/dms-day'
 
 /**
  * Task 85 — SYNC DOWN (manual download — booker offline-first app ka poora data bundle)
@@ -49,6 +50,8 @@ export async function GET(req: Request) {
       visitDays: o.visitDays, address: o.address, ownerName: o.ownerName, phone: o.phone,
       lat: o.lat, lng: o.lng, creditDays: o.creditDays,
       balance: Math.round((balanceByOutlet.get(o.id) ?? 0) * 100) / 100,
+      // Task 106: PJP-aware app — plannedToday = Karachi aaj ka din visitDays se match (orders route jaisa hi rule)
+      plannedToday: dayMatches(o.visitDays, karachiDayCode()),
     }))
 
     // --- Products (tenant catalog + booker ki assigned company + ATP stock) ---
@@ -91,7 +94,7 @@ export async function GET(req: Request) {
 
     return Response.json({
       serverTime: new Date().toISOString(),
-      settings: { fridayOff: pjp.fridayOff, unplannedEnabled: pjp.unplannedEnabled },
+      settings: { fridayOff: pjp.fridayOff, unplannedEnabled: pjp.unplannedEnabled, allRoutesOpen: user.allRoutesOpen },
       shops,
       products,
       pendingShops: pendingShops.map((s) => ({

@@ -199,9 +199,16 @@ export async function POST(req: Request) {
         const bookerId = salesmanId ?? outlet.salesmanId ?? ''
         const inRoute = bookerId ? outletInTodayRoute(outlet, bookerId, dayCode) : false
         if (!inRoute) {
-          // Out-of-route shop — sirf tab jab admin ne Unplanned ON rakha ho
+          // Out-of-route shop — sirf tab jab admin ne Unplanned ON rakha ho AUR booker ki
+          // All Routes access bhi ON ho (Task 106: per-booker switch ab orders par bhi)
           if (!pjp.unplannedEnabled) {
             return jsonError('The admin has disabled unplanned orders — this shop is not on the route today', 403)
+          }
+          if (outlet.salesmanId) {
+            const bookerRow = await db.user.findUnique({ where: { id: outlet.salesmanId }, select: { allRoutesOpen: true } })
+            if (!bookerRow?.allRoutesOpen) {
+              return jsonError('Unplanned (out-of-route) booking is not enabled for you — the distributor has to switch on All Routes access for this order booker', 403)
+            }
           }
           isUnplanned = true
         } else if (dayCode === 'FRI' && pjp.fridayOff) {
