@@ -82,7 +82,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       prevBalance: o.prevBalance,
       advanceApplied: o.advanceApplied,
       advanceAppliedNote: o.advanceAppliedNote,
-      items: o.items.map((it) => ({
+      // Task 112: fully-cut (qty=0) lines invoice par print nahi hoti — cut ka matlab cut
+      items: o.items.filter((it) => it.qty > 0).map((it) => ({
         id: it.id,
         productName: it.product.name,
         sku: it.product.sku,

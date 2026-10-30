@@ -157,6 +157,8 @@ export function UnprocessedBillsView() {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [processOpen, setProcessOpen] = useState(false)
+  // Task 112: 400 shortage payload ka preview — bills jinko KUCH bhi allocate nahi hua
+  const [skippedPreview, setSkippedPreview] = useState<{ orderNo: string; outletName: string }[]>([])
   const [dlvDate, setDlvDate] = useState(tomorrowKey())
   const [processing, setProcessing] = useState(false)
   const [shortages, setShortages] = useState<ShortageRow[] | null>(null)
@@ -300,14 +302,10 @@ export function UnprocessedBillsView() {
 
   function addProductLine() {
     const p = products.find((x) => x.id === addId)
-    if (!p) { toast({ title: 'Product select karein', variant: 'destructive' }); return }
-    if (addQty <= 0) { toast({ title: 'Qty 0 se ziada honi chahiye', variant: 'destructive' }); return }
-    if (lines.some((l) => l.productId === p.id)) { toast({ title: 'Ye product pehle se bill mein hai', description: 'Usi line mein qty barha dein' }); return }
-    // Task 26: nayi line bhi available stock ke andar ho
-    if (p.available != null && addQty > p.available) {
-      toast({ title: 'Stock limit crossed', description: `${p.name}: sirf ${fmtQty(p.available, Math.max(1, p.unitsPerCarton), p.pcsPerBox > 0 ? p.pcsPerBox : 0)} available hai`, variant: 'destructive' })
-      return
-    }
+    if (!p) { toast({ title: 'Select a product', variant: 'destructive' }); return }
+    if (addQty <= 0) { toast({ title: 'Quantity must be greater than 0', variant: 'destructive' }); return }
+    if (lines.some((l) => l.productId === p.id)) { toast({ title: 'This product is already in the bill', description: 'Increase the quantity on the same line' }); return }
+    // Task 112: over-stock line add allowed — kami process par Process Anyway handle karta hai
     setLines((prev) => [...prev, {
       productId: p.id, productName: p.name, sku: p.sku,
       upc: p.unitsPerCarton, boxesPerCarton: p.boxesPerCarton, pcsPerBox: p.pcsPerBox,
@@ -319,14 +317,9 @@ export function UnprocessedBillsView() {
 
   async function saveLines() {
     if (!expandedId || lines.length === 0) {
-      toast({ title: 'Kam az kam 1 item chahiye', variant: 'destructive' }); return
+      toast({ title: 'At least 1 item is required', variant: 'destructive' }); return
     }
-    // Task 26: STOCK LIMIT — allocation edit bhi available stock ke andar (server bhi block karta hai)
-    const overLine = lines.find((l) => l.availablePcs != null && l.qtyPcs > l.availablePcs)
-    if (overLine && overLine.availablePcs != null) {
-      toast({ title: 'Stock limit crossed', description: `${overLine.productName}: sirf ${fmtQty(overLine.availablePcs, Math.max(1, overLine.upc), overLine.pcsPerBox > 0 ? overLine.pcsPerBox : 0)} available hai — qty kam karein`, variant: 'destructive' })
-      return
-    }
+    // Task 112: over-stock edit allowed — kami process par Process Anyway pop-up handle karta hai
     setSaving(true)
     try {
       const r = await api<{ order: { id: string; orderNo: string; subtotal: number; schemeDiscount: number; manualDiscount: number; total: number; itemCount: number; totalCases: number; totalFreePcs: number; tradeOfferTotal: number; gstTotal: number; advanceTax: number; payable: number } }>(
@@ -341,7 +334,7 @@ export function UnprocessedBillsView() {
       } : x)))
       setExpandedOrder((prev) => (prev ? { ...prev, total: o.total, itemCount: o.itemCount, totalCases: o.totalCases, totalFreePcs: o.totalFreePcs, tradeOfferTotal: o.tradeOfferTotal, gstTotal: o.gstTotal, advanceTax: o.advanceTax, payable: o.payable } : prev))
       setSavedSnapshot(linesKey)
-      toast({ title: `${o.orderNo} Stock Updated ✓`, description: `Naya total: ${fmtPKR(o.total)} (${o.totalCases?.toFixed(4)} cases)` })
+      toast({ title: `${o.orderNo} Stock Updated ✓`, description: `New total: ${fmtPKR(o.total)} (${o.totalCases?.toFixed(4)} cases)` })
       // fresh detail reload (naye item ids / scheme values)
       const d = await api<{ order: OrderDetailDTO }>(`/api/orders/${expandedId}`)
       setDetail(d.order)
@@ -364,7 +357,7 @@ export function UnprocessedBillsView() {
     if (selectedOrders.length === 0) return
     const books = new Set(selectedOrders.map((o) => o.salesmanName))
     if (books.size > 1) {
-      toast({ title: 'Mixed order bookers', description: 'Ek summary mein sirf ek order booker ki bills process hoti hain — pehle orderbooker select karein', variant: 'destructive' })
+      toast({ title: 'Mixed order bookers', description: 'One summary can only contain bills of a single order booker — select one order booker first', variant: 'destructive' })
       return
     }
     setProcessing(true)
@@ -373,29 +366,21 @@ export function UnprocessedBillsView() {
         method: 'POST',
         body: JSON.stringify({ orderIds: [...selected], deliveryDate: dlvDate ? new Date(dlvDate + 'T12:00:00').toISOString() : undefined }),
       })
-      toast({ title: `Summary ${r.summary.summaryNo} Created ✓`, description: `${r.summary.billsCount} bills processed — van loading FEFO basis par ho gayi` })
+      toast({ title: `Summary ${r.summary.summaryNo} Created ✓`, description: `${r.summary.billsCount} bills processed — van loaded on a FEFO basis` })
       setProcessOpen(false)
       setFocusSummary(r.summary.id)
       router.push('/summaries')
     } catch (e) {
-      // Task 27: out-of-stock — structured shortages payload se detail popup (kis bill sy kia minus)
-      const payload = (e as Error & { payload?: { shortages?: ShortageRow[] } }).payload
+      // Task 27/112: out-of-stock — structured shortages + skipped preview se detail popup
+      const payload = (e as Error & { payload?: { shortages?: ShortageRow[]; skippedBills?: { orderNo: string; outletName: string }[] } }).payload
       if (payload?.shortages && payload.shortages.length > 0) {
         setProcessOpen(false)
         setShortages(payload.shortages)
+        setSkippedPreview(payload.skippedBills ?? [])
       } else {
         toast({ title: 'Process Failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' })
       }
     } finally { setProcessing(false) }
-  }
-
-  /** Popup se: jin bills mein stock kami thi unhe selection se nikal do — baaki process ho sake */
-  function deselectShortBills() {
-    if (!shortages) return
-    const shortIds = new Set(shortages.map((s) => s.orderId))
-    setSelected((prev) => new Set([...prev].filter((id) => !shortIds.has(id))))
-    setShortages(null)
-    toast({ title: 'Short bills deselect ho gayin', description: 'Ab Process dobara dabayein — baaki bills jo poore stock mein hain wo ban jayengi' })
   }
 
   /** Task 28: PROCESS ANYWAY — jitna stock hai utna lag jaye. Jis bill mein kuch bhi na bache wo unprocessed khari rahegi */
@@ -414,6 +399,7 @@ export function UnprocessedBillsView() {
         body: JSON.stringify({ orderIds: [...selected], processAnyway: true, deliveryDate: dlvDate ? new Date(dlvDate + 'T12:00:00').toISOString() : undefined }),
       })
       setShortages(null)
+      setSkippedPreview([])
       setProcessOpen(false)
       setAnywayResult({ summaryId: r.summary.id, summaryNo: r.summary.summaryNo, processedCount: r.processedCount, skippedBills: r.skippedBills, shortRows: r.shortRows })
       setSelected(new Set())
@@ -428,7 +414,7 @@ export function UnprocessedBillsView() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2"><SlidersHorizontal className="h-5 w-5 text-emerald-600" /> Stock Allocation</h2>
-          <p className="text-sm text-slate-500">Order booker ke bills — har bill ka stock edit / add / delete karke process karein</p>
+          <p className="text-sm text-slate-500">Bills from the order bookers — edit / add / delete stock per bill, then process</p>
         </div>
         {selectedOrders.length > 0 && (
           <Button onClick={() => setProcessOpen(true)} className="bg-emerald-600 hover:bg-emerald-700">
@@ -469,7 +455,7 @@ export function UnprocessedBillsView() {
           ) : filtered.length === 0 ? (
             <div className="py-16 text-center">
               <ClipboardList className="h-10 w-10 text-slate-200 mx-auto mb-3" />
-              <p className="text-sm text-slate-400">Koi unprocessed bill nahi — sab process ho chuke hain ✓</p>
+              <p className="text-sm text-slate-400">No unprocessed bills — all have been processed ✓</p>
             </div>
           ) : (
             <div className="flex-1 min-h-0 overflow-auto">
@@ -527,7 +513,7 @@ export function UnprocessedBillsView() {
                   Change Stock Allocation — <span className="text-emerald-700">{expandedOrder.orderNo}</span>
                   {dirty && <Badge className="bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-100">Unsaved</Badge>}
                 </p>
-                <p className="text-xs text-slate-500">{expandedOrder.outletName} • {expandedOrder.salesmanName ?? '—'} • items qty Ctn/Box/Pcs mein edit karein, product add ya delete karein</p>
+                <p className="text-xs text-slate-500">{expandedOrder.outletName} • {expandedOrder.salesmanName ?? '—'} • edit item qty in Ctn/Box/Pcs, add or delete products</p>
               </div>
               <Button size="sm" variant="ghost" className="h-8 text-slate-500" onClick={() => toggleExpand(expandedOrder)}>
                 <X className="h-4 w-4 mr-1" /> Close
@@ -541,7 +527,7 @@ export function UnprocessedBillsView() {
                 <div className="space-y-2">
                   {lines.length === 0 && (
                     <div className="rounded-lg border border-dashed border-slate-200 py-6 text-center text-sm text-slate-400">
-                      Sab items delete ho chuke — Save se pehle kam az kam 1 product add karein
+                      All items deleted — add at least 1 product before saving
                     </div>
                   )}
                   {lines.map((l) => {
@@ -597,13 +583,13 @@ export function UnprocessedBillsView() {
 
                 {/* Add product */}
                 <div className="rounded-lg border border-dashed border-emerald-300 bg-emerald-50/40 p-2.5">
-                  <p className="text-xs font-medium text-emerald-700 mb-2 flex items-center gap-1"><Plus className="h-3.5 w-3.5" /> Naya Product Add Karein</p>
+                  <p className="text-xs font-medium text-emerald-700 mb-2 flex items-center gap-1"><Plus className="h-3.5 w-3.5" /> Add New Product</p>
                   <div className="flex flex-col lg:flex-row lg:items-center gap-2">
                     <Select value={addId || undefined} onValueChange={setAddId}>
-                      <SelectTrigger className="lg:w-72 bg-white"><SelectValue placeholder="Product select karein..." /></SelectTrigger>
+                      <SelectTrigger className="lg:w-72 bg-white"><SelectValue placeholder="Select a product..." /></SelectTrigger>
                       <SelectContent>
                         {addableProducts.map((p) => (
-                          <SelectItem key={p.id} value={p.id} disabled={p.available != null && p.available <= 0}>
+                          <SelectItem key={p.id} value={p.id}>
                             {p.name} ({p.sku}){p.available != null ? (p.available <= 0 ? ' • out of stock' : ` • avail ${fmtQty(p.available, Math.max(1, p.unitsPerCarton), p.pcsPerBox > 0 ? p.pcsPerBox : 0)}`) : ''}
                           </SelectItem>
                         ))}
@@ -611,7 +597,7 @@ export function UnprocessedBillsView() {
                     </Select>
                     {(() => {
                       const p = products.find((x) => x.id === addId)
-                      if (!p) return <p className="text-xs text-slate-400 flex-1">Product select karne par Ctn/Box/Pcs inputs yahan aayenge</p>
+                      if (!p) return <p className="text-xs text-slate-400 flex-1">Ctn/Box/Pcs inputs will appear here once a product is selected</p>
                       return (
                         <>
                           <UnitQtyInputs pcs={addQty} upc={p.unitsPerCarton} pcsPerBox={p.pcsPerBox} onChange={setAddQty} />
@@ -631,12 +617,12 @@ export function UnprocessedBillsView() {
                     {/* Task 108: kaunsa TAX SYSTEM lag raha hai — print wala hi rule, ab naam ke sath */}
                     <p className={`text-[10px] font-bold uppercase tracking-wide ${previewModeA ? 'text-amber-600' : expandedOrder?.taxMode === 'RETAIL_GST' ? 'text-violet-600' : 'text-slate-400'}`}>
                       Tax Mode: {expandedOrder?.taxMode === 'MIXED'
-                        ? 'Mixed — har line apni company ke tax rule par'
+                        ? 'Mixed — each line follows its own company tax rule'
                         : previewModeA
-                          ? 'Invoice Discount — Trade Offer pehle kaata, GST net−TO par (Noms style)'
+                          ? 'Invoice Discount — Trade Offer deducted first, GST on net − TO (NOMS style)'
                           : expandedOrder?.taxMode === 'RETAIL_GST'
-                            ? 'Retail GST — GST retail price se, discounts ka asar nahi (Cadbury style)'
-                            : 'Claim — GST poore net par, Trade Offer baad me'}
+                            ? 'Retail GST — GST on the retail price, discounts have no effect (Cadbury style)'
+                            : 'Claim — GST on the full net, Trade Offer after'}
                     </p>
                     <div className="flex justify-between gap-8"><span className="text-slate-500">Subtotal</span><span className="tabular-nums text-slate-800">{preview ? fmtPKR(preview.subtotal) : '…'}</span></div>
                     <div className="flex justify-between gap-8"><span className="text-slate-500">Scheme Discount</span><span className="tabular-nums text-rose-600">{preview ? (preview.schemeDiscount > 0 ? `− ${fmtPKR(preview.schemeDiscount)}` : fmtPKR(0)) : '…'}</span></div>
@@ -663,7 +649,7 @@ export function UnprocessedBillsView() {
                     {!(preview?.tradeOfferTotal) && !(preview?.gstTotal) && (preview?.advanceTax ?? 0) > 0 && (
                       <div className="flex justify-between gap-8"><span className="font-medium text-slate-700">Total Payable (incl. Adv Tax)</span><span className="tabular-nums font-semibold text-slate-900">{fmtPKR(Math.round((preview!.total + (preview!.advanceTax ?? 0)) * 100) / 100)}</span></div>
                     )}
-                    <p className="text-[11px] text-slate-400">{previewing ? 'Calculating…' : 'Scheme aur discount server par dobara calculate hoti hai (booking wali hi math)'}</p>
+                    <p className="text-[11px] text-slate-400">{previewing ? 'Calculating…' : 'Schemes and discounts are recalculated on the server (same math as booking)'}</p>
                   </div>
                   <div className="flex gap-2">
                     <Button variant="outline" className="h-9" onClick={() => toggleExpand(expandedOrder)} disabled={saving}>Cancel</Button>
@@ -700,7 +686,7 @@ export function UnprocessedBillsView() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><Truck className="h-5 w-5 text-emerald-600" /> Execute Invoices → Delivery Summary</DialogTitle>
-            <DialogDescription>Selected bills ek summary mein ban jayengi — process se pehle stock check hota hai (kami par detail popup aayega), phir warehouse stock van ke liye FEFO basis par niklega</DialogDescription>
+            <DialogDescription>Selected bills will be combined into one delivery summary — stock is checked before processing, then warehouse stock is issued for the van on a FEFO basis</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
             <div className="rounded-lg bg-slate-50 border p-3 space-y-1.5 text-sm">
@@ -722,13 +708,13 @@ export function UnprocessedBillsView() {
         </DialogContent>
       </Dialog>
 
-      {/* ===== Task 27: Out-of-stock popup — kis bill sy kis product ka kitna minus hota ===== */}
+      {/* ===== Task 27/112: Out-of-stock popup — which bill / which product / how short ===== */}
       <Dialog open={!!shortages} onOpenChange={(v) => { if (!v) setShortages(null) }}>
         <DialogContent className="max-w-[calc(100%-2rem)] sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-red-700"><TriangleAlert className="h-5 w-5 text-red-600" /> Out of Stock — Stock Kami Hai</DialogTitle>
+            <DialogTitle className="flex items-center gap-2 text-red-700"><TriangleAlert className="h-5 w-5 text-red-600" /> Out of Stock — Warehouse Shortage</DialogTitle>
             <DialogDescription>
-              Warehouse mein stock kam hai — neeche dekhein kis bill sy kis product ka kitna minus ho raha tha. Aap <b>Process Anyway</b> chun sakte hain (jitna stock hai utna har bill mein lag jayega) ya short bills nikaal kar sirf poori bills process karein:
+              Warehouse stock is short for the lines below. <b>Process Anyway</b> loads each bill with whatever stock remains — oldest bill first — and each bill total becomes exactly what was loaded. <b>Cancel</b> closes this dialog without processing.
             </DialogDescription>
           </DialogHeader>
           <div className="rounded-lg border border-red-200 bg-red-50/60 overflow-hidden">
@@ -739,9 +725,9 @@ export function UnprocessedBillsView() {
                     <TableHead className="text-red-800">Bill #</TableHead>
                     <TableHead className="text-red-800">Store</TableHead>
                     <TableHead className="text-red-800">Product</TableHead>
-                    <TableHead className="text-right text-red-800">Bill Mein</TableHead>
-                    <TableHead className="text-right text-red-800">Warehouse</TableHead>
-                    <TableHead className="text-right text-red-800">Minus</TableHead>
+                    <TableHead className="text-right text-red-800">Booked</TableHead>
+                    <TableHead className="text-right text-red-800">In Warehouse</TableHead>
+                    <TableHead className="text-right text-red-800">Short</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -762,19 +748,29 @@ export function UnprocessedBillsView() {
               </Table>
             </div>
           </div>
+          {skippedPreview.length > 0 && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+              <p className="text-xs font-semibold text-slate-700 mb-1.5">Out of stock — whole bill (nothing can be loaded; these bills will not enter the load form and stay in Stock Allocation):</p>
+              <div className="flex flex-wrap gap-1.5">
+                {skippedPreview.map((b, i) => (
+                  <span key={`${b.orderNo}-${i}`} className="inline-flex items-center gap-1 rounded-md bg-white border border-slate-300 px-2 py-0.5 text-xs">
+                    <b className="text-slate-800">{b.orderNo}</b>
+                    <span className="text-slate-500 max-w-[120px] truncate">{b.outletName}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
-            <b>Process Anyway kya karega:</b> Purani bill pehle — har bill ko jitna stock milega utna load ho jayega (partial load), aur jis bill mein <b>kuch bhi nahi bachega</b> wo process nahi hogi — Stock Allocation mein khari rahegi (stock aane par process karein). Ya phir bill ke aage <b>+</b> dabaa kar qty edit karein / short bills deselect karein.
+            <b>What Process Anyway does:</b> bills are served oldest first — every bill loads whatever stock remains (partial load); stock ends at zero and the shortfall is recorded on the bill. A bill with nothing left is not processed — it stays in Stock Allocation until stock arrives.
           </div>
           <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => setShortages(null)} className="w-full sm:w-auto">
+              <X className="h-4 w-4 mr-1.5" /> Cancel
+            </Button>
             <Button onClick={processAnywayBills} disabled={anywayLoading} className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700">
               {anywayLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Truck className="h-4 w-4 mr-1.5" />}
-              Process Anyway — Jitna Hai Utna Lag Jaye
-            </Button>
-            <Button variant="outline" onClick={deselectShortBills} className="w-full sm:w-auto border-red-300 text-red-700 hover:bg-red-50">
-              <X className="h-4 w-4 mr-1.5" /> Short Bills Deselect Karein
-            </Button>
-            <Button variant="outline" onClick={() => setShortages(null)} className="w-full sm:w-auto bg-slate-800 hover:bg-slate-900 text-white border-slate-800">
-              Theek Hai
+              Process Anyway
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -784,14 +780,14 @@ export function UnprocessedBillsView() {
       <Dialog open={!!anywayResult} onOpenChange={(v) => { if (!v) setAnywayResult(null) }}>
         <DialogContent className="max-w-[calc(100%-2rem)] sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-emerald-700"><Truck className="h-5 w-5 text-emerald-600" /> {anywayResult?.summaryNo} — Process Ho Gaya (Jitna Stock Tha Utna)</DialogTitle>
+            <DialogTitle className="flex items-center gap-2 text-emerald-700"><Truck className="h-5 w-5 text-emerald-600" /> {anywayResult?.summaryNo} — Processed (Loaded Whatever Was Available)</DialogTitle>
             <DialogDescription>
-              {anywayResult?.processedCount} bill{anywayResult && anywayResult.processedCount !== 1 ? 's' : ''} process ho gayin{anywayResult && anywayResult.skippedBills.length > 0 ? ` — ${anywayResult.skippedBills.length} bill${anywayResult.skippedBills.length > 1 ? 's' : ''} mein kuch bhi load nahi hua, wo Stock Allocation mein khari rahengi` : ''}:
+              {anywayResult?.processedCount} bill{anywayResult && anywayResult.processedCount !== 1 ? 's' : ''} processed{anywayResult && anywayResult.skippedBills.length > 0 ? ` — ${anywayResult.skippedBills.length} bill${anywayResult.skippedBills.length > 1 ? 's' : ''} had nothing to load and remain in Stock Allocation` : ''}. Bill totals were reduced to the loaded quantity:
             </DialogDescription>
           </DialogHeader>
           {anywayResult && anywayResult.shortRows.length > 0 && (
             <div>
-              <p className="text-xs font-semibold text-slate-500 mb-1.5">Partial load — jitna lag gaya wo load ho gaya:</p>
+              <p className="text-xs font-semibold text-slate-500 mb-1.5">Partial load — billed exactly what was loaded:</p>
               <div className="rounded-lg border border-amber-200 bg-amber-50/60 overflow-hidden">
                 <div className="overflow-auto max-h-[32vh]">
                   <Table className="min-w-[460px]">
@@ -800,9 +796,9 @@ export function UnprocessedBillsView() {
                         <TableHead className="text-amber-800">Bill #</TableHead>
                         <TableHead className="text-amber-800">Store</TableHead>
                         <TableHead className="text-amber-800">Product</TableHead>
-                        <TableHead className="text-right text-amber-800">Bill Mein</TableHead>
-                        <TableHead className="text-right text-amber-800">Load Hua</TableHead>
-                        <TableHead className="text-right text-amber-800">Minus</TableHead>
+                        <TableHead className="text-right text-amber-800">Booked</TableHead>
+                        <TableHead className="text-right text-amber-800">Loaded</TableHead>
+                        <TableHead className="text-right text-amber-800">Short</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -827,7 +823,7 @@ export function UnprocessedBillsView() {
           )}
           {anywayResult && anywayResult.skippedBills.length > 0 && (
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
-              <p className="text-xs font-semibold text-slate-700 mb-1.5">Ye bills UNPROCESSED khari rahengi (1 item bhi load nahi hua — stock aane par process karein):</p>
+              <p className="text-xs font-semibold text-slate-700 mb-1.5">Out of stock — nothing could be loaded for these bills; they did not enter the load form and remain in Stock Allocation (process when stock arrives):</p>
               <div className="flex flex-wrap gap-1.5">
                 {anywayResult.skippedBills.map((b, i) => (
                   <span key={`${b.orderNo}-${i}`} className="inline-flex items-center gap-1 rounded-md bg-white border border-slate-300 px-2 py-0.5 text-xs">
@@ -840,7 +836,7 @@ export function UnprocessedBillsView() {
           )}
           {anywayResult && anywayResult.shortRows.length === 0 && anywayResult.skippedBills.length === 0 && (
             <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-sm text-emerald-800">
-              Sab kuch poora load ho gaya — koi kami nahi hui.
+              Everything loaded in full — no shortfall.
             </div>
           )}
           <DialogFooter className="flex-col sm:flex-row gap-2">
@@ -849,10 +845,10 @@ export function UnprocessedBillsView() {
               onClick={() => { const sid = anywayResult?.summaryId; setAnywayResult(null); if (sid) { setFocusSummary(sid); router.push('/summaries') } }}
               className="w-full sm:w-auto"
             >
-              <ClipboardList className="h-4 w-4 mr-1.5" /> Summary Dekhein
+              <ClipboardList className="h-4 w-4 mr-1.5" /> Open Summary
             </Button>
             <Button onClick={() => setAnywayResult(null)} className="w-full sm:w-auto bg-slate-800 hover:bg-slate-900">
-              Theek Hai
+              OK
             </Button>
           </DialogFooter>
         </DialogContent>

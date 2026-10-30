@@ -506,6 +506,10 @@ model OrderItem {
   productId     String
   product       Product @relation(fields: [productId], references: [id])
   qty           Int
+  // Task 112: Process Anyway trim par ORIGINAL booked qty ka backup — bill loaded stock
+  // par trim hoti hai (total = jitna stock laga), unprocess par qty isi se restore hoti hai.
+  // Null = line kabhi trim nahi hui (legacy + normal full-stock process).
+  bookedQty     Int?
   freeQty       Int     @default(0)
   rate          Float
   discount      Float   @default(0)

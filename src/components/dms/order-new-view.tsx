@@ -282,13 +282,13 @@ export function OrderNewView() {
     }
     if (lines.length > 0) {
       setLines([])
-      toast({ title: 'Order lines reset ho gayin', description: 'Nayi company ke products dobara add karein — ek order sirf ek company ke SKUs ka hota hai' })
+      toast({ title: 'Order lines reset', description: 'Add the new company\u2019s products again — one order can only contain SKUs of a single company' })
     }
   }
 
   function addLine() {
     if (!companyId) {
-      toast({ title: 'Pehle company select karein', description: 'Order lines usi company ke SKUs mein add hoti hain jo upar select ki hai', variant: 'destructive' })
+      toast({ title: 'Select a company first', description: 'Order lines are added from the company selected above', variant: 'destructive' })
       return
     }
     const used = new Set(lines.map((l) => l.productId))
@@ -477,26 +477,19 @@ export function OrderNewView() {
       return
     }
     if (discType !== 'NONE' && !discInputValid) {
-      toast({ title: 'Discount value galat hai', description: discType === 'PERCENT' ? 'Percentage 0 se 100 ke darmiyan ho' : 'Flat amount 0 se bara hona chahiye', variant: 'destructive' })
+      toast({ title: 'Invalid discount value', description: discType === 'PERCENT' ? 'Percentage must be between 0 and 100' : 'Flat amount must be greater than 0', variant: 'destructive' })
       return
     }
     // Task 45: Trade Offer validation — line ke net total se zyada nahi (server bhi check karta hai)
     // Task 52: merged net ke against (manual discount ke baad) — server bhi wahi karta hai
     const badTo = merged.rows.findIndex((r) => r.tradeOffer > r.total)
     if (badTo >= 0) {
-      toast({ title: 'Trade Offer galat hai', description: `${merged.rows[badTo].name}: Rs ${merged.rows[badTo].tradeOffer} line total Rs ${merged.rows[badTo].total} se zyada nahi ho sakta`, variant: 'destructive' })
+      toast({ title: 'Invalid trade offer', description: `${merged.rows[badTo].name}: Rs ${merged.rows[badTo].tradeOffer} cannot exceed line total Rs ${merged.rows[badTo].total}`, variant: 'destructive' })
       return
     }
-    // Task 26: STOCK LIMIT — available stock se zyada booking UI par bhi block (server bhi check karta hai)
-    const overLines = lines.filter((l) => {
-      const p = products.find((x) => x.id === l.productId)
-      return p ? l.qtyPcs > p.available : false
-    })
-    if (overLines.length > 0) {
-      const names = overLines.slice(0, 2).map((l) => products.find((x) => x.id === l.productId)?.name ?? '').filter(Boolean).join(', ')
-      toast({ title: 'Stock limit crossed', description: `${names}${overLines.length > 2 ? ` +${overLines.length - 2} aur` : ''} — available stock se zyada book nahi ho sakta`, variant: 'destructive' })
-      return
-    }
+    // Task 112: STOCK LIMIT booking par block NAHI — over-stock bill bhi sync hogi.
+    // Kami office par Process Anyway pop-up se handle hoti hai (jitna stock laga utna
+    // total, jo cut hua wo cut hua). Pehle yahan UI block tha — poori bill ruk jati thi.
     setSaving(true)
     try {
       // 3-unit split: qtyPcs -> ctn/box/pcs (server dobara verify karta hai) + per-SKU trade offer
@@ -542,11 +535,11 @@ export function OrderNewView() {
       {/* ============ PAGE HEADER (full page — dialog nahi) ============ */}
       <div className="shrink-0 flex flex-wrap items-center gap-3 pb-3">
         <Button variant="outline" size="sm" className="h-9 shrink-0" onClick={goBack}>
-          <ArrowLeft className="h-4 w-4 mr-1" /> Wapas
+          <ArrowLeft className="h-4 w-4 mr-1" /> Back
         </Button>
         <div className="min-w-0">
           <h2 className="text-xl font-bold text-slate-900 leading-tight">New Order Booking</h2>
-          <p className="text-sm text-slate-500 truncate">Ye poora page hai — ghalati se click se form band nahi hota. Company → booker → shop, schemes auto-apply</p>
+          <p className="text-sm text-slate-500 truncate">A full page — an accidental click will not close the form. Company → booker → shop, schemes auto-apply</p>
         </div>
         <div className="ml-auto flex items-center gap-2 shrink-0">
           {dirty && lastSaved && (
@@ -555,7 +548,7 @@ export function OrderNewView() {
             </span>
           )}
           {dirty && (
-            <Button variant="ghost" size="sm" className="h-8 text-slate-400 hover:text-red-500" onClick={startFresh} title="Draft clear kar ke naya order shuru">
+            <Button variant="ghost" size="sm" className="h-8 text-slate-400 hover:text-red-500" onClick={startFresh} title="Clear the draft and start a new order">
               <RotateCcw className="h-3.5 w-3.5 mr-1" /> Fresh Start
             </Button>
           )}
@@ -701,7 +694,7 @@ export function OrderNewView() {
           </div>
           {lines.length === 0 && (
             <div className="rounded-lg border border-dashed p-6 text-center text-sm text-slate-400">
-              {companyId ? '"Add Product" se order lines shuru karein' : 'Pehle company select karein — phir "Add Product" se lines shuru hongi'}
+              {companyId ? 'Start order lines with "Add Product"' : 'Select a company first — then start lines with "Add Product"'}
             </div>
           )}
           {computed.rows.map((r, i) => {
@@ -720,9 +713,9 @@ export function OrderNewView() {
                       const availCtn = p.available / Math.max(1, p.unitsPerCarton)
                       return {
                         id: p.id, name: p.name, sku: p.sku, brand: p.brand,
-                        meta: `${fmtPKR(p.tradePrice)}/crtn (${p.unitsPerCarton} pcs) • ${used ? 'pehle se add' : p.available <= 0 ? 'out of stock' : `avail ${availCtn.toFixed(2)} ctn`}`,
-                        disabled: used || p.available <= 0,
-                        disabledReason: used ? 'pehle se add' : p.available <= 0 ? 'out of stock' : undefined,
+                        meta: `${fmtPKR(p.tradePrice)}/crtn (${p.unitsPerCarton} pcs) • ${used ? 'already added' : p.available <= 0 ? 'out of stock — office confirms at processing' : `avail ${availCtn.toFixed(2)} ctn`}`,
+                        disabled: used,
+                        disabledReason: used ? 'already added' : undefined,
                       }
                     })}
                     value={lines[i]?.productId ?? ''}
@@ -787,14 +780,14 @@ export function OrderNewView() {
                 {!r.modeA && r.tradeOffer > 0 && <span className="text-violet-600 font-semibold whitespace-nowrap">TO − {fmtPKR(r.tradeOffer)}</span>}
                 <span className="text-slate-500 ml-auto whitespace-nowrap">Line payable: <b className="text-slate-700">{fmtPKR(Math.max(0, Math.round(((mr?.total ?? r.total) - r.tradeOffer + (mr?.gstAmt ?? r.gstAmt)) * 100) / 100))}</b></span>
               </div>
-              {/* Task 26: available stock guard — requested qty available se bara ho to red warning */}
+              {/* Task 112: over-stock booking allowed — soft info (koi block nahi; office par Process Anyway handle karta hai) */}
               {lineProduct && (
                 (lines[i]?.qtyPcs ?? 0) > lineProduct.available ? (
-                  <p className="text-[11px] font-semibold text-red-600 bg-red-50 border border-red-200 rounded-md px-2 py-1">
-                    Stock limit: sirf {fmtQty(lineProduct.available, Math.max(1, lineProduct.unitsPerCarton), lineProduct.pcsPerBox > 0 ? lineProduct.pcsPerBox : 0)} available hai — is line ko kam karein
+                  <p className="text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">
+                    Ordered more than available ({fmtQty(lineProduct.available, Math.max(1, lineProduct.unitsPerCarton), lineProduct.pcsPerBox > 0 ? lineProduct.pcsPerBox : 0)}) — the bill will sync; the office confirms stock at processing
                   </p>
                 ) : (
-                  <p className="text-[11px] text-slate-400">Available: <span className="font-semibold text-emerald-700">{fmtQty(lineProduct.available, Math.max(1, lineProduct.unitsPerCarton), lineProduct.pcsPerBox > 0 ? lineProduct.pcsPerBox : 0)}</span> (open bills ke baad bacha hua stock)</p>
+                  <p className="text-[11px] text-slate-400">Available: <span className="font-semibold text-emerald-700">{fmtQty(lineProduct.available, Math.max(1, lineProduct.unitsPerCarton), lineProduct.pcsPerBox > 0 ? lineProduct.pcsPerBox : 0)}</span> (stock left after open bills)</p>
                 )
               )}
             </div>

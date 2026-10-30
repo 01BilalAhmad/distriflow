@@ -5,7 +5,7 @@ import { audit } from '@/lib/audit'
 import { fulfillOrder } from '@/lib/dms-fulfill'
 import { computeOrderLines, recalcManualDiscount, applyManualMerge, orderGrandPayable, type CalcIncomingItem } from '@/lib/dms-order-calc'
 import { advanceTaxFor, getTaxRates, getDistributorAddress } from '@/lib/dms-settings'
-import { getAvailableToPromise, groupQtyByProduct, oversellMessage } from '@/lib/dms-inventory'
+import { getAvailableToPromise } from '@/lib/dms-inventory'
 import { liveRecalcOrder } from '@/lib/dms-live-recalc'
 import { ensureOutletBalance, computeAdvanceProjection } from '@/lib/dms-credit'
 
@@ -78,7 +78,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         advanceAppliedNote: order.advanceAppliedNote,
         notes: order.notes,
         orderDate: new Date(order.orderDate).toISOString(),
-        items: order.items.map((it) => {
+        // Task 112: fully-cut (qty=0) lines detail/print mein nahi — cut ka matlab cut
+        items: order.items.filter((it) => it.qty > 0).map((it) => {
           // Task 86: CONFIRMED par live item values (naya scheme stack/discount/free qty)
           const lv = liveById.get(it.id)
           return {
@@ -214,21 +215,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         ?? (await db.outlet.findUnique({ where: { id: order.outletId }, select: { filerStatus: true } }))?.filerStatus
         ?? null
       const { lines, subtotal, schemeDiscount, tradeOfferTotal } = computeOrderLines(calcProducts, schemes, withSnapshots, order.channel, outletFiler)
-      if (lines.length === 0) return jsonError('Kam az kam 1 item qty ke saath chahiye')
+      if (lines.length === 0) return jsonError('At least 1 item with quantity is required')
 
-      // ---- Task 26: STOCK LIMIT — allocation edit bhi available ke andar ----
-      // excludeOrderId: is bill ki APNI purani booked qty committed count nahi hoti
-      // (warna apni hi lines available se minus ho kar edit kabhi possible na hota).
-      const atp = await getAvailableToPromise(tenantId, lines.map((l) => l.productId), id)
-      const demand = groupQtyByProduct(lines)
-      const over = [...demand.entries()]
-        .filter(([productId, qty]) => qty > (atp.get(productId)?.available ?? 0))
-        .map(([productId, qty]) => ({ productId, qty }))
-      if (over.length > 0 && action === 'UPDATE_ITEMS') {
-        const names = new Map(products.map((p) => [p.id, p.name]))
-        const upcOf = (pid: string) => Math.max(1, products.find((p) => p.id === pid)?.unitsPerCarton ?? 1)
-        return jsonError(`Stock limit crossed — ${oversellMessage(over, atp, names, upcOf)}`)
-      }
+      // ---- Task 112: stock-allocation edit par stock block NAHI ----
+      // Over-booked edit allowed — kami process par Process Anyway pop-up handle karta hai
+      // (pehle Task 26 ka hard reject tha — admin bhi over-stock qty save nahi kar sakta tha).
 
       const manual = recalcManualDiscount(order.manualDiscType, order.manualDiscValue, subtotal, schemeDiscount)
       const total = Math.round((subtotal - schemeDiscount - manual.manualDiscount) * 100) / 100
@@ -261,6 +252,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       const tax = advanceTaxFor(advBase, taxStatus, { filer: taxRate, nonFiler: taxRate })
 
       if (action === 'PREVIEW_ITEMS') {
+        // Task 112: available stock ab SIRF editor information ke liye (edit par block nahi hota)
+        const atp = await getAvailableToPromise(tenantId, lines.map((l) => l.productId), id)
         return Response.json({
           preview: {
             subtotal, schemeDiscount,

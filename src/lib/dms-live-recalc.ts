@@ -91,7 +91,10 @@ export function liveRecalcFromParts(
   order: LiveRecalcOrderParts,
   schemes: CalcScheme[],
 ): LiveRecalcPart | null {
-  const products: CalcProduct[] = order.items.map((it) => ({
+  // Task 112: Process Anyway trim se qty=0 (fully-cut) lines aa sakti hain — recalc sirf
+  // active (qty > 0) lines par chale, warna lines.length guard stale return karta rehta.
+  const activeItems = order.items.filter((it) => it.qty > 0)
+  const products: CalcProduct[] = activeItems.map((it) => ({
     id: it.productId,
     unitsPerCarton: it.product.unitsPerCarton,
     pcsPerBox: it.product.pcsPerBox,
@@ -103,7 +106,7 @@ export function liveRecalcFromParts(
     taxMode: it.product.taxMode ?? 'CLAIM',
   }))
   // LIVE PATH: koi scheme/schemeStack attach nahi — current schemes se full stack (Task 58)
-  const incoming: CalcIncomingItem[] = order.items.map((it) => ({
+  const incoming: CalcIncomingItem[] = activeItems.map((it) => ({
     productId: it.productId,
     qty: it.qty,
     rate: it.rate,
@@ -111,7 +114,7 @@ export function liveRecalcFromParts(
     bookedGstRate: it.gstRate,
   }))
   const res = computeOrderLines(products, schemes, incoming, order.channel, order.filerStatus)
-  if (res.lines.length !== order.items.length) return null // stale — stored values rehne do
+  if (res.lines.length !== activeItems.length) return null // stale — stored values rehne do
 
   const manual = recalcManualDiscount(order.manualDiscType, order.manualDiscValue, res.subtotal, res.schemeDiscount)
   const gstTotal = applyManualMerge(res.lines, manual.manualDiscount)
@@ -169,13 +172,15 @@ export async function liveRecalcOrder(orderId: string): Promise<LiveRecalcFull |
   if (!order || order.status !== 'CONFIRMED') return null
 
   const schemes = await loadActiveSchemes(order.distributorId)
+  // Task 112: qty=0 (fully-cut) lines recalc se bahar — id mapping bhi isi filtered list par
+  const activeItems = order.items.filter((it) => it.qty > 0)
   const part = liveRecalcFromParts(
     {
       channel: order.channel,
       filerStatus: order.filerStatus ?? order.outlet?.filerStatus ?? null,
       manualDiscType: order.manualDiscType,
       manualDiscValue: order.manualDiscValue,
-      items: order.items.map((it) => ({
+      items: activeItems.map((it) => ({
         id: it.id, productId: it.productId, qty: it.qty, rate: it.rate,
         tradeOfferAmt: it.tradeOfferAmt, gstRate: it.gstRate,
         // Task 26: company taxMode CalcProduct shape mein resolve
@@ -197,7 +202,7 @@ export async function liveRecalcOrder(orderId: string): Promise<LiveRecalcFull |
     filerStatus,
     payable: orderGrandPayable({ total: part.total, tradeOfferTotal: part.tradeOfferTotal, gstTotal: part.gstTotal, advanceTax: tax.amount }),
     items: part.lines.map((l, i) => ({
-      id: order.items[i].id,
+      id: activeItems[i].id,
       freeQty: l.freeQty,
       discount: l.discount,
       schemeId: l.schemeId,

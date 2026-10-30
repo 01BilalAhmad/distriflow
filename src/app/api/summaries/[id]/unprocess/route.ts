@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
 import { requireUser, tenantMismatch } from '@/lib/api-auth'
 import { restockStock } from '@/lib/dms-inventory'
+import { persistLiveRecalc } from '@/lib/dms-live-recalc'
 import { audit } from '@/lib/audit'
 
 /**
@@ -64,16 +65,29 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       }
       // 3) Bills wapas unprocessed (Stock Allocation mein dobara nazar aayengi)
       await tx.order.updateMany({ where: { id: { in: orderIds } }, data: { status: 'CONFIRMED' } })
+      // 3b) Task 112: Process Anyway trim restore — bookedQty backup se original booked qty wapas
+      const trimmedItems = await tx.orderItem.findMany({
+        where: { orderId: { in: orderIds }, bookedQty: { not: null } },
+        select: { id: true, bookedQty: true },
+      })
+      for (const t of trimmedItems) {
+        await tx.orderItem.update({ where: { id: t.id }, data: { qty: t.bookedQty!, bookedQty: null } })
+      }
       // 4) Summary delete (implicit m-n join rows cascade)
       await tx.deliverySummary.delete({ where: { id: summary.id } })
-      return { summaryNo: summary.summaryNo, billsCount: orderIds.length, restockedPcs, deliveries: deliveries.length }
+      return { summaryNo: summary.summaryNo, billsCount: orderIds.length, restockedPcs, deliveries: deliveries.length, restoredLines: trimmedItems.length }
     })
+
+    // Task 112: trim restore ke baad stored totals bhi full booked par refresh (live recalc)
+    for (const o of summary.orders) {
+      await persistLiveRecalc({ id: o.id, status: 'CONFIRMED', subtotal: 0, schemeDiscount: 0, manualDiscount: 0, total: 0, tradeOfferTotal: 0, gstTotal: 0, filerStatus: null, advanceTaxRate: null, advanceTax: 0 })
+    }
 
     // Task 35: SUMMARY_UNPROCESS — revert ka record (kitna stock wapas aaya)
     await audit(
       { id: user.id, name: user.name, role: user.role, tenantId: summary.distributorId },
       'SUMMARY_UNPROCESS',
-      { req, entity: 'DeliverySummary', entityId: summary.id, detail: `${result.summaryNo} UN-PROCESSED — ${result.billsCount} bills wapas CONFIRMED, ${result.restockedPcs} pcs stock wapas` },
+      { req, entity: 'DeliverySummary', entityId: summary.id, detail: `${result.summaryNo} UN-PROCESSED — ${result.billsCount} bills back to CONFIRMED, ${result.restockedPcs} pcs restocked, ${result.restoredLines} trimmed lines restored (Task 112)` },
     )
 
     return Response.json({ ok: true, ...result })

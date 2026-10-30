@@ -4,7 +4,6 @@ import { requireUser, tenantMismatch } from '@/lib/api-auth'
 import { computeOrderLines, recalcManualDiscount, applyManualMerge, orderGrandPayable, type CalcIncomingItem } from '@/lib/dms-order-calc'
 import { advanceTaxFor, getTaxRates } from '@/lib/dms-settings'
 import { ensureOutletBalance, computeAdvanceProjection, creditStatus } from '@/lib/dms-credit'
-import { getAvailableToPromise, groupQtyByProduct, oversellMessage } from '@/lib/dms-inventory'
 import { getPjpSettings, karachiDayCode, karachiDayBounds, outletInTodayRoute } from '@/lib/dms-pjp'
 import { loadActiveSchemes, liveRecalcFromParts, type LiveRecalcOrderParts } from '@/lib/dms-live-recalc'
 import { audit } from '@/lib/audit'
@@ -248,19 +247,11 @@ export async function POST(req: Request) {
       }
     }
 
-    // ---- Task 26: STOCK LIMIT — overselling band ----
-    // Available = warehouse stock − pehle se CONFIRMED (unprocessed) bills ki booked qty.
-    // Isi liye 1 ctn stock par 3 bills × 1 ctn nahi ban sakte — pehli bill ke baad available 0.
-    const atp = await getAvailableToPromise(tenantId, itemsData.map((l) => l.productId))
-    const demand = groupQtyByProduct(itemsData)
-    const over = [...demand.entries()]
-      .filter(([productId, qty]) => qty > (atp.get(productId)?.available ?? 0))
-      .map(([productId, qty]) => ({ productId, qty }))
-    if (over.length > 0) {
-      const names = new Map(products.map((p) => [p.id, p.name]))
-      const upcOf = (pid: string) => Math.max(1, products.find((p) => p.id === pid)?.unitsPerCarton ?? 1)
-      return jsonError(`Stock limit crossed — ${oversellMessage(over, atp, names, upcOf)}`)
-    }
+    // ---- Task 112: STOCK LIMIT booking par BLOCK NAHI ----
+    // User rule: stock kam ho to bhi bill server par sync hogi — kami office par
+    // Process Anyway pop-up se handle hoti hai (jitna stock laga utna total, jo cut
+    // hua wo cut hua). Pehle yahan Task 26 ka hard reject tha — poori bill upload hi
+    // nahi hoti thi (ek kam SKU baqi sab SKUs ke saath bill ko bhi block kar deta tha).
 
     // ---- Manual discount (order-level, scheme ke ilawa) ----
     // PERCENT: subtotal ka % | FLAT: seedha Rs. Total kabhi negative nahi ho sakta.

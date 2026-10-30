@@ -91,12 +91,12 @@ export async function POST(req: Request) {
     const me = auth.user
     const mb = megaBlocked(me.role)
     if (mb) return mb
-    if (me.role === 'SALESMAN') return jsonError('Van out sirf distributor kar sakta hai', 403)
+    if (me.role === 'SALESMAN') return jsonError('Only the distributor can van-out bills', 403)
 
     const body = await req.json() as ProcessBody
     const { orderIds, deliveryDate, notes, processAnyway } = body
     if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
-      return jsonError('Kam az kam 1 bill select karein')
+      return jsonError('Select at least 1 bill')
     }
 
     const orders = await db.order.findMany({
@@ -110,11 +110,11 @@ export async function POST(req: Request) {
     if (orders.length !== orderIds.length) return jsonError('Kuch orders nahi mile', 404)
 
     const bad = orders.find((o) => o.status !== 'CONFIRMED')
-    if (bad) return jsonError(`Order ${bad.orderNo} process nahi ho sakta (status: ${bad.status})`)
+    if (bad) return jsonError(`Order ${bad.orderNo} cannot be processed (status: ${bad.status})`)
 
     const salesmanIds = new Set(orders.map((o) => o.salesmanId))
     if (salesmanIds.size > 1 || orders.some((o) => !o.salesmanId)) {
-      return jsonError('Ek summary mein sirf EK order booker ki bills ho sakti hain')
+      return jsonError('One summary can only contain bills of a single order booker')
     }
     const salesmanId = orders[0].salesmanId!
 
@@ -127,7 +127,7 @@ export async function POST(req: Request) {
     let deliveryDt: Date
     if (deliveryDate) {
       deliveryDt = new Date(deliveryDate)
-      if (isNaN(deliveryDt.getTime())) return jsonError('Delivery date invalid hai')
+      if (isNaN(deliveryDt.getTime())) return jsonError('Invalid delivery date')
     } else {
       deliveryDt = new Date()
       deliveryDt.setDate(deliveryDt.getDate() + 1)
@@ -182,12 +182,16 @@ export async function POST(req: Request) {
       shortPcs: number
     }
     const shortages: ShortageRow[] = []
+    // Task 112: preview — bills jinko check-walk mein KUCH bhi allocate na hua (out of stock)
+    const previewSkipped: { orderNo: string; outletName: string }[] = []
     {
       // Check-walk apni copy par — allocation walk ko fresh initialRemaining chahiye
       const checkRemaining = new Map(initialRemaining)
       for (const o of seqOrders) {
+        let loadedPcs = 0
         for (const it of o.items) {
           const rem = checkRemaining.get(it.productId) ?? 0
+          loadedPcs += Math.min(it.qty, Math.max(0, rem))
           if (it.qty > rem) {
             const p = prodInfo.get(it.productId)
             shortages.push({
@@ -206,13 +210,15 @@ export async function POST(req: Request) {
           }
           checkRemaining.set(it.productId, Math.max(0, rem - it.qty))
         }
+        if (loadedPcs === 0) previewSkipped.push({ orderNo: o.orderNo, outletName: o.outlet?.name ?? '—' })
       }
     }
     if (shortages.length > 0 && !processAnyway) {
       return Response.json(
         {
-          error: `Out of stock — ${shortages.length} line${shortages.length > 1 ? 's' : ''} mein stock kami hai (detail popup dekhein)`,
+          error: `Out of stock — ${shortages.length} line${shortages.length > 1 ? 's' : ''} short (see the detail popup)`,
           shortages,
+          skippedBills: previewSkipped,
         },
         { status: 400 },
       )
@@ -271,6 +277,33 @@ export async function POST(req: Request) {
         }
       }
 
+      // ---- Task 112: BILL TOTAL = LOADED STOCK ----
+      // User rule: "jitna stock lagega bill mein usi ka total aayega — jo cut gaya wo cut gaya."
+      // Har short line apni qty = loaded par trim hoti hai (original booked qty
+      // OrderItem.bookedQty mein backup — unprocess par wapas restore hota hai).
+      // persistLiveRecalc (neeche) naye qty par poora math re-compute kar deta hai.
+      let trimmedLines = 0
+      for (const o of seqOrders) {
+        const ov = overrideByOrder.get(o.id)
+        if (!ov) continue
+        for (const it of o.items) {
+          const loaded = ov.get(it.id)
+          if (loaded === undefined || loaded >= it.qty) continue
+          await db.orderItem.update({
+            where: { id: it.id },
+            data: {
+              bookedQty: it.qty,
+              qty: loaded,
+              // Fully-cut line (loaded 0): stored money fields zero — reports/sums isay
+              // booked amount na gine (liveRecalc qty=0 lines ko skip karta hai).
+              ...(loaded === 0 ? { freeQty: 0, discount: 0, gstAmt: 0, lineTotal: 0, manualShare: 0 } : {}),
+            },
+          })
+          it.qty = loaded
+          trimmedLines++
+        }
+      }
+
       // ---- Task 86: PROCESS-TIME LIVE REFRESH (Rule 3 ka dil) ----
       // Process hone se pehle har bill CURRENT schemes par re-calc + persist hoti hai —
       // isliye processed bill hamesha "us waqt ke latest scheme" par freeze hoti hai.
@@ -319,7 +352,7 @@ export async function POST(req: Request) {
       await audit(
         { id: me.id, name: me.name, role: me.role, tenantId: distributorId },
         'BILLS_PROCESS',
-        { req, entity: 'DeliverySummary', entityId: summary.id, detail: `${summary.summaryNo} van-out (Process Anyway) — ${processedOrderIds.length} bills load, ${skippedBills.length} skip` },
+        { req, entity: 'DeliverySummary', entityId: summary.id, detail: `${summary.summaryNo} van-out (Process Anyway) — ${processedOrderIds.length} bills load, ${skippedBills.length} skip, ${trimmedLines} lines trimmed to loaded stock (Task 112)` },
       )
 
       return Response.json({
@@ -334,6 +367,7 @@ export async function POST(req: Request) {
         processedCount: processedOrderIds.length,
         skippedBills,
         shortRows,
+        trimmedLines,
       })
     }
 
