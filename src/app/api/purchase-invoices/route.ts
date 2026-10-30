@@ -152,9 +152,11 @@ export async function POST(req: Request) {
 
     const company = await db.company.findFirst({ where: { id: b.companyId, distributorId: tenantId } })
     if (!company) return jsonError('Company nahi mili (ya aap ki nahi hai)', 404)
-    // Task 108: is purchase ka tax mode = COMPANY ka tax mode (Noms = INVOICE_DISCOUNT ladder,
-    // Cadbury/CLAIM companies purana rule) — snapshot invoice par freeze hota hai
-    const companyTaxMode = company.taxMode === 'INVOICE_DISCOUNT' ? 'INVOICE_DISCOUNT' : 'CLAIM'
+    // Task 108/109: is purchase ka tax mode = COMPANY ka tax mode (Noms = INVOICE_DISCOUNT ladder,
+    // Cadbury = RETAIL_GST retail-basis GST, baqi CLAIM) — snapshot invoice par freeze hota hai
+    const companyTaxMode = company.taxMode === 'INVOICE_DISCOUNT'
+      ? 'INVOICE_DISCOUNT'
+      : company.taxMode === 'RETAIL_GST' ? 'RETAIL_GST' : 'CLAIM'
 
     // validate items + snapshot product data
     const productIds = [...new Set(b.items.map((i) => i.productId!))]
@@ -192,8 +194,10 @@ export async function POST(req: Request) {
         ? Math.min(100, Math.max(0, Number(it.gstRate) || 0))
         : (p.gstEnabled ? p.gstRate : 0)
       // 4-7) Task 108: tax ladder ab COMPANY KE TAX MODE se — shared pure helper
-      //   CLAIM (default/Cadbury): GST poore net par, TO baad me minus
+      //   CLAIM (default): GST poore net par, TO baad me minus
       //   INVOICE_DISCOUNT (Noms): TO pehle kaata → GST (net − TO) par
+      //   RETAIL_GST (Cadbury): GST RETAIL value par (consumerPrice × cartons × r/(100+r)) —
+      //     PassOn/TO ka GST par koi asar nahi, TO baad me minus (sheet exact ladder)
       const tax = computePurchaseLineTaxes({
         gross,
         discAmt,
@@ -202,6 +206,8 @@ export async function POST(req: Request) {
         tradeOfferRequest: Number(it.tradeOfferAmt ?? 0) || 0,
         advanceTaxPct: advPct,
         taxMode: companyTaxMode,
+        // Task 109: line ka RETAIL value — consumerPrice (retail/pc) × cartons (Cadbury mode ka GST base)
+        retailValue: Math.round((Number(p.consumerPrice) || 0) * cartons * 100) / 100,
       })
       clean.push({
         productId: p.id,

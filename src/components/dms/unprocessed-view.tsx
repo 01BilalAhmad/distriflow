@@ -629,12 +629,14 @@ export function UnprocessedBillsView() {
                 <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 rounded-lg bg-slate-50 border border-slate-200 p-3">
                   <div className="text-sm space-y-1">
                     {/* Task 108: kaunsa TAX SYSTEM lag raha hai — print wala hi rule, ab naam ke sath */}
-                    <p className={`text-[10px] font-bold uppercase tracking-wide ${previewModeA ? 'text-amber-600' : 'text-slate-400'}`}>
+                    <p className={`text-[10px] font-bold uppercase tracking-wide ${previewModeA ? 'text-amber-600' : expandedOrder?.taxMode === 'RETAIL_GST' ? 'text-violet-600' : 'text-slate-400'}`}>
                       Tax Mode: {expandedOrder?.taxMode === 'MIXED'
                         ? 'Mixed — har line apni company ke tax rule par'
                         : previewModeA
                           ? 'Invoice Discount — Trade Offer pehle kaata, GST net−TO par (Noms style)'
-                          : 'Claim — GST poore net par, Trade Offer baad me'}
+                          : expandedOrder?.taxMode === 'RETAIL_GST'
+                            ? 'Retail GST — GST retail price se, discounts ka asar nahi (Cadbury style)'
+                            : 'Claim — GST poore net par, Trade Offer baad me'}
                     </p>
                     <div className="flex justify-between gap-8"><span className="text-slate-500">Subtotal</span><span className="tabular-nums text-slate-800">{preview ? fmtPKR(preview.subtotal) : '…'}</span></div>
                     <div className="flex justify-between gap-8"><span className="text-slate-500">Scheme Discount</span><span className="tabular-nums text-rose-600">{preview ? (preview.schemeDiscount > 0 ? `− ${fmtPKR(preview.schemeDiscount)}` : fmtPKR(0)) : '…'}</span></div>

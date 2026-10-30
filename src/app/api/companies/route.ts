@@ -18,9 +18,9 @@ interface CompanyBody {
   taxMode?: string
 }
 
-/** Task 26: sirf ye 2 modes valid — kuch aur aaye to CLAIM (default) */
-function validTaxMode(v: string | undefined): 'CLAIM' | 'INVOICE_DISCOUNT' {
-  return v === 'INVOICE_DISCOUNT' ? 'INVOICE_DISCOUNT' : 'CLAIM'
+/** Task 26/109: valid tax modes — CLAIM | INVOICE_DISCOUNT (Noms) | RETAIL_GST (Cadbury retail) */
+function validTaxMode(v: string | undefined): 'CLAIM' | 'INVOICE_DISCOUNT' | 'RETAIL_GST' {
+  return v === 'INVOICE_DISCOUNT' ? 'INVOICE_DISCOUNT' : v === 'RETAIL_GST' ? 'RETAIL_GST' : 'CLAIM'
 }
 
 // Task 95: tenantProfileId(userId) helper ki jagah cookie-user se tenant resolve

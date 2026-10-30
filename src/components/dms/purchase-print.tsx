@@ -67,7 +67,9 @@ export function CblPurchaseInvoiceDoc({ inv, dist }: { inv: PurchaseInvoiceDTO; 
   const balance = Math.round((inv.total - inv.paidAmount) * 100) / 100
   const bizName = (dist?.businessName || dist?.distributorName || '').trim()
   // Task 108: invoice ka tax mode snapshot — INVOICE_DISCOUNT = Noms ladder (TO pehle, GST net−TO par)
+  // Task 109: RETAIL_GST = Cadbury sheet mode — GST retail basis (column order CLAIM jaisa, label alag)
   const modeAInv = inv.taxMode === 'INVOICE_DISCOUNT'
+  const modeRInv = inv.taxMode === 'RETAIL_GST'
 
   // ---- Task 34 pattern: DATA-AWARE column widths (water-filling) — bill table jaisa hi ----
   const colSpecs: { key?: string; hw: number; vl: number; min: number; d: number; need: number }[] = []
@@ -89,11 +91,12 @@ export function CblPurchaseInvoiceDoc({ inv, dist }: { inv: PurchaseInvoiceDTO; 
   addCol(inv.items.map((it) => fmtCell(it.discountAmt, 2)), 'Pass On', 'passon')
   addCol(inv.items.map((it) => fmtCell(it.netAmount, 2)), 'Net Amount (Excluding Sales Tax)', 'net')
   // Task 108: column order tax mode par depend — Noms ladder me Trade Offer Sales Tax se PEHLE aata hai
+  // Task 109: retail mode (Cadbury) me GST retail basis par hota hai — label me saaf likha jata hai
   if (modeAInv) {
     addCol(inv.items.map((it) => fmt2(it.tradeOfferAmt)), 'Less: Trade Offer', 'to')
     addCol(inv.items.map((it) => fmt2(it.totalTax)), 'Sales Tax (GST)', 'st')
   } else {
-    addCol(inv.items.map((it) => fmt2(it.totalTax)), 'Sales Tax', 'st')
+    addCol(inv.items.map((it) => fmt2(it.totalTax)), modeRInv ? 'Sales Tax (On Retail)' : 'Sales Tax', 'st')
     addCol(inv.items.map((it) => fmt2(it.tradeOfferAmt)), 'Trade Offer', 'to')
   }
   addCol(inv.items.map((it) => fmt2(it.advanceTax)), 'Advance Tax 236H', 'adv')
@@ -177,7 +180,7 @@ export function CblPurchaseInvoiceDoc({ inv, dist }: { inv: PurchaseInvoiceDTO; 
                 </>
               ) : (
                 <>
-                  <th>Sales Tax</th>
+                  <th>{modeRInv ? 'Sales Tax (On Retail)' : 'Sales Tax'}</th>
                   <th>Trade Offer</th>
                 </>
               )}
@@ -250,7 +253,7 @@ export function CblPurchaseInvoiceDoc({ inv, dist }: { inv: PurchaseInvoiceDTO; 
                 <tr><td style={{ textAlign: 'center', fontWeight: 'bold' }}>Net Amount:</td><td className="num" style={{ fontWeight: 'bold' }}>{fmt2(S.net)}</td></tr>
                 {modeAInv && inv.tradeOfferTotal > 0 && <tr><td style={{ textAlign: 'center' }}>Less: Trade Offer:</td><td className="num">- {fmt2(inv.tradeOfferTotal)}</td></tr>}
                 {billDisc > 0 && <tr><td style={{ textAlign: 'center' }}>Bill Discount{inv.discountPct > 0 ? ` (${inv.discountPct}%)` : ''}:</td><td className="num">- {fmt2(billDisc)}</td></tr>}
-                {inv.taxTotal > 0 && <tr><td style={{ textAlign: 'center' }}>{modeAInv ? 'Sales Tax (GST):' : 'GST:'}</td><td className="num">+ {fmt2(inv.taxTotal)}</td></tr>}
+                {inv.taxTotal > 0 && <tr><td style={{ textAlign: 'center' }}>{modeAInv ? 'Sales Tax (GST):' : modeRInv ? 'GST (Retail Basis):' : 'GST:'}</td><td className="num">+ {fmt2(inv.taxTotal)}</td></tr>}
                 {inv.advanceTaxTotal > 0 && <tr><td style={{ textAlign: 'center' }}>Advance Tax 236H ({inv.advanceTaxPct}%):</td><td className="num">+ {fmt2(inv.advanceTaxTotal)}</td></tr>}
                 {!modeAInv && inv.tradeOfferTotal > 0 && <tr><td style={{ textAlign: 'center' }}>Trade Offer:</td><td className="num">- {fmt2(inv.tradeOfferTotal)}</td></tr>}
                 <tr><td style={{ textAlign: 'right', fontWeight: 'bold' }}>Net Invoice Amount:</td><td className="num" style={{ fontWeight: 'bold' }}>{fmt2(inv.total)}</td></tr>

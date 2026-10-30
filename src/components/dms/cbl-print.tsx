@@ -615,7 +615,9 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
   const hasAccountRows = prevBal > 0.005 || advAdjust > 0.005
   const grandNet = Math.round((netInvoice + prevBal - advAdjust) * 100) / 100
   // Task 26: INVOICE_DISCOUNT order → Noms/SalesFlo ladder (TO pehle kaata gaya, GST net−TO par)
+  // Task 109: RETAIL_GST order (Cadbury) → GST retail basis par lagi thi — label me saaf
   const modeAInv = inv.taxMode === 'INVOICE_DISCOUNT'
+  const modeRInv = inv.taxMode === 'RETAIL_GST'
 
   // ---- Task 34: DATA-AWARE column widths (water-filling) — Task 59: portrait TABLE_W par ----
   const colSpecs: { key?: string; hw: number; vl: number; min: number; d: number; need: number }[] = []
@@ -811,7 +813,7 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
                 <tr><td style={{ textAlign: 'center' }}>Gross Amount:</td><td className="num" style={{ width: 96 }}>{fmt2(S.gross)}</td></tr>
                 <tr><td style={{ textAlign: 'center' }}>Total Discount:</td><td className="num" style={{ fontWeight: 'bold' }}>{fmt2(totalDiscount)}</td></tr>
                 {modeAInv && S.to > 0 && <tr><td style={{ textAlign: 'center' }}>Less: Trade Offer:</td><td className="num">- {fmt2(S.to)}</td></tr>}
-                <tr><td style={{ textAlign: 'center' }}>{modeAInv ? 'Sales Tax (GST):' : 'GST:'}</td><td className="num">{fmt2(S.gst)}</td></tr>
+                <tr><td style={{ textAlign: 'center' }}>{modeAInv ? 'Sales Tax (GST):' : modeRInv ? 'GST (Retail Basis):' : 'GST:'}</td><td className="num">{fmt2(S.gst)}</td></tr>
                 <tr><td style={{ textAlign: 'center' }}>Advance Tax 236H:</td><td className="num">{fmt2(S.adv)}</td></tr>
                 {!modeAInv && S.to > 0 && <tr><td style={{ textAlign: 'center' }}>Trade Offer:</td><td className="num">- {fmt2(S.to)}</td></tr>}
                 <tr><td style={{ textAlign: 'right', fontWeight: 'bold' }}>Net Invoice Amount:</td><td className="num" style={{ fontWeight: 'bold' }}>{fmtI(Math.round(netInvoice))}</td></tr>

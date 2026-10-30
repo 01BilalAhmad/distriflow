@@ -216,12 +216,14 @@ function OrderDetailDialog({ order, items, onClose }: { order: OrderDTO | null; 
                 {order.orderNo}
                 <Badge variant="outline" className={STATUS_STYLES[order.status]}>{statusLabel(order.status)}</Badge>
                 {/* Task 108: kaunsa TAX SYSTEM is bill par laga — snapshot se, zuban ke sath */}
-                <Badge variant="outline" className={`text-[9px] ${detailModeA ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                <Badge variant="outline" className={`text-[9px] ${detailModeA ? 'border-amber-200 bg-amber-50 text-amber-700' : order.taxMode === 'RETAIL_GST' ? 'border-violet-200 bg-violet-50 text-violet-700' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
                   {order.taxMode === 'MIXED'
                     ? 'Tax: Mixed (per-line)'
                     : detailModeA
                       ? 'Tax: Invoice Discount (Noms)'
-                      : 'Tax: Claim (GST pehle)'}
+                      : order.taxMode === 'RETAIL_GST'
+                        ? 'Tax: Retail GST (Cadbury)'
+                        : 'Tax: Claim (GST pehle)'}
                 </Badge>
               </DialogTitle>
               <DialogDescription>

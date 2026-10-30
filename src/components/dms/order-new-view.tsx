@@ -35,7 +35,7 @@ import { api, fmtPKR } from '@/lib/dms-api'
 import type { OutletDTO, ProductDTO, SchemeDTO, SalesmanPerfDTO, CompanyFullDTO } from '@/lib/dms-types'
 import { UnitQtyInputs, splitPcs, fmtQty, packHint } from '@/components/dms/unit-qty'
 import { ProductCombobox } from '@/components/dms/product-combobox'
-import { splitManualByNet } from '@/lib/dms-order-calc'
+import { splitManualByNet, retailGstAmt } from '@/lib/dms-order-calc'
 import {
   ArrowLeft, Plus, XCircle, Loader2, Gift, Percent, ChevronsUpDown, Check,
   Store, ShieldCheck, RotateCcw, ShoppingCart,
@@ -297,11 +297,11 @@ export function OrderNewView() {
   }
 
   const computed = useMemo(() => {
-    if (!outlet) return { subtotal: 0, discount: 0, gstTotal: 0, toTotal: 0, rows: [] as { name: string; qtyPcs: number; freeQty: number; discount: number; total: number; gross: number; stack: PreviewStackEntry[]; ratePc: number; upc: number; pcsPerBox: number; tradeOffer: number; gstRate: number; gstAmt: number; modeA: boolean }[] }
+    if (!outlet) return { subtotal: 0, discount: 0, gstTotal: 0, toTotal: 0, rows: [] as { name: string; qtyPcs: number; freeQty: number; discount: number; total: number; gross: number; stack: PreviewStackEntry[]; ratePc: number; upc: number; pcsPerBox: number; tradeOffer: number; gstRate: number; gstAmt: number; modeA: boolean; retail: boolean }[] }
     let subtotal = 0, discount = 0, gstTotal = 0, toTotal = 0
     const rows = lines.map((l) => {
       const p = products.find((x) => x.id === l.productId)
-      if (!p) return { name: '', qtyPcs: l.qtyPcs, freeQty: 0, discount: 0, total: 0, gross: 0, stack: [] as PreviewStackEntry[], ratePc: 0, upc: 1, pcsPerBox: 0, tradeOffer: 0, gstRate: 0, gstAmt: 0, modeA: false }
+      if (!p) return { name: '', qtyPcs: l.qtyPcs, freeQty: 0, discount: 0, total: 0, gross: 0, stack: [] as PreviewStackEntry[], ratePc: 0, upc: 1, pcsPerBox: 0, tradeOffer: 0, gstRate: 0, gstAmt: 0, modeA: false, retail: false }
       const upc = Math.max(1, p.unitsPerCarton)
       const pcsPerBox = p.pcsPerBox > 0 ? p.pcsPerBox : 0
       const ratePc = p.tradePrice / upc
@@ -341,16 +341,21 @@ export function OrderNewView() {
       // Task 45: GST per product (Products page ka rate — hardcoded nahi); TO discount ke ILAWA
       // Task 26 MIRROR: company INVOICE_DISCOUNT ho to Trade Offer pehle minus — GST (net − TO)
       // par (server computeOrderLines ka same rule — preview == booked bill)
+      // Task 109 MIRROR: company RETAIL_GST (Cadbury) ho to GST RETAIL price se — qty ×
+      // consumerPrice × r/(100+r) (sheet exact formula; server jaisa hi fallback bhi)
       const modeA = p.company?.taxMode === 'INVOICE_DISCOUNT'
       const tradeOffer = Math.max(0, Math.round((parseFloat(l.tradeOffer) || 0) * 100) / 100)
       const gstRate = p.gstEnabled === false ? 0 : Math.max(0, Number(p.gstRate) || 0)
-      const gstAmt = Math.round(Math.max(0, gross - disc - (modeA ? tradeOffer : 0)) * (gstRate / 100) * 100) / 100
+      const retailGst = p.company?.taxMode === 'RETAIL_GST' ? retailGstAmt(l.qtyPcs, p.consumerPrice, gstRate) : null
+      const gstAmt = retailGst != null
+        ? retailGst
+        : Math.round(Math.max(0, gross - disc - (modeA ? tradeOffer : 0)) * (gstRate / 100) * 100) / 100
       const lineTotal = gross - disc
       subtotal += gross
       discount += disc
       gstTotal += gstAmt
       toTotal += tradeOffer
-      return { name: p.name, qtyPcs: l.qtyPcs, freeQty, discount: disc, total: lineTotal, gross, stack: stackAgg, ratePc, upc, pcsPerBox, tradeOffer, gstRate, gstAmt, modeA }
+      return { name: p.name, qtyPcs: l.qtyPcs, freeQty, discount: disc, total: lineTotal, gross, stack: stackAgg, ratePc, upc, pcsPerBox, tradeOffer, gstRate, gstAmt, modeA, retail: retailGst != null }
     })
     return { subtotal, discount, gstTotal: Math.round(gstTotal * 100) / 100, toTotal: Math.round(toTotal * 100) / 100, rows }
   }, [lines, products, schemes, outlet])
@@ -392,8 +397,9 @@ export function OrderNewView() {
       const manualShare = shares[i]
       const total = Math.round(Math.max(0, r.total - manualShare) * 100) / 100
       // Task 26 mirror: INVOICE_DISCOUNT line ka GST base = merged net − TO (server applyManualMerge jaisa)
+      // Task 109 mirror: RETAIL (Cadbury) line ka GST discounts se azad — freeze (server jaisa hi)
       const base = r.modeA ? Math.max(0, total - r.tradeOffer) : total
-      const gstAmt = r.gstRate > 0 ? Math.round(base * (r.gstRate / 100) * 100) / 100 : 0
+      const gstAmt = r.retail ? r.gstAmt : r.gstRate > 0 ? Math.round(base * (r.gstRate / 100) * 100) / 100 : 0
       gstTotal += gstAmt
       return { ...r, manualShare, total, gstAmt }
     })
@@ -416,7 +422,9 @@ export function OrderNewView() {
 
   // Task 26-b: preview ladder mode-aware — SAARI lines Mode A (INVOICE_DISCOUNT companies)
   // hon to Noms/SalesFlo ladder (Less: Trade Offer GST se pehle). Mixed = print jaisa purana ladder.
+  // Task 109: SAARI lines retail (Cadbury) hon to GST label 'Retail Basis' ka (ladder default jaisa).
   const previewModeA = computed.rows.length > 0 && computed.rows.every((r) => r.modeA)
+  const previewRetail = computed.rows.length > 0 && computed.rows.every((r) => r.retail)
 
   function deleteDiscount() {
     setDiscType('NONE')
@@ -581,6 +589,8 @@ export function OrderNewView() {
               </Select>
               {selectedCompany?.taxMode === 'INVOICE_DISCOUNT' ? (
                 <p className="text-[11px] leading-snug text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">⚡ <b>Invoice Discount mode</b> — is bill par Trade Offer pehle minus hoga, GST baad mein (Noms/SalesFlo style — GST kam aati hai)</p>
+              ) : selectedCompany?.taxMode === 'RETAIL_GST' ? (
+                <p className="text-[11px] leading-snug text-violet-800 bg-violet-50 border border-violet-200 rounded-md px-2 py-1">⚡ <b>Retail GST mode (Cadbury)</b> — GST is bill par RETAIL price se lagegi (Consumer Price × qty × 18/118), Pass On/Trade Offer ka GST par asar nahi — company invoice sheet jaisa</p>
               ) : selectedCompany ? (
                 <p className="text-[11px] text-slate-500">Claim/Rebate mode — GST pehle net par lagti hai, Trade Offer baad mein minus (default mechanism)</p>
               ) : (
@@ -845,7 +855,7 @@ export function OrderNewView() {
           {previewModeA && computed.toTotal > 0 && (
             <div className="flex justify-between text-violet-600 font-medium"><span>Less: Trade Offer (GST se pehle)</span><span>- {fmtPKR(computed.toTotal)}</span></div>
           )}
-          {merged.gstTotal > 0 && <div className="flex justify-between text-blue-600 font-medium"><span>{previewModeA ? 'Sales Tax (GST)' : 'GST (Sales Tax)'}</span><span>+ {fmtPKR(merged.gstTotal)}</span></div>}
+          {merged.gstTotal > 0 && <div className="flex justify-between text-blue-600 font-medium"><span>{previewModeA ? 'Sales Tax (GST)' : previewRetail ? 'GST (Retail Basis)' : 'GST (Sales Tax)'}</span><span>+ {fmtPKR(merged.gstTotal)}</span></div>}
           {!previewModeA && computed.toTotal > 0 && <div className="flex justify-between text-violet-600 font-medium"><span>Trade Offer</span><span>- {fmtPKR(computed.toTotal)}</span></div>}
           {outlet && taxRates && advTaxPreview > 0 && (
             <div className="flex justify-between text-blue-600"><span>Advance Tax ({outlet.filerStatus === 'FILER' ? `Filer ${taxRates.filer}` : `Non-Filer ${taxRates.nonFiler}`}%)</span><span>+ {fmtPKR(advTaxPreview)}</span></div>

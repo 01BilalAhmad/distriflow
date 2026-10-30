@@ -8,6 +8,7 @@ import {
   applyManualMerge,
   recalcManualDiscount,
   aggregateSchemePromos,
+  retailGstFraction,
   type CalcProduct,
   type CalcScheme,
   type CalcLine,
@@ -404,5 +405,84 @@ describe('Task 108: computePurchaseLineTaxes — purchase ladder company tax-mod
     const noms = computePurchaseLineTaxes({ gross: 1000, discAmt: 0, gstRate: 0, furtherTaxPct: 2, tradeOfferRequest: 100, advanceTaxPct: 0, taxMode: 'INVOICE_DISCOUNT' })
     expect(claim.furtherTax).toBe(20) // 1000 par
     expect(noms.furtherTax).toBe(18) // 900 par
+  })
+})
+/* ==================== Task 109: RETAIL_GST — Cadbury invoice sheet (NEW-1.xlsx) ====================
+ * User ki real Cadbury sheet (Yaseen Enterprises) ka exact system:
+ *   GST/ctn = RP_PER_CTN × 18/118 (retail GST-INCLUSIVE hota hai, GST usme se extract)
+ *   TOTAL GST = ORDER × GST/ctn — Pass On / Trade Offer ka GST par KOI asar NAHI
+ *   AMOUNT = Gross + GST − TO − PassOn; Adv 236H = AMOUNT × 0.5%; Net = AMOUNT + Adv
+ * Sheet rows: ECLAIRS RS.3 RP/ctn 3,600 → GST 549.1525…; HALLS RS.5 hard 1,200 (= RP 6,000 × 25/125).
+ */
+describe('Task 109 — RETAIL_GST mode (Cadbury sheet exact)', () => {
+  // Sheet row 1: ECLAIRS RS.3 — RP 3 × (50 × 24) = 3,600/ctn; TP 118.61/box × 24 = 2,846.64/ctn
+  const ECLAIRS: CalcProduct = {
+    id: 'ecl3', unitsPerCarton: 1200, pcsPerBox: 50, tradePrice: 2846.64,
+    gstEnabled: true, gstRate: 18, category: 'Candy', consumerPrice: 3,
+    taxMode: 'RETAIL_GST',
+  }
+  const SCHEME10: CalcScheme = { id: 's-po', name: 'Chocolate Pass On 10%', type: 'PERCENT_DISCOUNT', channel: null, productId: null, categoryName: 'Candy', value: 10, buyQty: 0, freeQty: 0 }
+
+  it('ORDER — GST retail se: 10 ctn ECLAIRS → gross 28,466.40, GST 5,491.53 (sheet 5,491.5254…)', () => {
+    const r = computeOrderLines([ECLAIRS], [], [{ productId: 'ecl3', ctn: 10 }], 'KIRYANA')
+    expect(r.lines[0].lineTotal).toBe(28466.4) // no scheme → lineTotal == gross
+    expect(r.lines[0].gstAmt).toBe(5491.53) // 12,000 pcs × Rs 3 × 18/118
+    expect(r.lines[0].taxMode).toBe('RETAIL_GST')
+  })
+
+  it('ORDER — Pass On discount GST ko NAHI hilata (sheet: TOTAL GST = ORDER × GST/ctn)', () => {
+    const withScheme = computeOrderLines([ECLAIRS], [SCHEME10], [{ productId: 'ecl3', ctn: 10 }], 'KIRYANA')
+    expect(withScheme.lines[0].discount).toBe(2846.64) // 10% of gross
+    expect(withScheme.lines[0].gstAmt).toBe(5491.53) // GST wahi — discount se azad
+  })
+
+  it('ORDER — manual discount merge par bhi GST freeze (Cadbury ladder)', () => {
+    const r = computeOrderLines([ECLAIRS], [], [{ productId: 'ecl3', ctn: 10 }], 'KIRYANA')
+    const gst = applyManualMerge(r.lines, 1000)
+    expect(r.lines[0].lineTotal).toBe(27466.4) // 28,466.40 − 1,000
+    expect(gst).toBe(5491.53) // GST UNCHANGED — retail basis
+  })
+
+  it('ORDER — HALLS RS.5 @25% = sheet ka hardcoded 1,200/ctn exact (retail × 25/125)', () => {
+    const halls: CalcProduct = { ...ECLAIRS, id: 'halls5', tradePrice: 4478.64, gstRate: 25, consumerPrice: 5 }
+    const r = computeOrderLines([halls], [], [{ productId: 'halls5', ctn: 1 }], 'KIRYANA')
+    expect(r.lines[0].gstAmt).toBe(1200) // sheet row 5 EXACT
+  })
+
+  it('ORDER — consumerPrice missing → net-base fallback (bill sane, mode CLAIM jaisa)', () => {
+    const noRp: CalcProduct = { ...ECLAIRS, consumerPrice: null }
+    const r = computeOrderLines([noRp], [], [{ productId: 'ecl3', ctn: 10 }], 'KIRYANA')
+    expect(r.lines[0].gstAmt).toBe(5123.95) // fallback: gross 28,466.40 × 18% (no scheme discount)
+    expect(r.lines[0].taxMode).toBe('CLAIM') // fallback line CLAIM behave karti hai
+  })
+
+  it('PURCHASE — Cadbury sheet ladder exact: gross 28,466.40, PO 10%, TO 1,000, adv 0.5%', () => {
+    const r = computePurchaseLineTaxes({
+      gross: 28466.4, discAmt: 2846.64, gstRate: 18, furtherTaxPct: 0,
+      tradeOfferRequest: 1000, advanceTaxPct: 0.5, taxMode: 'RETAIL_GST', retailValue: 36000,
+    })
+    expect(r.netAmount).toBe(25619.76)
+    expect(r.salesTax).toBe(5491.53) // 36,000 retail × 18/118 — TO/PO se azad
+    expect(r.tradeOfferAmt).toBe(1000)
+    // Sheet: AMOUNT = Gross + GST − TO − PO = 30,111.29 → Adv 236H 0.5% = 150.56
+    expect(r.advanceTax).toBe(150.56)
+    expect(r.amountInclusive).toBe(30261.85)
+  })
+
+  it('PURCHASE — Pass On badle to GST wahi (discount-independence, sheet rule)', () => {
+    const a = computePurchaseLineTaxes({ gross: 28466.4, discAmt: 0, gstRate: 18, furtherTaxPct: 0, tradeOfferRequest: 0, advanceTaxPct: 0, taxMode: 'RETAIL_GST', retailValue: 36000 })
+    const b = computePurchaseLineTaxes({ gross: 28466.4, discAmt: 5000, gstRate: 18, furtherTaxPct: 0, tradeOfferRequest: 0, advanceTaxPct: 0, taxMode: 'RETAIL_GST', retailValue: 36000 })
+    expect(a.salesTax).toBe(5491.53)
+    expect(b.salesTax).toBe(5491.53)
+  })
+
+  it('PURCHASE — retailValue missing → net-base fallback (18% of net)', () => {
+    const r = computePurchaseLineTaxes({ gross: 28466.4, discAmt: 2846.64, gstRate: 18, furtherTaxPct: 0, tradeOfferRequest: 0, advanceTaxPct: 0, taxMode: 'RETAIL_GST', retailValue: 0 })
+    expect(r.salesTax).toBe(4611.56) // net 25,619.76 × 18%
+  })
+
+  it('retailGstFraction — 18% → 18/118 (sheet ka F/118*100*18/100 hi)', () => {
+    expect(retailGstFraction(18)).toBeCloseTo(18 / 118, 12)
+    expect(retailGstFraction(25)).toBeCloseTo(25 / 125, 12)
   })
 })

@@ -17,8 +17,36 @@ export interface CalcProduct {
   category?: string | null
   /** Task 26: company ka TAX MODE (product.company.taxMode se aata hai) —
    * 'INVOICE_DISCOUNT' = Trade Offer pehle minus, GST (net − TO) par (Noms/SalesFlo style);
+   * 'RETAIL_GST' = Cadbury sheet style — GST RETAIL price se (Task 109, neeche helper);
    * undefined/'CLAIM' = GST line net par, TO baad me minus (purana behaviour). */
   taxMode?: string | null
+  /** Task 109: RETAIL PRICE per piece (Product.consumerPrice) — RETAIL_GST mode ka GST base.
+   * Cadbury invoice sheet: GST/ctn = (retail × units/ctn) × 18/118 — retail GST-INCLUSIVE hota
+   * hai, GST usme se extract hota hai. Missing/0 par net-base fallback (bill sane rehta hai). */
+  consumerPrice?: number | null
+}
+
+/**
+ * Task 109: GST-inclusive retail price me se GST ka hissa — rate r par r/(100+r).
+ * Cadbury sheet formula J× = F/118*100*18/100 = RP × 18/118 (r=18 → 18/118 EXACT).
+ * Per-SKU tuning bhi isi se: sheet ke hardcoded rows (e.g. HALLS GST 1200 on RP 6000)
+ * = retail × 25/125 — product ka gstRate 25 set karo, bilkul wahi number.
+ */
+export function retailGstFraction(gstRate: number): number {
+  const r = Math.min(100, Math.max(0, Number(gstRate) || 0))
+  return r / (100 + r)
+}
+
+/**
+ * Task 109: ek line ka RETAIL-BASIS GST (Cadbury mode) — qty (pcs) × consumerPrice ×
+ * r/(100+r). consumerPrice na ho to null (caller fallback kare — net-base).
+ */
+export function retailGstAmt(qtyPcs: number, consumerPrice: number | null | undefined, gstRate: number): number | null {
+  const cp = Math.max(0, Number(consumerPrice) || 0)
+  if (cp <= 0) return null
+  const r = Math.min(100, Math.max(0, Number(gstRate) || 0))
+  if (r <= 0) return 0
+  return Math.round(qtyPcs * cp * (r / (100 + r)) * 100) / 100
 }
 
 export interface CalcScheme {
@@ -277,14 +305,22 @@ export function computeOrderLines(
     //     jaisa ladder (Gross → Offers → Net → GST). Per-line hai kyunki TO bhi per-SKU hai:
     //     mixed order mein A-mode lines net−TO par, CLAIM lines net par GST lagti hai.
     //     Clamp 0: TO > net ho to line GST 0 (extra TO dusri lines ka base NAHI khatata).
+    // ---- Task 109: RETAIL_GST (Cadbury sheet) — GST TRADE amount se NAHI, RETAIL se:
+    //   GST = qty × consumerPrice × r/(100+r) — sheet ka exact "F/118*100*18/100" formula.
+    //   TO/PassOn/manual discounts ka GST par KOI asar nahi (sheet: TOTAL GST = ORDER × GST/ctn,
+    //   AMOUNT = Gross + GST − TO − PassOn). consumerPrice na ho to net-base fallback
+    //   (bill sane rehta hai — Products page par Consumer Price set karte hi retail basis live).
     const gross = Math.round(ratePerPc * qty * 100) / 100
     const gstRate = item.bookedGstRate != null
       ? Math.max(0, Number(item.bookedGstRate) || 0)
       : (p.gstEnabled === false ? 0 : Math.max(0, Number(p.gstRate) || 0))
     const netExclTax = Math.max(0, gross - discount)
     const modeA = p.taxMode === 'INVOICE_DISCOUNT'
-    const gstBase = modeA ? Math.max(0, netExclTax - tradeOfferAmt) : netExclTax
-    const gstAmt = Math.round(gstBase * (gstRate / 100) * 100) / 100
+    const modeR = p.taxMode === 'RETAIL_GST'
+    const retailGst = modeR ? retailGstAmt(qty, p.consumerPrice, gstRate) : null
+    const gstAmt = retailGst != null
+      ? retailGst
+      : Math.round((modeA ? Math.max(0, netExclTax - tradeOfferAmt) : netExclTax) * (gstRate / 100) * 100) / 100
 
     const lineTotal = gross - discount
     subtotal += gross
@@ -308,7 +344,8 @@ export function computeOrderLines(
       gstRate: gstRate > 0 ? gstRate : null,
       gstAmt,
       lineTotal,
-      taxMode: modeA ? 'INVOICE_DISCOUNT' : 'CLAIM',
+      // Task 109: retail line apna mode rakhta hai (applyManualMerge isi se GST freeze karta hai)
+      taxMode: retailGst != null ? 'RETAIL_GST' : modeA ? 'INVOICE_DISCOUNT' : 'CLAIM',
       manualShare,
     })
   }
@@ -439,6 +476,9 @@ export function applyManualMerge(lines: CalcLine[], manualDiscount: number): num
   lines.forEach((l, i) => {
     l.manualShare = shares[i]
     l.lineTotal = Math.round(Math.max(0, l.lineTotal - shares[i]) * 100) / 100
+    // Task 109: RETAIL_GST line ka GST discounts se AZAD hai (Cadbury sheet: TOTAL GST =
+    // ORDER × GST/ctn — PassOn/TO/manual kuch bhi ho, GST wahi rehta hai) — freeze.
+    if (l.taxMode === 'RETAIL_GST') return
     // Task 26: GST recompute bhi tax-mode aware — INVOICE_DISCOUNT line ka base merged
     // net − TO hai (computeOrderLines jaisa hi rule, warna manual discount Mode A ka
     // GST base toor deta). Clamp 0 same.
@@ -473,11 +513,16 @@ export function recalcManualDiscount(
   return { manualDiscount: 0, manualDiscType: null, manualDiscValue: null }
 }
 
-/* ==================== Task 108: PURCHASE LINE TAX CHAIN (company tax-mode aware) ====================
+/* ==================== Task 108/109: PURCHASE LINE TAX CHAIN (company tax-mode aware) ====================
  * Purchase invoice ki per-line tax ladder — AB COMPANY KE TAX MODE KE MUTABIQ:
- *   CLAIM (default / Cadbury style):  GST poore net par, Trade Offer baad me minus
+ *   CLAIM (default):                  GST poore net par, Trade Offer baad me minus
  *   INVOICE_DISCOUNT (Noms style):    Trade Offer pehle net se kaata → GST (net − TO) par
+ *   RETAIL_GST (Cadbury sheet):       GST RETAIL value par (retailValue × r/(100+r)) — TO /
+ *                                     PassOn ka GST par koi asar NAHI, TO baad me minus.
+ *                                     Sheet exact: AMOUNT = Gross + GST − TO − PassOn,
+ *                                     Adv 236H = AMOUNT × %, Net = AMOUNT + Adv.
  * (Real Noms/SalesFlo bill se verified: net 5,366.61 × 18% = 965.99 — PDF row 1.)
+ * (Cadbury sheet se verified: RP/ctn 3600 × 18/118 = 549.1525… GST/ctn — NEW-1.xlsx row 1.)
  * Pure function — POST route + purchase entry preview dono isi se chalte hain (preview == booked bill). */
 
 export interface PurchaseLineTaxInput {
@@ -493,8 +538,12 @@ export interface PurchaseLineTaxInput {
   tradeOfferRequest: number
   /** Advance Tax 236H % (invoice-level) */
   advanceTaxPct: number
-  /** company ka tax mode — 'INVOICE_DISCOUNT' = Noms ladder, baqi sab CLAIM */
+  /** company ka tax mode — 'INVOICE_DISCOUNT' = Noms ladder, 'RETAIL_GST' = Cadbury retail,
+   *  baqi sab CLAIM */
   taxMode?: string | null
+  /** Task 109: line ka RETAIL value (consumerPrice × cartons) — sirf RETAIL_GST mode use karta hai;
+   *  missing/0 par net-base fallback (Cadbury products par Consumer Price set hona chahiye) */
+  retailValue?: number | null
 }
 
 export interface PurchaseLineTaxResult {
@@ -513,15 +562,23 @@ const r2 = (v: number) => Math.round(v * 100) / 100
 export function computePurchaseLineTaxes(i: PurchaseLineTaxInput): PurchaseLineTaxResult {
   const netAmount = r2(Math.max(0, i.gross - i.discAmt))
   const modeA = i.taxMode === 'INVOICE_DISCOUNT'
+  // Task 109: RETAIL_GST (Cadbury) — GST retail value par, discounts se azad
+  const modeR = i.taxMode === 'RETAIL_GST'
+  const retailValue = Math.max(0, r2(Number(i.retailValue) || 0))
   const toReq = Math.max(0, r2(Number(i.tradeOfferRequest) || 0))
   const gstRate = Math.min(100, Math.max(0, Number(i.gstRate) || 0))
   const furtherTaxPct = Math.min(100, Math.max(0, Number(i.furtherTaxPct) || 0))
   // Task 108: GST base company ke tax mode se — INVOICE_DISCOUNT = net − Trade Offer (clamp 0)
-  const gstBase = modeA ? Math.max(0, netAmount - toReq) : netAmount
-  const salesTax = r2((gstBase * gstRate) / 100)
-  const furtherTax = r2((gstBase * furtherTaxPct) / 100)
+  // Task 109: RETAIL_GST = retailValue × r/(100+r) (sheet "F/118*100*18/100" hi formula);
+  //   retailValue na ho to net-base fallback — PassOn/TO ka GST par asar nahi hota us bhi me
+  const salesTax = modeR && retailValue > 0
+    ? r2(retailValue * (gstRate / (100 + gstRate)))
+    : r2(((modeA ? Math.max(0, netAmount - toReq) : netAmount) * gstRate) / 100)
+  const furtherTax = modeR && retailValue > 0
+    ? r2((netAmount * furtherTaxPct) / 100)
+    : r2(((modeA ? Math.max(0, netAmount - toReq) : netAmount) * furtherTaxPct) / 100)
   const totalTax = r2(salesTax + furtherTax)
-  // TO cap: INVOICE_DISCOUNT me TO GST se PEHLE kaata jata hai (net tak), CLAIM me net+tax tak
+  // TO cap: INVOICE_DISCOUNT me TO GST se PEHLE kaata jata hai (net tak), CLAIM/RETAIL me net+tax tak
   const tradeOfferAmt = Math.min(modeA ? netAmount : r2(netAmount + totalTax), toReq)
   const advanceTax = r2(Math.max(0, netAmount + totalTax - tradeOfferAmt) * Math.min(100, Math.max(0, Number(i.advanceTaxPct) || 0)) / 100)
   const amountInclusive = r2(netAmount + totalTax - tradeOfferAmt + advanceTax)

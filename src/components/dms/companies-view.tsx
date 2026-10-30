@@ -172,8 +172,9 @@ export function CompaniesView() {
                     <button className="text-left w-full group" onClick={() => setDetailId(c.id)}>
                       <p className="font-bold text-slate-900 leading-tight truncate group-hover:text-emerald-700">{c.name}</p>
                       {c.shortCode && <Badge variant="outline" className="mt-1 text-[9px] border-violet-200 bg-violet-50 text-violet-700">{c.shortCode}</Badge>}
-                      {/* Task 26: Invoice Discount company pehchan — default (Claim) par koi badge nahi */}
+                      {/* Task 26/109: tax mode badge — Cadbury retail GST company bhi pehchani jaye */}
                       {c.taxMode === 'INVOICE_DISCOUNT' && <Badge variant="outline" className="mt-1 ml-1 text-[9px] border-amber-200 bg-amber-50 text-amber-700">Invoice Discount Tax</Badge>}
+                      {c.taxMode === 'RETAIL_GST' && <Badge variant="outline" className="mt-1 ml-1 text-[9px] border-violet-200 bg-violet-50 text-violet-700">Retail GST (Cadbury)</Badge>}
                     </button>
                     <div className="mt-1.5 space-y-0.5 text-[11px] text-slate-500">
                       {c.contactPerson && <p className="truncate flex items-center gap-1"><User className="h-3 w-3 shrink-0" /> {c.contactPerson}</p>}
@@ -246,7 +247,8 @@ function CompanyFormDialog({ company, onClose, onSaved }: {
   const [notes, setNotes] = useState(company?.notes ?? '')
   const [logo, setLogo] = useState(company?.logo ?? '')
   // Task 26: TAX MODE — company-level GST/Trade-Offer timing (Noms/SalesFlo style toggle)
-  const [taxMode, setTaxMode] = useState(company?.taxMode === 'INVOICE_DISCOUNT' ? 'INVOICE_DISCOUNT' : 'CLAIM')
+  // Task 109: RETAIL_GST (Cadbury) — GST retail price se (sheet exact)
+  const [taxMode, setTaxMode] = useState(company?.taxMode === 'INVOICE_DISCOUNT' ? 'INVOICE_DISCOUNT' : company?.taxMode === 'RETAIL_GST' ? 'RETAIL_GST' : 'CLAIM')
   const [saving, setSaving] = useState(false)
 
   function handleLogoFile(file: File) {
@@ -336,17 +338,20 @@ function CompanyFormDialog({ company, onClose, onSaved }: {
           {/* Task 26: TAX MODE — bill ka GST Trade Offer se pehle ya baad mein lage */}
           <div className="space-y-1.5 rounded-lg border border-slate-200 bg-slate-50 p-3">
             <Label className="text-[11px] font-semibold">Tax Mode — GST kis tarah lage?</Label>
-            <Select value={taxMode} onValueChange={(v) => setTaxMode(v === 'INVOICE_DISCOUNT' ? 'INVOICE_DISCOUNT' : 'CLAIM')}>
+            <Select value={taxMode} onValueChange={(v) => setTaxMode(v === 'INVOICE_DISCOUNT' ? 'INVOICE_DISCOUNT' : v === 'RETAIL_GST' ? 'RETAIL_GST' : 'CLAIM')}>
               <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="CLAIM">Claim / Rebate — GST pehle (net par), Trade Offer baad mein</SelectItem>
                 <SelectItem value="INVOICE_DISCOUNT">Invoice Discount — Trade Offer pehle minus, GST baad mein (Noms style)</SelectItem>
+                <SelectItem value="RETAIL_GST">Retail GST — GST retail price se, discounts ka asar nahi (Cadbury style)</SelectItem>
               </SelectContent>
             </Select>
             <p className="text-[10px] leading-snug text-slate-500">
               {taxMode === 'INVOICE_DISCOUNT'
                 ? 'Is company ke bills par Trade Offer Net se kaat kar GST baqi amount par lagegi (SalesFlo/Noms invoice jaisa — GST kam aati hai).'
-                : 'Default — GST poore net par lagti hai, Trade Offer baad mein minus hota hai (offer claim/rebate ki tarah).'}
+                : taxMode === 'RETAIL_GST'
+                  ? 'Is company ke bills par GST RETAIL price se extract hogi (Consumer Price × qty × 18/118) — Pass On / Trade Offer ka GST par koi asar nahi. Cadbury invoice sheet ka exact formula. Products par Consumer Price set hona zaroori hai.'
+                  : 'Default — GST poore net par lagti hai, Trade Offer baad mein minus hota hai (offer claim/rebate ki tarah).'}
             </p>
           </div>
         </div>

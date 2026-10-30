@@ -44,7 +44,7 @@ export async function GET(req: Request) {
         // Task 86: live scheme recalc ke liye product ka pack/GST/category data bhi chahiye
         // (Product.category string column hai — relation nahi)
         // Task 26: company taxMode bhi (per-line GST base rule — live recalc booked jaisa)
-        items: { include: { product: { select: { unitsPerCarton: true, pcsPerBox: true, tradePrice: true, gstEnabled: true, gstRate: true, category: true, company: { select: { taxMode: true } } } } } },
+        items: { include: { product: { select: { unitsPerCarton: true, pcsPerBox: true, tradePrice: true, gstEnabled: true, gstRate: true, category: true, consumerPrice: true, company: { select: { taxMode: true } } } } } },
       },
       orderBy: { orderDate: 'desc' },
       take: 100,

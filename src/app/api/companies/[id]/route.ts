@@ -99,8 +99,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (b.notes !== undefined) data.notes = b.notes?.trim() || null
     if (b.logo !== undefined) data.logo = b.logo || null
     if (b.isActive !== undefined) data.isActive = b.isActive
-    // Task 26: tax mode toggle (invalid value par CLAIM fallback)
-    if (b.taxMode !== undefined) data.taxMode = b.taxMode === 'INVOICE_DISCOUNT' ? 'INVOICE_DISCOUNT' : 'CLAIM'
+    // Task 26/109: tax mode toggle (invalid value par CLAIM fallback — RETAIL_GST = Cadbury retail)
+    if (b.taxMode !== undefined) data.taxMode = b.taxMode === 'INVOICE_DISCOUNT' ? 'INVOICE_DISCOUNT' : b.taxMode === 'RETAIL_GST' ? 'RETAIL_GST' : 'CLAIM'
 
     const company = await db.company.update({ where: { id }, data })
     return Response.json({ company: { id: company.id, name: company.name, shortCode: company.shortCode } })

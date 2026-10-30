@@ -189,15 +189,23 @@ export function PurchaseEntryView() {
     [products, companyId],
   )
   const company = companies.find((c) => c.id === companyId)
-  // Task 108: is purchase ka tax mode = company ka tax mode (server bhi YEHIN rule use karta hai)
-  const companyTaxMode = company?.taxMode === 'INVOICE_DISCOUNT' ? 'INVOICE_DISCOUNT' : 'CLAIM'
+  // Task 108/109: is purchase ka tax mode = company ka tax mode (server bhi YEHIN rule use karta hai)
+  // RETAIL_GST = Cadbury sheet mode — GST retail price se, discounts se azad
+  const companyTaxMode = company?.taxMode === 'INVOICE_DISCOUNT'
+    ? 'INVOICE_DISCOUNT'
+    : company?.taxMode === 'RETAIL_GST' ? 'RETAIL_GST' : 'CLAIM'
   const modeA = companyTaxMode === 'INVOICE_DISCOUNT'
+  const modeR = companyTaxMode === 'RETAIL_GST'
 
   // ---------- Task 44 calc chain — Task 108 se SHARED pure helper (preview == booked bill) ----------
   const itemCalc = useMemo(() => items.map((it) => {
     const gross = Math.round((Number(it.cartons) || 0) * (Number(it.price) || 0) * 100) / 100
     const pct = Math.min(100, Math.max(0, Number(it.disc) || 0))
     const discRs = Math.round(gross * pct) / 100
+    // Task 109: RETAIL_GST mode ka GST base = consumerPrice × cartons (retail value) —
+    // wahi value jo server POST route bhi pass karta hai (preview == booked bill)
+    const p = companyProducts.find((x) => x.id === it.productId)
+    const retailValue = Math.round((Number(p?.consumerPrice) || 0) * (Number(it.cartons) || 0) * 100) / 100
     const t = computePurchaseLineTaxes({
       gross,
       discAmt: discRs,
@@ -206,9 +214,10 @@ export function PurchaseEntryView() {
       tradeOfferRequest: Number(it.to) || 0,
       advanceTaxPct: Number(advTaxPct) || 0,
       taxMode: companyTaxMode,
+      retailValue,
     })
-    return { key: it.key, gross, pct, discRs, net: t.netAmount, gstRate: Math.min(100, Math.max(0, Number(it.gst) || 0)), salesTax: t.salesTax, furPct: t.furtherTaxPct, furTax: t.furtherTax, totalTax: t.totalTax, toRs: t.tradeOfferAmt, advTax: t.advanceTax, inclusive: t.amountInclusive }
-  }), [items, advTaxPct, companyTaxMode])
+    return { key: it.key, gross, pct, discRs, net: t.netAmount, gstRate: Math.min(100, Math.max(0, Number(it.gst) || 0)), salesTax: t.salesTax, furPct: t.furtherTaxPct, furTax: t.furtherTax, totalTax: t.totalTax, toRs: t.tradeOfferAmt, advTax: t.advanceTax, inclusive: t.amountInclusive, retailMissing: modeR && !(Number(p?.consumerPrice) || 0) }
+  }), [items, advTaxPct, companyTaxMode, modeR, companyProducts])
   const calcMap = useMemo(() => new Map(itemCalc.map((c) => [c.key, c])), [itemCalc])
   const subtotal = itemCalc.reduce((s, c) => s + c.gross, 0)
   const itemDiscTotal = Math.round(itemCalc.reduce((s, c) => s + c.discRs, 0) * 100) / 100
@@ -443,11 +452,12 @@ export function PurchaseEntryView() {
                       = Net <span className="font-semibold text-slate-700">Rs {fmtNum(c.net)}</span>
                       <br />
                       {modeA && c.toRs > 0 && <span className="text-amber-700">TO − Rs {fmtNum(c.toRs)} • </span>}
-                      {c.gstRate > 0 && <span>GST@{c.gstRate}% Rs {fmtNum(c.salesTax)} • </span>}
+                      {c.gstRate > 0 && <span>{modeR ? `GST@${c.gstRate}% (Retail)` : `GST@${c.gstRate}%`} Rs {fmtNum(c.salesTax)} • </span>}
                       {c.furPct > 0 && <span>Fur@{c.furPct}% Rs {fmtNum(c.furTax)} • </span>}
                       {!modeA && c.toRs > 0 && <span className="text-amber-700">TO − Rs {fmtNum(c.toRs)} • </span>}
                       {c.advTax > 0 && <span>Adv 236H Rs {fmtNum(c.advTax)} • </span>}
                       <span className="font-semibold text-red-600">Incl Rs {fmtNum(c.inclusive)}</span>
+                      {c.retailMissing && <span className="font-semibold text-red-500"> • Retail price missing — set Consumer Price on Products page</span>}
                       {p ? <span className="text-slate-400"> • {fmtNum((Number(it.cartons) || 0) * p.unitsPerCarton)} units</span> : null}
                     </>
                   )
@@ -495,6 +505,8 @@ export function PurchaseEntryView() {
             <p className="col-span-2 sm:col-span-4 text-[11px] text-slate-500">
               {modeA ? (
                 <><span className="font-bold text-amber-700">Tax Mode: Invoice Discount (Noms style)</span> — <b>Gross − Pass On = Net</b> → <b>− Trade Offer</b> → GST (net−TO par) + Advance Tax 236H = <b>Net Invoice</b>. GST % har product ka apna (Products page par set hota hy, yahan override bhi kar sakte hain)</>
+              ) : modeR ? (
+                <><span className="font-bold text-violet-700">Tax Mode: Retail GST (Cadbury style)</span> — GST <b>RETAIL price</b> se extract hota hai (Consumer Price × cartons × 18/118), Pass On / Trade Offer ka GST par <b>koi asar nahi</b> → <b>Gross − Pass On = Net</b> → + GST (Retail) − Trade Offer + Advance Tax 236H = <b>Net Invoice</b> — bilkul company invoice sheet jaisa. SKU ka GST alag chahiye to us product ka GST % adjust karein</>
               ) : (
                 <>Company invoice ka formula: <b>Gross − Pass On = Net Amount</b> (upar items ke Net column ka yahi total banta hy) → − Trade Offer − Bill Discount + GST + Advance Tax 236H = <b>Net Invoice</b> — yehi amount ledger payable banti hy. GST % har product ka apna (Products page par set hota hy, yahan override bhi kar sakte hain)</>
               )}

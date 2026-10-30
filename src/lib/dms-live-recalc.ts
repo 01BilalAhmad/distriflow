@@ -59,6 +59,8 @@ export interface LiveRecalcOrderParts {
       gstRate: number | null
       /** Product.category STRING column hai (relation nahi) — scheme category-match isi se */
       category?: string | null
+      /** Task 109: RETAIL price/pc — RETAIL_GST (Cadbury) mode ka GST base isi se banta hai */
+      consumerPrice?: number | null
       /** Task 26: company ka tax mode (product.company.taxMode) — per-line GST base rule */
       taxMode?: string | null
     }
@@ -97,6 +99,7 @@ export function liveRecalcFromParts(
     gstEnabled: it.product.gstEnabled ?? undefined,
     gstRate: it.product.gstRate ?? undefined,
     category: it.product.category ?? null,
+    consumerPrice: it.product.consumerPrice ?? null,
     taxMode: it.product.taxMode ?? 'CLAIM',
   }))
   // LIVE PATH: koi scheme/schemeStack attach nahi — current schemes se full stack (Task 58)

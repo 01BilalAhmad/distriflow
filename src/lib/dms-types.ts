@@ -117,7 +117,7 @@ export interface OrderDTO {
   unplanned?: boolean
   orderLat?: number | null
   orderLng?: number | null
-  /** Task 26: booking waqt items ka tax-mode snapshot (CLAIM | INVOICE_DISCOUNT | MIXED) */
+  /** Task 26: booking waqt items ka tax-mode snapshot (CLAIM | INVOICE_DISCOUNT | RETAIL_GST | MIXED) */
   taxMode?: string | null
   items?: OrderItemDTO[]
 }
@@ -128,7 +128,8 @@ export interface CompanyDTO {
   shortCode: string | null
   productCount?: number
   salesmanCount?: number
-  /** Task 26: TAX MODE — CLAIM (GST pehle, TO baad me) | INVOICE_DISCOUNT (TO pehle, GST net−TO par).
+  /** Task 26: TAX MODE — CLAIM (GST pehle, TO baad me) | INVOICE_DISCOUNT (TO pehle, GST net−TO par)
+   * | RETAIL_GST (Task 109 Cadbury: GST retail price se, discounts ka asar nahi).
    * Optional: purana client-cache safe. */
   taxMode?: string | null
 }
@@ -205,7 +206,7 @@ export interface PurchaseInvoiceDTO {
   advanceTaxPct: number
   advanceTaxTotal: number
   tradeOfferTotal: number
-  /** Task 108: company ka tax mode snapshot (CLAIM | INVOICE_DISCOUNT) — purchase ladder isi se */
+  /** Task 108/109: company ka tax mode snapshot (CLAIM | INVOICE_DISCOUNT | RETAIL_GST) — purchase ladder isi se */
   taxMode?: string | null
   total: number
   paidAmount: number
