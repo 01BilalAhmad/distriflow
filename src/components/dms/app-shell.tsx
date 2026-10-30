@@ -30,7 +30,7 @@ import {
   LayoutDashboard, ShoppingCart, Warehouse, Package, Store, Network, Route,
   Users, Gift, Undo2, BarChart3, Package2, LogOut, Building2, PackageX,
   ClipboardList, FileStack, Wallet, BookText, BookLock, HandCoins, Landmark,
-  Database, Map as MapIcon, TrendingUp, Receipt, ReceiptText, Target, Boxes, Coins,
+  Database, Map as MapIcon, TrendingUp, Receipt, ReceiptText, Target, Boxes, Coins, ScrollText,
   Settings as SettingsIcon, ChevronRight, ChevronLeft, Search, Calendar, Menu, PanelLeftClose, PanelLeftOpen, X,
 } from 'lucide-react'
 
@@ -87,6 +87,8 @@ const NAV: { key: string; label: string; icon: typeof LayoutDashboard; roles: st
   { key: 'distributors', label: 'My Network', icon: Network, roles: ['DISTRIBUTOR'], group: 'Business Network', desc: 'Distribution network tree' },
   // Task 78 — System: distributor apni profile + bill/tax settings khud manage kare
   { key: 'settings', label: 'Settings', icon: SettingsIcon, roles: ['DISTRIBUTOR'], group: 'System', desc: 'Distributor profile, bill print & tax rates' },
+  // Task 35 — audit log: website par har activity ka record (distributor apni, mega sab)
+  { key: 'audit', label: 'Audit Log', icon: ScrollText, roles: ['DISTRIBUTOR', 'MEGA_ADMIN'], group: 'System', desc: 'Har activity ka record — login, bills, settlement, returns' },
   // SALESMAN top nav tak pohanchta hi nahi (SalesmanApp render hota hai) — sirf type fallback
   { key: 'sales-app', label: 'Order Booker App', icon: Package2, roles: ['SALESMAN'], group: 'Overview', desc: 'Field app for bookers' },
 ]

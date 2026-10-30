@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
 import { AUTH_COOKIE, authCookieOptions, makeAuthToken } from '@/lib/auth-token'
 import { rateLimit, clientIp } from '@/lib/rate-limit'
+import { audit } from '@/lib/audit'
 
 /**
  * MEGA ADMIN subscription model (Task 22):
@@ -71,6 +72,8 @@ export async function POST(req: Request) {
     })
     if (!user) {
       await bcrypt.compare(String(password), DUMMY_HASH) // timing equalizer
+      // Task 35: security trail — kaunsa email login try kar raha tha (password KABHI log nahi)
+      await audit(null, 'LOGIN_FAILED', { req, entity: 'auth', detail: `Login fail — email registered nahi: ${String(email).toLowerCase().trim().slice(0, 120)}` })
       return jsonError('Invalid credentials - ye email registered nahi hai', 401)
     }
 
@@ -99,6 +102,11 @@ export async function POST(req: Request) {
           lockedUntil: lock ? new Date(Date.now() + LOCK_MINUTES * 60 * 1000) : user.lockedUntil,
         },
       })
+      await audit(
+        { id: user.id, name: user.name, role: user.role },
+        'LOGIN_FAILED',
+        { req, entity: 'auth', detail: `Galat password${lock ? ' — account lock ho gaya' : ''} (attempt ${failed}/${MAX_FAILED_ATTEMPTS})` },
+      )
       if (lock) {
         return jsonError(`Bohat galat attempts — account ${LOCK_MINUTES} minute ke liye lock ho gaya`, 429)
       }
@@ -161,6 +169,12 @@ export async function POST(req: Request) {
       },
     })
     res.cookies.set(AUTH_COOKIE, await makeAuthToken(user.id), authCookieOptions())
+    // Task 35: LOGIN audit — kaun, kab, kis role se (profile tenant ke sath)
+    await audit(
+      { id: user.id, name: user.name, role: user.role, tenantId: user.profile?.id ?? null },
+      'LOGIN',
+      { req, entity: 'auth', entityId: user.id, detail: `${user.name} (${user.role}) login — ${user.email}` },
+    )
     return res
   } catch {
     return jsonError('Login failed', 500)

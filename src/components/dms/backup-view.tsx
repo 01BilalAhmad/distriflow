@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { CloudCheck, Database, Download, ExternalLink, Loader2, PlusCircle, ShieldCheck } from 'lucide-react'
+import { CloudCheck, Database, Download, ExternalLink, Loader2, PlusCircle, ShieldCheck, AlertTriangle, Clock } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -45,6 +45,10 @@ export function BackupView() {
   const [cloudMode, setCloudMode] = useState(false)
   const [cloudMsg, setCloudMsg] = useState('')
   const [downloading, setDownloading] = useState(false)
+  // Task 36: BACKUP FRESHNESS — aakhri backup kab liya (AuditLog ki BACKUP_EXPORT row se).
+  // User: "backup lazmi hy" — 7 din se purana (ya kabhi nahi liya) par red warning.
+  const [lastBackupAt, setLastBackupAt] = useState<string | null>(null)
+  const [backupChk, setBackupChk] = useState<'loading' | 'ok' | 'stale' | 'never'>('loading')
 
   const load = async () => {
     if (!user) return
@@ -68,6 +72,20 @@ export function BackupView() {
 
   useEffect(() => {
     load()
+  }, [user?.id])
+
+  // Task 36: aakhri BACKUP_EXPORT audit row — backup freshness ka source
+  useEffect(() => {
+    if (!user) return
+    fetch('/api/audit?action=BACKUP_EXPORT&take=1')
+      .then((r) => (r.ok ? r.json() : { logs: [] }))
+      .then((d) => {
+        const at: string | null = d?.logs?.[0]?.at ?? null
+        setLastBackupAt(at)
+        if (!at) setBackupChk('never')
+        else setBackupChk(Date.now() - new Date(at).getTime() > 7 * 24 * 3600 * 1000 ? 'stale' : 'ok')
+      })
+      .catch(() => setBackupChk('never'))
   }, [user?.id])
 
   const createBackup = async () => {
@@ -174,8 +192,15 @@ export function BackupView() {
               </div>
               <div className="flex items-start justify-between gap-3 flex-wrap bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
                 <div className="text-sm text-emerald-900">
-                  <p className="font-semibold">Apna data khud bhi safe rakhein (recommended)</p>
+                  <p className="font-semibold">Apna data khud bhi safe rakhein (lazmi)</p>
                   <p className="text-emerald-800 leading-relaxed mt-0.5">Neeche button se poora database JSON file me download hota hai. Har hafte ya koi bhi bara kaam shuru karne se pehle ek backup download karke apne paas (email/Drive/USB) rakh lein.</p>
+                  {/* Task 36: backup freshness — aakhri backup kab liya, 7 din se purana ho to warning */}
+                  <p className={`mt-2 text-xs font-semibold flex items-center gap-1.5 ${backupChk === 'ok' ? 'text-emerald-700' : 'text-red-700'}`}>
+                    {backupChk === 'loading' && <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Backup history check ho rahi hai…</>}
+                    {backupChk === 'ok' && <><Clock className="h-3.5 w-3.5" /> Aakhri backup: {lastBackupAt ? fmtDT(lastBackupAt) : ''} — sab theek ✓</>}
+                    {backupChk === 'stale' && <><AlertTriangle className="h-3.5 w-3.5" /> Aakhri backup {lastBackupAt ? `(${fmtDT(lastBackupAt)})` : ''} 7 din se purana hai — ABHI naya backup lein!</>}
+                    {backupChk === 'never' && <><AlertTriangle className="h-3.5 w-3.5" /> Abhi tak KOI backup download nahi hua — pehla backup ABHI lein, ye lazmi hai!</>}
+                  </p>
                 </div>
                 <Button onClick={downloadJson} disabled={downloading} className="bg-emerald-600 hover:bg-emerald-700 shrink-0">
                   {downloading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}

@@ -779,3 +779,29 @@ model Counter {
   name  String @id // SEQ_CONFIG table name (order | delivery | saleReturn | claim | collection | recovery | deliverySummary | purchaseInvoice)
   value Int
 }
+
+// ============ AUDIT LOG (Task 35) — har activity ka record ============
+// User directive: "Audit log hr AK AK CHOTI CHOTI activity ka log — jo bhi action
+// perform ho rha ho website pr, ye lazmi hy". Har mutation (POST/PATCH/PUT/DELETE)
+// requireUser se AUTO-log hota hai (generic API_<METHOD> row); critical business
+// events (login/settle/process/returns...) upar se apni labeled row bhi likhte hain.
+// Audit ki APNI failure business action ko kabhi nahi rokti (fire-safe helper).
+model AuditLog {
+  id            String   @id @default(cuid())
+  userId        String? // kis ne kiya (null = system / anonymous attempt)
+  userName      String? // snapshot — user delete ho jaye to bhi naam dikhe
+  userRole      String?
+  distributorId String? // tenant scope (DistributorProfile id) — distributor apni activity dekhta hai
+  action        String // LOGIN | LOGIN_FAILED | LOGOUT | AUTH_REJECTED | ORDER_CREATE | SETTLEMENT_POST | API_POST ...
+  entity        String? // kis cheez par: Order / STM-6012 / pathname
+  entityId      String? // record id (jo mile)
+  detail        String? // human-readable 1-liner
+  ip            String? // x-forwarded-for (Vercel)
+  userAgent     String?
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([distributorId, createdAt])
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+}

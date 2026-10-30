@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
 import { requireUser, type AuthedUser } from '@/lib/api-auth'
+import { audit } from '@/lib/audit'
 
 // Task 95: tenantProfileId(userId) helper ki jagah cookie-user se tenant resolve
 // (same semantics: apna profile, warna salesman parent walk-up, warna null)
@@ -361,6 +362,13 @@ export async function POST(req: Request) {
 
       return inv
     })
+
+    // Task 35: PURCHASE_CREATE — procurement invoice ka record
+    await audit(
+      { id: user.id, name: user.name, role: user.role, tenantId },
+      'PURCHASE_CREATE',
+      { req, entity: 'PurchaseInvoice', entityId: invoice.id, detail: `${invoice.invoiceNo} — Rs ${invoice.total} (GST Rs ${invoice.taxTotal}, adv tax Rs ${invoice.advanceTaxTotal})` },
+    )
 
     return Response.json({ invoice: { id: invoice.id, invoiceNo: invoice.invoiceNo, total: invoice.total, discount: invoice.discount, discountPct: invoice.discountPct, subtotal: invoice.subtotal, taxTotal: invoice.taxTotal, advanceTaxTotal: invoice.advanceTaxTotal }, warehouseName: stockWarehouseName })
   } catch (e) {

@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
 import { requireUser } from '@/lib/api-auth'
+import { audit } from '@/lib/audit'
 import { postLedgerEntry } from '@/lib/dms-credit'
 import { recalcSettlementRow, restockEligible } from '@/lib/dms-return-core'
 
@@ -197,6 +198,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
       return { ledgerAmount, settledReturns: updated.settledReturns, settledCredit: updated.settledCredit }
     }, { timeout: 20000 })
+
+    // Task 35: RETURN_CANCEL — undo ka record (kitna stock/ledger wapas)
+    await audit(
+      { id: user.id, name: user.name, role: user.role, tenantId: ret.outlet.distributorId },
+      'RETURN_CANCEL',
+      { req, entity: 'SaleReturn', entityId: ret.id, detail: `${ret.returnNo} CANCEL (undo) — Rs ${v} wapas, ledger Rs ${result.ledgerAmount} adjust` },
+    )
 
     return Response.json({
       result: {

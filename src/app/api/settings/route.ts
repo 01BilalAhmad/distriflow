@@ -3,6 +3,7 @@ import { jsonError, tenantProfileId } from '@/lib/dms-scope'
 import { requireUser } from '@/lib/api-auth'
 import { getTaxRates, getGstSettings, getDistributorAddress, setDistributorAddress, TAX_KEYS, GST_KEYS } from '@/lib/dms-settings'
 import { getPjpSettings, upsertPjpFlag, PJP_KEYS } from '@/lib/dms-pjp'
+import { audit } from '@/lib/audit'
 
 /** Per-tenant settings (Task 23) — GET ?userId= => us distributor ke apne tax/GST rates.
  * Task 78: ab profile (distribution name, distributor name, cell, city) bhi — bill print isi se. */
@@ -149,6 +150,12 @@ export async function PUT(req: Request) {
     }
 
     const [rates, gst, freshAddr, freshPjp] = await Promise.all([getTaxRates(tenantId), getGstSettings(tenantId), getDistributorAddress(tenantId), getPjpSettings(tenantId)])
+    // Task 35: SETTINGS_UPDATE — tax/GST/profile settings badalne ka record
+    await audit(
+      { id: user.id, name: user.name, role: user.role, tenantId },
+      'SETTINGS_UPDATE',
+      { req, entity: 'AppSetting', entityId: tenantId, detail: 'Tax/GST/profile settings update huay' },
+    )
     const fresh = await db.user.findUnique({ where: { id: user.id }, include: { profile: true } })
     return Response.json({
       settings: {

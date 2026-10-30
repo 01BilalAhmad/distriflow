@@ -7,6 +7,7 @@ import { ensureOutletBalance, computeAdvanceProjection, creditStatus } from '@/l
 import { getAvailableToPromise, groupQtyByProduct, oversellMessage } from '@/lib/dms-inventory'
 import { getPjpSettings, karachiDayCode, karachiDayBounds, outletInTodayRoute } from '@/lib/dms-pjp'
 import { loadActiveSchemes, liveRecalcFromParts, type LiveRecalcOrderParts } from '@/lib/dms-live-recalc'
+import { audit } from '@/lib/audit'
 
 export async function GET(req: Request) {
   try {
@@ -362,6 +363,13 @@ export async function POST(req: Request) {
         ? `Shop ka udhaar (is bill ke sath) limit se Rs ${cs.overBy.toFixed(2)} zyada hoga`
         : `Shop ka udhaar limit ke ${cs.pct.toFixed(0)}% par pohanch raha hai`,
     }
+
+    // Task 35: ORDER_CREATE — business event (generic API_POST row bhi requireUser se aati hai)
+    await audit(
+      { id: user.id, name: user.name, role: user.role, tenantId },
+      'ORDER_CREATE',
+      { req, entity: 'Order', entityId: order.id, detail: `${order.orderNo} — ${outlet.name}: Rs ${order.total} (${order.items.length} items)` },
+    )
 
     return Response.json({
       order: {

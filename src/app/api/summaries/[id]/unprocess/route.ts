@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
 import { requireUser, tenantMismatch } from '@/lib/api-auth'
 import { restockStock } from '@/lib/dms-inventory'
+import { audit } from '@/lib/audit'
 
 /**
  * POST /api/summaries/[id]/unprocess — Task 27: UN-PROCESS a delivery summary.
@@ -67,6 +68,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       await tx.deliverySummary.delete({ where: { id: summary.id } })
       return { summaryNo: summary.summaryNo, billsCount: orderIds.length, restockedPcs, deliveries: deliveries.length }
     })
+
+    // Task 35: SUMMARY_UNPROCESS — revert ka record (kitna stock wapas aaya)
+    await audit(
+      { id: user.id, name: user.name, role: user.role, tenantId: summary.distributorId },
+      'SUMMARY_UNPROCESS',
+      { req, entity: 'DeliverySummary', entityId: summary.id, detail: `${result.summaryNo} UN-PROCESSED — ${result.billsCount} bills wapas CONFIRMED, ${result.restockedPcs} pcs stock wapas` },
+    )
 
     return Response.json({ ok: true, ...result })
   } catch (e) {

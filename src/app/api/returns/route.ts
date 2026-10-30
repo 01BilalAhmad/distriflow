@@ -3,6 +3,7 @@ import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
 import { requireUser, outletScopeError } from '@/lib/api-auth'
 import { computeReturnLines } from '@/lib/dms-return-core'
 import { applyBillReturnEffects } from '@/lib/dms-return-effects'
+import { audit } from '@/lib/audit'
 
 export async function GET(req: Request) {
   try {
@@ -158,6 +159,12 @@ export async function POST(req: Request) {
       const stockMsg = result.fx.restocked
         ? 'stock inventory (van warehouse) mein wapas'
         : 'damage/expired stock inventory mein NAHI gaya — floor claim report mein counted'
+      // Task 35: RETURN_CREATE (bill-linked, auto-APPROVED) ka record
+      await audit(
+        { id: user.id, name: user.name, role: user.role, tenantId: outlet.distributorId },
+        'RETURN_CREATE',
+        { req, entity: 'SaleReturn', entityId: result.ret.id, detail: `${returnNo} — ${outlet.name}: bill ${order.orderNo} par Rs ${returnValue} (${type}${reason ? ` — ${reason}` : ''}), APPROVED` },
+      )
       return Response.json({
         return: {
           id: result.ret.id,
@@ -196,6 +203,12 @@ export async function POST(req: Request) {
         items: { create: itemData },
       },
     })
+    // Task 35: RETURN_CREATE (standalone, PENDING) ka record
+    await audit(
+      { id: user.id, name: user.name, role: user.role, tenantId: outlet.distributorId },
+      'RETURN_CREATE',
+      { req, entity: 'SaleReturn', entityId: ret.id, detail: `${ret.returnNo} — ${outlet.name}: ${items.length} items, Rs ${totalValue} (${type}${reason ? ` — ${reason}` : ''}), PENDING` },
+    )
     return Response.json({ return: { id: ret.id, returnNo: ret.returnNo, status: 'PENDING' } })
   } catch (e) {
     console.error(e)

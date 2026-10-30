@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
 import { requireUser, tenantMismatch } from '@/lib/api-auth'
 import { applyBillReturnEffects } from '@/lib/dms-return-effects'
+import { audit } from '@/lib/audit'
 
 interface LateReturnItem { productId: string; qty: number }
 interface LateReturnBody {
@@ -130,6 +131,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
       return { returnNo, fx }
     }, { timeout: 20000 })
+
+    // Task 35: LATE_RETURN — settled summary par return ka record
+    await audit(
+      { id: user.id, name: user.name, role: user.role, tenantId: summary.distributorId },
+      'LATE_RETURN',
+      { req, entity: 'SaleReturn', entityId: order.id, detail: `${result.returnNo} — ${order.outlet.name} (${order.orderNo}): Rs ${returnValue} wapas${result.fx.taxRev ? ` + adv tax Rs ${result.fx.taxRev} reversal` : ''}` },
+    )
 
     return Response.json({
       return: {

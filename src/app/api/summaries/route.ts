@@ -4,6 +4,7 @@ import { requireUser } from '@/lib/api-auth'
 import { fulfillOrder } from '@/lib/dms-fulfill'
 import { orderGrandPayable } from '@/lib/dms-order-calc'
 import { persistLiveRecalc } from '@/lib/dms-live-recalc'
+import { audit } from '@/lib/audit'
 
 /** GET /api/summaries?status= — list delivery summaries (cookie user se scoped by role) */
 export async function GET(req: Request) {
@@ -314,6 +315,13 @@ export async function POST(req: Request) {
         })
       }, { timeout: 30000 })
 
+      // Task 35: BILLS_PROCESS (Process Anyway branch) — partial van-out ka record
+      await audit(
+        { id: me.id, name: me.name, role: me.role, tenantId: distributorId },
+        'BILLS_PROCESS',
+        { req, entity: 'DeliverySummary', entityId: summary.id, detail: `${summary.summaryNo} van-out (Process Anyway) — ${processedOrderIds.length} bills load, ${skippedBills.length} skip` },
+      )
+
       return Response.json({
         summary: {
           id: summary.id,
@@ -368,6 +376,13 @@ export async function POST(req: Request) {
         include: { orders: true },
       })
     }, { timeout: 30000 })
+
+    // Task 35: BILLS_PROCESS — van-out ka business record (kitni bills, kis booker ki)
+    await audit(
+      { id: me.id, name: me.name, role: me.role, tenantId: distributorId },
+      'BILLS_PROCESS',
+      { req, entity: 'DeliverySummary', entityId: summary.id, detail: `${summary.summaryNo} van-out — ${summary.orders.length} bills process (booker id: ${salesmanId})` },
+    )
 
     return Response.json({
       summary: {

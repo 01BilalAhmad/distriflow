@@ -13,6 +13,7 @@ export type ViewKey =
   | 'summaries'
   | 'settlement'
   | 'posted-summaries'
+  | 'audit'
   | 'ledgers'
   | 'recovery'
   | 'inventory'

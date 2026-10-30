@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
 import { requireUser, tenantMismatch } from '@/lib/api-auth'
 import { restockStock } from '@/lib/dms-inventory'
+import { audit } from '@/lib/audit'
 import { postLedgerEntry, consumeOutletAdvance } from '@/lib/dms-credit'
 
 interface SettleReturnItem { productId: string; qty: number }
@@ -259,6 +260,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         settledByName: actorName,
       },
     })
+
+    // Task 35: SETTLEMENT_POST — ledgers update hone ka permanent record
+    await audit(
+      { id: user.id, name: user.name, role: user.role, tenantId: summary.distributorId },
+      'SETTLEMENT_POST',
+      { req, entity: 'DeliverySummary', entityId: summary.id, detail: `${summary.summaryNo} SETTLED — cash Rs ${updated.settledCash}, udhaar Rs ${updated.settledCredit}, returns Rs ${updated.settledReturns}` },
+    )
 
     return Response.json({
       summary: {

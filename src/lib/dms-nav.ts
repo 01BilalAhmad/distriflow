@@ -16,6 +16,8 @@ export const VIEW_PATH: Record<ViewKey, string> = {
   settlement: '/settlement',
   // Task 33 — posted (settled) summaries apna poora page — settlement page sirf unsettled ka kaam
   'posted-summaries': '/posted-summaries',
+  // Task 35 — audit log apna page (har activity ka record)
+  audit: '/audit',
   ledgers: '/ledgers',
   recovery: '/recovery',
   inventory: '/inventory',

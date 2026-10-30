@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
 import { requireUser, outletScopeError } from '@/lib/api-auth'
+import { audit } from '@/lib/audit'
 import { computeReturnLines, restockEligible } from '@/lib/dms-return-core'
 import { applyBillReturnEffects } from '@/lib/dms-return-effects'
 import { restockStock } from '@/lib/dms-inventory'
@@ -79,6 +80,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         return fx
       }, { timeout: 20000 })
 
+      // Task 35: RETURN_APPROVE — bill-linked approve (full effects) ka record
+      await audit(
+        { id: user.id, name: user.name, role: user.role, tenantId: ret.outlet.distributorId },
+        'RETURN_APPROVE',
+        { req, entity: 'SaleReturn', entityId: ret.id, detail: `${ret.returnNo} APPROVED — bill ${order.orderNo} par Rs ${ret.totalValue}, stock + khata effects apply` },
+      )
+
       return Response.json({
         status: 'APPROVED',
         restocked: result.restocked,
@@ -110,11 +118,23 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
           }
         }
       })
+      // Task 35: RETURN_APPROVE — standalone UNSOLD (inventory restock) ka record
+      await audit(
+        { id: user.id, name: user.name, role: user.role, tenantId: ret.outlet.distributorId },
+        'RETURN_APPROVE',
+        { req, entity: 'SaleReturn', entityId: ret.id, detail: `${ret.returnNo} APPROVED — Rs ${ret.totalValue}${wh ? ', primary warehouse restock' : ' (D/E — no restock)'}` },
+      )
       return Response.json({ status: 'APPROVED', restocked: !!wh })
     }
 
     // ---------------- Standalone return — DAMAGED/EXPIRED ya legacy: status flip only ----------------
     await db.saleReturn.update({ where: { id }, data: { status } })
+    // Task 35: approve/reject decision ka record (status-flip path)
+    await audit(
+      { id: user.id, name: user.name, role: user.role, tenantId: ret.outlet.distributorId },
+      action === 'APPROVE' ? 'RETURN_APPROVE' : 'RETURN_REJECT',
+      { req, entity: 'SaleReturn', entityId: id, detail: `${ret.returnNo} ${status} — Rs ${ret.totalValue}` },
+    )
     return Response.json({ status, restocked: false })
   } catch (e) {
     console.error(e)
@@ -154,6 +174,12 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
       await tx.returnItem.deleteMany({ where: { returnId: ret.id } })
       await tx.saleReturn.delete({ where: { id: ret.id } })
     })
+    // Task 35: RETURN_DELETE — galti wali entry mitane ka record
+    await audit(
+      { id: user.id, name: user.name, role: user.role, tenantId: ret.outlet.distributorId },
+      'RETURN_DELETE',
+      { req, entity: 'SaleReturn', entityId: ret.id, detail: `${ret.returnNo} DELETE — ${ret.status} entry (koi effect apply nahi hua tha), Rs ${ret.totalValue}` },
+    )
     return Response.json({ deleted: ret.returnNo })
   } catch (e) {
     console.error(e)

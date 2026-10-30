@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
 import { requireUser, tenantMismatch } from '@/lib/api-auth'
+import { audit } from '@/lib/audit'
 import { fulfillOrder } from '@/lib/dms-fulfill'
 import { computeOrderLines, recalcManualDiscount, applyManualMerge, orderGrandPayable, type CalcIncomingItem } from '@/lib/dms-order-calc'
 import { advanceTaxFor, getTaxRates, getDistributorAddress } from '@/lib/dms-settings'
@@ -149,6 +150,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
     if (action === 'CANCEL') {
       const updated = await db.order.update({ where: { id }, data: { status: 'CANCELLED' } })
+      // Task 35: ORDER_CANCEL — bill cancel ka record
+      await audit(
+        { id: user.id, name: user.name, role: user.role, tenantId: order.distributorId },
+        'ORDER_CANCEL',
+        { req, entity: 'Order', entityId: id, detail: `${order.orderNo} — ${order.channel} bill CANCEL hua` },
+      )
       return Response.json({ order: { id: updated.id, status: updated.status } })
     }
 
@@ -324,6 +331,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         },
       })
       const items2 = fresh?.items ?? []
+      // Task 35: ORDER_EDIT — stock allocation / items replace ka record
+      await audit(
+        { id: user.id, name: user.name, role: user.role, tenantId: order.distributorId },
+        'ORDER_EDIT',
+        { req, entity: 'Order', entityId: id, detail: `${order.orderNo} items edit — ${items2.length} lines, new total Rs ${total}` },
+      )
       return Response.json({
         order: {
           id, orderNo: order.orderNo,
@@ -355,6 +368,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
       const { delivery } = await fulfillOrder(order.id)
       await db.order.update({ where: { id: order.id }, data: { status: 'DELIVERED' } })
+      // Task 35: ORDER_DELIVER — seed delivery ka record
+      await audit(
+        { id: user.id, name: user.name, role: user.role, tenantId: order.distributorId },
+        'ORDER_DELIVER',
+        { req, entity: 'Order', entityId: order.id, detail: `${order.orderNo} DELIVERED — challan ${delivery.deliveryNo}` },
+      )
       return Response.json({ delivery: { id: delivery.id, deliveryNo: delivery.deliveryNo }, orderStatus: 'DELIVERED' })
     }
 

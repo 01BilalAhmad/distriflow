@@ -17,7 +17,7 @@ import type { OrderDTO, OrderItemDTO } from '@/lib/dms-types'
 import { fmtQty } from '@/components/dms/unit-qty'
 import { PrintFrame, CblInvoiceDoc, keepDialogBehind, type InvoiceData } from '@/components/dms/cbl-print'
 import { orderGrandPayable, aggregateSchemePromos } from '@/lib/dms-order-calc'
-import { Plus, Eye, XCircle, Search, ShoppingCart, Printer } from 'lucide-react'
+import { Plus, Eye, XCircle, Search, ShoppingCart, Printer, Lock } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
 export function OrdersView() {
@@ -194,6 +194,12 @@ function OrderDetailDialog({ order, items, onClose }: { order: OrderDTO | null; 
   // ISI shared helper se). Purani orders (stack nahi) helper khud legacy fallback use karta hai.
   const detailPromos = useMemo(() => aggregateSchemePromos(items ?? []), [items])
 
+  // Task 34: PROCESS-PEHLE-PRINT — user directive: "bill ko process kiye bagair print nai
+  // nikal saktein". CONFIRMED = unprocessed (Unprocessed Bills mein van-out hona baqi),
+  // CANCELLED = dead bill — dono par print LOCK. Processed = PROCESSING / PARTIALLY_DELIVERED /
+  // DELIVERED — print allowed. Un-process (revert) par print dobara lock ho jata hai.
+  const canPrint = !!order && order.status !== 'CONFIRMED' && order.status !== 'CANCELLED'
+
   // Task 26-b: screen ladder bhi print (cbl-print) jaisa mode-aware — INVOICE_DISCOUNT order
   // par Noms/SalesFlo ladder (Trade Offer GST se PEHLE minus dikhta hai). Numbers pehle se
   // sahi the (Task 26 calc) — sirf presentation ka tarteeb yahan fix ho rahi hai.
@@ -330,8 +336,18 @@ function OrderDetailDialog({ order, items, onClose }: { order: OrderDTO | null; 
                 </div>
               )}
             </div>
-            <div className="flex justify-end border-t pt-3 shrink-0">
-              <Button disabled={!invData} className="bg-slate-800 hover:bg-slate-900 text-white" onClick={() => setPrinting(true)}>
+            <div className="flex flex-col items-end gap-1.5 border-t pt-3 shrink-0">
+              {/* Task 34: print restriction note — process se pehle print locked */}
+              {order && !canPrint && (
+                <p className="text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5 flex items-center gap-1.5 text-right">
+                  <Lock className="h-3 w-3 shrink-0" />
+                  {order.status === 'CANCELLED'
+                    ? 'Bill cancel ho chuka hai — print locked'
+                    : 'Bill process nahi hua — pehle Unprocessed Bills se process karein, phir print hogi'}
+                </p>
+              )}
+              <Button disabled={!invData || !canPrint} title={canPrint ? 'Invoice print / export karein' : 'Print locked — bill pehle process hona zaroori hai'}
+                className="bg-slate-800 hover:bg-slate-900 text-white" onClick={() => setPrinting(true)}>
                 <Printer className="h-4 w-4 mr-1.5" /> Print / Export Invoice
               </Button>
             </div>

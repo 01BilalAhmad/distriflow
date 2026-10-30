@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { jsonError } from '@/lib/dms-scope'
 import { requireUser } from '@/lib/api-auth'
+import { audit } from '@/lib/audit'
 
 /**
  * Task 42 — Full JSON data export (MEGA_ADMIN only).
@@ -20,6 +21,10 @@ const MODELS: Array<[string, keyof typeof db]> = [
   ['DistributorProfile', 'distributorProfile'],
   ['Company', 'company'],
   ['Brand', 'brand'],
+  // Task 36: Category pehle export se MISS thi (Product.category string hai — relation
+  // nahi — is liye chupchap reh gaya tha). Counter bhi — bina iske restore par order
+  // numbering reset ho jati. AuditLog sab se aakhir (activity trail, sab se kam critical).
+  ['Category', 'category'],
   ['Product', 'product'],
   ['PurchaseInvoice', 'purchaseInvoice'],
   ['PurchaseInvoiceItem', 'purchaseInvoiceItem'],
@@ -45,6 +50,8 @@ const MODELS: Array<[string, keyof typeof db]> = [
   ['Recovery', 'recovery'],
   ['Collection', 'collection'],
   ['SalesTarget', 'salesTarget'],
+  ['Counter', 'counter'],
+  ['AuditLog', 'auditLog'],
 ]
 
 export async function GET(req: Request) {
@@ -71,6 +78,14 @@ export async function GET(req: Request) {
       { meta: { app: 'DistriFlow', exportedAt: now.toISOString(), totalRows: total, format: 'json-full-v1' }, tables },
       null,
       1
+    )
+
+    // Task 35+36: BACKUP_EXPORT audit — ye row hi "aakhri backup kab liya" ka source hai
+    // (Backup page isi se freshness warning dikhata hai). GET hone par bhi log — data exfil.
+    await audit(
+      { id: auth.user.id, name: auth.user.name, role: auth.user.role },
+      'BACKUP_EXPORT',
+      { req, entity: 'Backup', detail: `Poora database export — ${total} rows, ${MODELS.length} tables (${filename})` },
     )
 
     return new Response(body, {

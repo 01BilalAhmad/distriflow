@@ -16,6 +16,7 @@
 import { db } from '@/lib/db'
 import { AUTH_COOKIE, verifyAuthToken } from '@/lib/auth-token'
 import { jsonError } from '@/lib/dms-scope'
+import { auditApiCall, audit, resolveTenantId } from '@/lib/audit'
 import type { DistributorProfile } from '@prisma/client'
 
 /** Route handlers ko milne wala authed user — profile relation ke sath */
@@ -52,7 +53,17 @@ function parseCookieHeader(req: Request): string | undefined {
 export async function requireUser(req: Request): Promise<AuthResult> {
   const token = parseCookieHeader(req)
   const userId = await verifyAuthToken(token)
-  if (!userId) return { error: jsonError('Login required — session invalid hai', 401) }
+  if (!userId) {
+    // Task 35: cookie MOJOOD thi magar invalid/expired = real browser (bot bina cookie
+    // aata hai — usay log nahi karte warna scanner spam). Security trail ke liye zaroori.
+    if (token) {
+      try {
+        const url = new URL(req.url)
+        await audit(null, 'AUTH_REJECTED', { req, entity: url.pathname, detail: 'Invalid/expired session token' })
+      } catch { /* audit fire-safe */ }
+    }
+    return { error: jsonError('Login required — session invalid hai', 401) }
+  }
 
   const user = await db.user.findUnique({
     where: { id: userId },
@@ -63,6 +74,15 @@ export async function requireUser(req: Request): Promise<AuthResult> {
   }
   if (user.role === 'DISTRIBUTOR' && user.subscriptionExpiry && user.subscriptionExpiry.getTime() < Date.now()) {
     return { error: jsonError('Subscription khatam — renew ke liye Mega Admin se rabta karein', 403) }
+  }
+
+  // Task 35 — GENERIC auto-audit: HAR mutation (POST/PATCH/PUT/DELETE) yahan se log
+  // ho jata hai ("hr choti activity ka log"). Reads (GET) spam na ho is liye nahi —
+  // critical reads (backup export) apni rich row khud likhte hain. Rich business
+  // events apne routes mein labeled audit() bhi likhte hain (generic + rich dono rows).
+  if (req.method !== 'GET') {
+    const tenantId = await resolveTenantId(user)
+    await auditApiCall(req, { id: user.id, name: user.name, role: user.role, tenantId })
   }
 
   return {
