@@ -147,6 +147,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
             discount: it.discount,
             lineTotal: it.lineTotal,
             schemeName: it.scheme?.name ?? null,
+            // Task 111: frozen scheme stack bhi — detail consumers (settlement/load form)
+            // mein per-scheme breakdown available rahe (combined naam nahi)
+            schemeStack: (it.schemeStack ?? null) as import('@/lib/dms-types').SchemeStackRow[] | null,
           })),
           returns: (returnsByOrder.get(o.id) ?? []).map((r) => ({
             id: r.id, // Task 64: cancel/undo ke liye

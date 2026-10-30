@@ -294,6 +294,28 @@ describe('aggregateSchemePromos — per-scheme rows (Task 57)', () => {
     expect(rows[0].id).toBe('Old Promo')
     expect(rows[0].amount).toBeCloseTo(12, 2)
   })
+
+  it('Task 111 REGRESSION: two 2% schemes on one line print as TWO separate rows (not combined)', () => {
+    // ORD-5054 scenario: Cadbury Regular 2% + Khushhali Program 2% stacked on a single
+    // line — Promotions Applied mein dono ki ALAG row (per-scheme amount), Total wahi.
+    const P: CalcProduct = { ...P1, pcsPerBox: 0 }
+    const schemes: CalcScheme[] = [
+      { id: 'sch-cadbury', name: 'Cadbury Chocolate Regular Scheme', type: 'PERCENT_DISCOUNT', channel: null, productId: 'p1', value: 2, buyQty: 0, freeQty: 0 },
+      { id: 'sch-khushhali', name: 'Khushhali Program Scheme', type: 'PERCENT_DISCOUNT', channel: null, productId: 'p1', value: 2, buyQty: 0, freeQty: 0 },
+    ]
+    const res = computeOrderLines([P], schemes, [{ productId: 'p1', qty: 20 }], 'KIRYANA', 'NON_FILER')
+    const line = res.lines[0]
+    expect(line.discount).toBeCloseTo(8, 2) // 2% + 2% of gross 200 (4 + 4)
+    expect(line.schemeStack).toHaveLength(2)
+
+    // print engine on the PERSISTED (JSON round-trip) stack — 2 separate rows
+    const persisted = JSON.parse(JSON.stringify(line.schemeStack))
+    const rows = aggregateSchemePromos([{ qty: 20, rate: line.rate, discount: line.discount, unitsPerCarton: 10, schemeName: line.schemeName, schemeStack: persisted }])
+    expect(rows).toHaveLength(2)
+    expect(rows.find((r) => r.id === 'sch-cadbury')?.name).toBe('Cadbury Chocolate Regular Scheme')
+    expect(rows.find((r) => r.id === 'sch-khushhali')?.name).toBe('Khushhali Program Scheme')
+    expect(rows.every((r) => Math.abs(r.amount - 4) < 0.005)).toBe(true) // 4 + 4 = 8 total
+  })
 })
 
 describe('Task 26 — TAX MODE: INVOICE_DISCOUNT (GST on net − Trade Offer)', () => {

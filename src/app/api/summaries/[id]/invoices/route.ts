@@ -104,6 +104,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         discount: it.discount,
         lineTotal: it.lineTotal,
         schemeName: it.schemeName ?? it.scheme?.name ?? null,
+        // Task 111: poora frozen scheme stack — Promotions Applied har scheme ki ALAG row
+        // (Cadbury Regular + Khushhali Program ek combined row mein na print hon).
+        // is include se scalar field mojood hai; pehle response mein map nahi ho raha tha,
+        // is liye bulk print par combined-name fallback chal jata tha.
+        schemeStack: (it.schemeStack ?? null) as import('@/lib/dms-types').SchemeStackRow[] | null,
       })),
     }))
 
