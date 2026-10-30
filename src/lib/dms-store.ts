@@ -37,6 +37,7 @@ export type ViewKey =
   | 'reports-booker-perf'
   | 'reports-company-purchase'
   | 'reports-returns-claims'
+  | 'reports-floor-stock'
   | 'reports-top-shops'
   | 'sales-app'
   | 'settings'

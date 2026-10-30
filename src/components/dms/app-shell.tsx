@@ -28,7 +28,7 @@ import { QuickNav } from './quick-nav'
 import { ThemeToggle } from './theme-toggle'
 import {
   LayoutDashboard, ShoppingCart, Warehouse, Package, Store, Network, Route,
-  Users, Gift, Undo2, BarChart3, Package2, LogOut, Building2,
+  Users, Gift, Undo2, BarChart3, Package2, LogOut, Building2, PackageX,
   ClipboardList, FileStack, Wallet, BookText, BookLock, HandCoins, Landmark,
   Database, Map as MapIcon, TrendingUp, Receipt, Target, Boxes, Coins,
   Settings as SettingsIcon, ChevronRight, ChevronLeft, Search, Calendar, Menu, PanelLeftClose, PanelLeftOpen, X,
@@ -66,6 +66,8 @@ const NAV: { key: string; label: string; icon: typeof LayoutDashboard; roles: st
   { key: 'reports-booker-perf', label: 'Booker Perf', icon: Users, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'Team scorecard' },
   { key: 'reports-company-purchase', label: 'Purchases', icon: Building2, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'Company procurement report' },
   { key: 'reports-returns-claims', label: 'Returns', icon: Undo2, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'Returns & claims report' },
+  // Task 30 — Damage & Expiry Floor apni report tile (pehle sirf Returns ke andar section tha — nazar nai aati thi)
+  { key: 'reports-floor-stock', label: 'Damage & Expiry Floor', icon: PackageX, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'Floor par jama damage/expired stock (inventory ke baghair)' },
   { key: 'reports-top-shops', label: 'Top Shops', icon: Store, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'Sab se baray buyers' },
   // Stock & Catalog — stock aur items
   { key: 'inventory', label: 'Inventory', icon: Warehouse, roles: ['DISTRIBUTOR'], group: 'Stock & Catalog', desc: 'Live stock levels' },

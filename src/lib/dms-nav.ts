@@ -40,6 +40,8 @@ export const VIEW_PATH: Record<ViewKey, string> = {
   'reports-booker-perf': '/reports/booker-perf',
   'reports-company-purchase': '/reports/company-purchase',
   'reports-returns-claims': '/reports/returns-claims',
+  // Task 30 — Damage & Expiry Floor report apna URL (Task 29 section ab discoverable tile bhi)
+  'reports-floor-stock': '/reports/floor-stock',
   'reports-top-shops': '/reports/top-shops',
   'sales-app': '/sales-app',
   // Task 78 — distributor apni profile (bill print ka naam/cell) + tax/GST settings

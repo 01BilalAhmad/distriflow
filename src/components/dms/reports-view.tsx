@@ -29,7 +29,7 @@ import { api, fmtPKR, fmtNum } from '@/lib/dms-api'
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import {
   BarChart3, TrendingUp, Percent, ShoppingCart, Receipt, HandCoins, Target,
-  Boxes, Users, Building2, Undo2, Store, Coins, BookLock,
+  Boxes, Users, Building2, Undo2, Store, Coins, BookLock, PackageX,
 } from 'lucide-react'
 import { SalesProfitTab } from './reports/sales-profit-tab'
 import { SkuProfitTab } from './reports/sku-profit-tab'
@@ -42,6 +42,7 @@ import { StockTab } from './reports/stock-tab'
 import { BookerPerformanceTab } from './reports/booker-performance-tab'
 import { CompanyPurchaseTab } from './reports/company-purchase-tab'
 import { ReturnsClaimsTab } from './reports/returns-claims-tab'
+import { FloorStockTab } from './reports/floor-stock-tab'
 import { TopShopsTab } from './reports/top-shops-tab'
 
 const COLORS = ['#059669', '#10b981', '#34d399', '#6ee7b7', '#f59e0b', '#a7f3d0']
@@ -59,6 +60,7 @@ const TABS = [
   { key: 'booker-perf', label: 'Booker Perf', icon: Users },
   { key: 'company-purchase', label: 'Purchases', icon: Building2 },
   { key: 'returns-claims', label: 'Returns', icon: Undo2 },
+  { key: 'floor-stock', label: 'Damage & Expiry Floor', icon: PackageX }, // Task 30
   { key: 'top-shops', label: 'Top Shops', icon: Store },
 ] as const
 
@@ -79,7 +81,7 @@ export function ReportsView({ tab: tabProp }: { tab?: string }) {
           {active && active.key !== 'overview' ? (
             <>Business ka poora hisaab — <b className="text-emerald-700">{active.label}</b> report • Pehle filters set karein, phir &quot;Report Load Karein&quot; — sirf selected data load hoga (Excel, PDF, CSV, print sab mojood)</>
           ) : (
-            'Business ka poora hisaab — 12 detailed reports • Har report filter-first hai: filters set karein, phir load karein'
+            'Business ka poora hisaab — 13 detailed reports • Har report filter-first hai: filters set karein, phir load karein'
           )}
         </p>
       </div>
@@ -98,6 +100,7 @@ export function ReportsView({ tab: tabProp }: { tab?: string }) {
         {tab === 'booker-perf' && <BookerPerformanceTab />}
         {tab === 'company-purchase' && <CompanyPurchaseTab />}
         {tab === 'returns-claims' && <ReturnsClaimsTab />}
+        {tab === 'floor-stock' && <FloorStockTab />}
         {tab === 'top-shops' && <TopShopsTab />}
       </div>
     </div>
