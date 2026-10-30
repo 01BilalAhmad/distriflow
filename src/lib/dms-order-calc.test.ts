@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   incomingPcs,
   computeOrderLines,
+  computePurchaseLineTaxes,
   orderGrandPayable,
   splitManualByNet,
   applyManualMerge,
@@ -358,5 +359,50 @@ describe('Task 26 — TAX MODE: INVOICE_DISCOUNT (GST on net − Trade Offer)', 
     expect(advBase).toBeCloseTo(188.8, 2)
     // orderGrandPayable formula unchanged — dono modes par wahi chain
     expect(orderGrandPayable({ total, tradeOfferTotal: r.tradeOfferTotal, gstTotal: r.gstTotal, advanceTax: 0 })).toBe(188.8)
+  })
+})
+
+describe('Task 108: computePurchaseLineTaxes — purchase ladder company tax-mode ke mutabiq', () => {
+  it('CLAIM (default) — purana rule barqarar: GST poore net par, TO baad me minus', () => {
+    const r = computePurchaseLineTaxes({ gross: 10000, discAmt: 0, gstRate: 18, furtherTaxPct: 0, tradeOfferRequest: 500, advanceTaxPct: 0.5 })
+    expect(r.netAmount).toBe(10000)
+    expect(r.salesTax).toBe(1800) // 10,000 × 18% — TO base se bahar
+    expect(r.totalTax).toBe(1800)
+    expect(r.tradeOfferAmt).toBe(500)
+    expect(r.advanceTax).toBe(56.5) // 0.5% × (10,000 + 1,800 − 500)
+    expect(r.amountInclusive).toBe(11356.5)
+  })
+
+  it('INVOICE_DISCOUNT (Noms) — REAL SalesFlo bill row 1 exact: Gross 6,240.24, Dist 8%, TO 6%, GST 18% = 965.99', () => {
+    const r = computePurchaseLineTaxes({ gross: 6240.24, discAmt: 499.22, gstRate: 18, furtherTaxPct: 0, tradeOfferRequest: 374.41, advanceTaxPct: 0, taxMode: 'INVOICE_DISCOUNT' })
+    expect(r.netAmount).toBe(5741.02) // gross − dist (TO iske BAAD katata hai ladder)
+    expect(r.salesTax).toBe(965.99) // (5,741.02 − 374.41) × 18% = 5,366.61 × 18% — NOMS bill PDF row 1 exact
+    expect(r.tradeOfferAmt).toBe(374.41)
+    expect(r.amountInclusive).toBe(6332.6) // 5,741.02 + 965.99 − 374.41 (NOMS Total Amount column)
+  })
+
+  it('INVOICE_DISCOUNT — 18% GST net−TO par (row 2: 9,540.33 base → 1,717.26)', () => {
+    const r = computePurchaseLineTaxes({ gross: 11093.4, discAmt: 887.47, gstRate: 18, furtherTaxPct: 0, tradeOfferRequest: 665.6, advanceTaxPct: 0, taxMode: 'INVOICE_DISCOUNT' })
+    expect(r.salesTax).toBe(1717.26) // NOMS bill PDF row 2 exact
+  })
+
+  it('INVOICE_DISCOUNT — TO cap net tak, GST base kabhi negative nahi', () => {
+    const r = computePurchaseLineTaxes({ gross: 1000, discAmt: 0, gstRate: 18, furtherTaxPct: 0, tradeOfferRequest: 5000, advanceTaxPct: 0.5, taxMode: 'INVOICE_DISCOUNT' })
+    expect(r.tradeOfferAmt).toBe(1000) // net se zyada nahi
+    expect(r.salesTax).toBe(0) // base 0
+  })
+
+  it('CLAIM — TO cap net+tax tak (purana behaviour)', () => {
+    const r = computePurchaseLineTaxes({ gross: 1000, discAmt: 0, gstRate: 18, furtherTaxPct: 0, tradeOfferRequest: 5000, advanceTaxPct: 0 })
+    expect(r.salesTax).toBe(180) // GST poore net par
+    expect(r.tradeOfferAmt).toBe(1180) // net + totalTax
+    expect(r.amountInclusive).toBe(0)
+  })
+
+  it('Further Tax bhi company ke GST base par (mode-aware)', () => {
+    const claim = computePurchaseLineTaxes({ gross: 1000, discAmt: 0, gstRate: 0, furtherTaxPct: 2, tradeOfferRequest: 100, advanceTaxPct: 0 })
+    const noms = computePurchaseLineTaxes({ gross: 1000, discAmt: 0, gstRate: 0, furtherTaxPct: 2, tradeOfferRequest: 100, advanceTaxPct: 0, taxMode: 'INVOICE_DISCOUNT' })
+    expect(claim.furtherTax).toBe(20) // 1000 par
+    expect(noms.furtherTax).toBe(18) // 900 par
   })
 })

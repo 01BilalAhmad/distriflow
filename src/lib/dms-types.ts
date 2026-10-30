@@ -205,6 +205,8 @@ export interface PurchaseInvoiceDTO {
   advanceTaxPct: number
   advanceTaxTotal: number
   tradeOfferTotal: number
+  /** Task 108: company ka tax mode snapshot (CLAIM | INVOICE_DISCOUNT) — purchase ladder isi se */
+  taxMode?: string | null
   total: number
   paidAmount: number
   status: string

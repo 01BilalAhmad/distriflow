@@ -107,6 +107,8 @@ export async function GET(req: Request) {
         // Task 45: GST + Trade Order totals (grand payable = total − TO + GST + advTax)
         tradeOfferTotal,
         gstTotal,
+        // Task 108: order-level tax mode snapshot — unprocessed preview ladder print jaisa hi
+        taxMode: o.taxMode,
         filerStatus: o.filerStatus,
         advanceTaxRate: o.advanceTaxRate,
         advanceTax: o.advanceTax,

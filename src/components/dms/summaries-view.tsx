@@ -537,6 +537,14 @@ function InvoiceDialog({ invoiceId, returns = [], onClose }: { invoiceId: string
               </Table>
             <div className="space-y-1 pt-2">
               <Separator className="mb-2" />
+              {/* Task 108: kaunsa TAX SYSTEM is bill par laga — snapshot, zuban ke sath */}
+              <p className={`text-[10px] font-bold uppercase tracking-wide ${invModeA ? 'text-amber-600' : 'text-slate-400'}`}>
+                Tax Mode: {data.taxMode === 'MIXED'
+                  ? 'Mixed — har line apni company ke tax rule par'
+                  : invModeA
+                    ? 'Invoice Discount — Trade Offer pehle kaata, GST net−TO par (Noms style)'
+                    : 'Claim — GST poore net par, Trade Offer baad me'}
+              </p>
               <div className="flex justify-between gap-3 text-sm text-slate-500"><span>Subtotal</span><span className="whitespace-nowrap tabular-nums">{fmtPKR(data.subtotal)}</span></div>
               <div className="flex justify-between gap-3 text-sm text-emerald-600"><span>Scheme Discount</span><span className="whitespace-nowrap tabular-nums">- {fmtPKR(data.schemeDiscount)}</span></div>
               {(data.manualDiscount ?? 0) > 0 && (

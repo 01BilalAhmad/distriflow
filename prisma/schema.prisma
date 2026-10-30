@@ -195,6 +195,9 @@ model PurchaseInvoice {
   advanceTaxPct     Float                 @default(0.5) // invoice-level Advance Tax 236H % (default 0.5 — editable, per invoice)
   advanceTaxTotal   Float                 @default(0) // Σ line advanceTax 236H
   tradeOfferTotal   Float                 @default(0) // Σ line trade offer (scheme value Rs)
+  // Task 108: company ka TAX MODE snapshot (CLAIM | INVOICE_DISCOUNT) — purchase GST base rule
+  // freeze hota hai (company ka mode baad me badle to purani purchase invoice ka ladder waisa hi rahe)
+  taxMode           String                @default("CLAIM")
   // total = subtotal − discount + taxTotal + advanceTaxTotal (Net Invoice Amount, all-tax inclusive)
   total             Float                 @default(0)
   paidAmount        Float                 @default(0) // advance + ledger payments against this invoice

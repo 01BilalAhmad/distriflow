@@ -472,3 +472,58 @@ export function recalcManualDiscount(
   }
   return { manualDiscount: 0, manualDiscType: null, manualDiscValue: null }
 }
+
+/* ==================== Task 108: PURCHASE LINE TAX CHAIN (company tax-mode aware) ====================
+ * Purchase invoice ki per-line tax ladder — AB COMPANY KE TAX MODE KE MUTABIQ:
+ *   CLAIM (default / Cadbury style):  GST poore net par, Trade Offer baad me minus
+ *   INVOICE_DISCOUNT (Noms style):    Trade Offer pehle net se kaata → GST (net − TO) par
+ * (Real Noms/SalesFlo bill se verified: net 5,366.61 × 18% = 965.99 — PDF row 1.)
+ * Pure function — POST route + purchase entry preview dono isi se chalte hain (preview == booked bill). */
+
+export interface PurchaseLineTaxInput {
+  /** gross = trade price × cartons */
+  gross: number
+  /** Pass On discount Rs (gross ka % ya flat — UI se) */
+  discAmt: number
+  /** GST % snapshot (product rate ya line override) */
+  gstRate: number
+  /** Further Sales Tax % (invoice column) */
+  furtherTaxPct: number
+  /** Trade Offer Rs request (UI se) — cap lagega */
+  tradeOfferRequest: number
+  /** Advance Tax 236H % (invoice-level) */
+  advanceTaxPct: number
+  /** company ka tax mode — 'INVOICE_DISCOUNT' = Noms ladder, baqi sab CLAIM */
+  taxMode?: string | null
+}
+
+export interface PurchaseLineTaxResult {
+  netAmount: number
+  salesTax: number
+  furtherTaxPct: number
+  furtherTax: number
+  totalTax: number
+  tradeOfferAmt: number
+  advanceTax: number
+  amountInclusive: number
+}
+
+const r2 = (v: number) => Math.round(v * 100) / 100
+
+export function computePurchaseLineTaxes(i: PurchaseLineTaxInput): PurchaseLineTaxResult {
+  const netAmount = r2(Math.max(0, i.gross - i.discAmt))
+  const modeA = i.taxMode === 'INVOICE_DISCOUNT'
+  const toReq = Math.max(0, r2(Number(i.tradeOfferRequest) || 0))
+  const gstRate = Math.min(100, Math.max(0, Number(i.gstRate) || 0))
+  const furtherTaxPct = Math.min(100, Math.max(0, Number(i.furtherTaxPct) || 0))
+  // Task 108: GST base company ke tax mode se — INVOICE_DISCOUNT = net − Trade Offer (clamp 0)
+  const gstBase = modeA ? Math.max(0, netAmount - toReq) : netAmount
+  const salesTax = r2((gstBase * gstRate) / 100)
+  const furtherTax = r2((gstBase * furtherTaxPct) / 100)
+  const totalTax = r2(salesTax + furtherTax)
+  // TO cap: INVOICE_DISCOUNT me TO GST se PEHLE kaata jata hai (net tak), CLAIM me net+tax tak
+  const tradeOfferAmt = Math.min(modeA ? netAmount : r2(netAmount + totalTax), toReq)
+  const advanceTax = r2(Math.max(0, netAmount + totalTax - tradeOfferAmt) * Math.min(100, Math.max(0, Number(i.advanceTaxPct) || 0)) / 100)
+  const amountInclusive = r2(netAmount + totalTax - tradeOfferAmt + advanceTax)
+  return { netAmount, salesTax, furtherTaxPct, furtherTax, totalTax, tradeOfferAmt, advanceTax, amountInclusive }
+}

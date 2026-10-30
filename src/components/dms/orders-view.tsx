@@ -215,6 +215,14 @@ function OrderDetailDialog({ order, items, onClose }: { order: OrderDTO | null; 
               <DialogTitle className="flex items-center gap-2">
                 {order.orderNo}
                 <Badge variant="outline" className={STATUS_STYLES[order.status]}>{statusLabel(order.status)}</Badge>
+                {/* Task 108: kaunsa TAX SYSTEM is bill par laga — snapshot se, zuban ke sath */}
+                <Badge variant="outline" className={`text-[9px] ${detailModeA ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                  {order.taxMode === 'MIXED'
+                    ? 'Tax: Mixed (per-line)'
+                    : detailModeA
+                      ? 'Tax: Invoice Discount (Noms)'
+                      : 'Tax: Claim (GST pehle)'}
+                </Badge>
               </DialogTitle>
               <DialogDescription>
                 {order.outletName} ({order.outletCode}) • {order.channel} • Salesman: {order.salesmanName ?? '—'} • {fmtDate(order.orderDate, true)}

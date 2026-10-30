@@ -26,6 +26,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { api, fmtPKR, fmtNum } from '@/lib/dms-api'
+import { computePurchaseLineTaxes } from '@/lib/dms-order-calc'
 import type { CompanyFullDTO, ProductDTO } from '@/lib/dms-types'
 import { ProductCombobox } from '@/components/dms/product-combobox'
 import { useDMS } from '@/lib/dms-store'
@@ -188,24 +189,26 @@ export function PurchaseEntryView() {
     [products, companyId],
   )
   const company = companies.find((c) => c.id === companyId)
+  // Task 108: is purchase ka tax mode = company ka tax mode (server bhi YEHIN rule use karta hai)
+  const companyTaxMode = company?.taxMode === 'INVOICE_DISCOUNT' ? 'INVOICE_DISCOUNT' : 'CLAIM'
+  const modeA = companyTaxMode === 'INVOICE_DISCOUNT'
 
-  // ---------- Task 44 calc chain (dialog wala EXACT) ----------
+  // ---------- Task 44 calc chain — Task 108 se SHARED pure helper (preview == booked bill) ----------
   const itemCalc = useMemo(() => items.map((it) => {
     const gross = Math.round((Number(it.cartons) || 0) * (Number(it.price) || 0) * 100) / 100
     const pct = Math.min(100, Math.max(0, Number(it.disc) || 0))
     const discRs = Math.round(gross * pct) / 100
-    const net = Math.round((gross - discRs) * 100) / 100
-    const gstRate = Math.min(100, Math.max(0, Number(it.gst) || 0))
-    const salesTax = Math.round(net * gstRate) / 100
-    const furPct = Math.min(100, Math.max(0, Number(it.fur) || 0))
-    const furTax = Math.round(net * furPct) / 100
-    const totalTax = Math.round((salesTax + furTax) * 100) / 100
-    const toRs = Math.min(net + totalTax, Math.max(0, Number(it.to) || 0))
-    const advPct = Math.min(100, Math.max(0, Number(advTaxPct) || 0))
-    const advTax = Math.round(Math.max(0, net + totalTax - toRs) * advPct) / 100
-    const inclusive = Math.round((net + totalTax - toRs + advTax) * 100) / 100
-    return { key: it.key, gross, pct, discRs, net, gstRate, salesTax, furPct, furTax, totalTax, toRs, advTax, inclusive }
-  }), [items, advTaxPct])
+    const t = computePurchaseLineTaxes({
+      gross,
+      discAmt: discRs,
+      gstRate: Number(it.gst) || 0,
+      furtherTaxPct: Number(it.fur) || 0,
+      tradeOfferRequest: Number(it.to) || 0,
+      advanceTaxPct: Number(advTaxPct) || 0,
+      taxMode: companyTaxMode,
+    })
+    return { key: it.key, gross, pct, discRs, net: t.netAmount, gstRate: Math.min(100, Math.max(0, Number(it.gst) || 0)), salesTax: t.salesTax, furPct: t.furtherTaxPct, furTax: t.furtherTax, totalTax: t.totalTax, toRs: t.tradeOfferAmt, advTax: t.advanceTax, inclusive: t.amountInclusive }
+  }), [items, advTaxPct, companyTaxMode])
   const calcMap = useMemo(() => new Map(itemCalc.map((c) => [c.key, c])), [itemCalc])
   const subtotal = itemCalc.reduce((s, c) => s + c.gross, 0)
   const itemDiscTotal = Math.round(itemCalc.reduce((s, c) => s + c.discRs, 0) * 100) / 100
@@ -439,9 +442,10 @@ export function PurchaseEntryView() {
                       {c.pct > 0 && <> − Rs {fmtNum(c.discRs)} ({c.pct}%)</>}
                       = Net <span className="font-semibold text-slate-700">Rs {fmtNum(c.net)}</span>
                       <br />
+                      {modeA && c.toRs > 0 && <span className="text-amber-700">TO − Rs {fmtNum(c.toRs)} • </span>}
                       {c.gstRate > 0 && <span>GST@{c.gstRate}% Rs {fmtNum(c.salesTax)} • </span>}
                       {c.furPct > 0 && <span>Fur@{c.furPct}% Rs {fmtNum(c.furTax)} • </span>}
-                      {c.toRs > 0 && <span className="text-amber-700">TO − Rs {fmtNum(c.toRs)} • </span>}
+                      {!modeA && c.toRs > 0 && <span className="text-amber-700">TO − Rs {fmtNum(c.toRs)} • </span>}
                       {c.advTax > 0 && <span>Adv 236H Rs {fmtNum(c.advTax)} • </span>}
                       <span className="font-semibold text-red-600">Incl Rs {fmtNum(c.inclusive)}</span>
                       {p ? <span className="text-slate-400"> • {fmtNum((Number(it.cartons) || 0) * p.unitsPerCarton)} units</span> : null}
@@ -489,7 +493,11 @@ export function PurchaseEntryView() {
             <div className="space-y-0.5"><p className="text-[10px] text-slate-400 uppercase font-semibold">Paid Now (advance)</p><Input type="number" min="0" className="h-8 bg-white" value={paidNow} onChange={(e) => setPaidNow(e.target.value)} placeholder="0" /></div>
             <div><p className="text-[10px] text-slate-400 uppercase font-semibold">Remaining Payable</p><p className="text-sm font-bold text-slate-700">{fmtPKR(Math.max(0, remaining))}</p></div>
             <p className="col-span-2 sm:col-span-4 text-[11px] text-slate-500">
-              Company invoice ka formula: <b>Gross − Pass On = Net Amount</b> (upar items ke Net column ka yahi total banta hy) → − Trade Offer − Bill Discount + GST + Advance Tax 236H = <b>Net Invoice</b> — yehi amount ledger payable banti hy. GST % har product ka apna (Products page par set hota hy, yahan override bhi kar sakte hain)
+              {modeA ? (
+                <><span className="font-bold text-amber-700">Tax Mode: Invoice Discount (Noms style)</span> — <b>Gross − Pass On = Net</b> → <b>− Trade Offer</b> → GST (net−TO par) + Advance Tax 236H = <b>Net Invoice</b>. GST % har product ka apna (Products page par set hota hy, yahan override bhi kar sakte hain)</>
+              ) : (
+                <>Company invoice ka formula: <b>Gross − Pass On = Net Amount</b> (upar items ke Net column ka yahi total banta hy) → − Trade Offer − Bill Discount + GST + Advance Tax 236H = <b>Net Invoice</b> — yehi amount ledger payable banti hy. GST % har product ka apna (Products page par set hota hy, yahan override bhi kar sakte hain)</>
+              )}
             </p>
           </div>
         </CardContent></Card>

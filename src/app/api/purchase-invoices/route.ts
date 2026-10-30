@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
 import { requireUser, type AuthedUser } from '@/lib/api-auth'
 import { audit } from '@/lib/audit'
+import { computePurchaseLineTaxes } from '@/lib/dms-order-calc'
 
 // Task 95: tenantProfileId(userId) helper ki jagah cookie-user se tenant resolve
 // (same semantics: apna profile, warna salesman parent walk-up, warna null)
@@ -62,6 +63,7 @@ export async function GET(req: Request) {
         advanceTaxPct: i.advanceTaxPct,
         advanceTaxTotal: i.advanceTaxTotal,
         tradeOfferTotal: i.tradeOfferTotal,
+        taxMode: i.taxMode,
         total: i.total,
         paidAmount: i.paidAmount,
         status: i.status,
@@ -150,6 +152,9 @@ export async function POST(req: Request) {
 
     const company = await db.company.findFirst({ where: { id: b.companyId, distributorId: tenantId } })
     if (!company) return jsonError('Company nahi mili (ya aap ki nahi hai)', 404)
+    // Task 108: is purchase ka tax mode = COMPANY ka tax mode (Noms = INVOICE_DISCOUNT ladder,
+    // Cadbury/CLAIM companies purana rule) — snapshot invoice par freeze hota hai
+    const companyTaxMode = company.taxMode === 'INVOICE_DISCOUNT' ? 'INVOICE_DISCOUNT' : 'CLAIM'
 
     // validate items + snapshot product data
     const productIds = [...new Set(b.items.map((i) => i.productId!))]
@@ -179,25 +184,25 @@ export async function POST(req: Request) {
       // ---- Task 44: REAL INVOICE CALC CHAIN (har step save hota hai, kuch bhi hardcoded nahi) ----
       // 1) Gross = Trade Price x Qty
       const gross = Math.round(cartons * price * 100) / 100
-      // 2) Pass On discount (% ya flat — UI se) -> Net (Excl. Sales Tax)
+      // 2) Pass On discount (% ya flat — UI se)
       const discPct = Math.min(100, Math.max(0, Number(it.discountPct ?? 0) || 0))
       const discAmt = Math.round(gross * discPct) / 100
-      const netAmount = Math.round((gross - discAmt) * 100) / 100
-      // 3) Sales Tax (GST %) — product ka rate (gstEnabled false = 0), UI override allowed
+      // 3) GST % (product ka rate — gstEnabled false = 0, UI override allowed)
       const gstRate = it.gstRate != null
         ? Math.min(100, Math.max(0, Number(it.gstRate) || 0))
         : (p.gstEnabled ? p.gstRate : 0)
-      const salesTax = Math.round(netAmount * gstRate) / 100
-      // 4) Further Sales Tax % (invoice column)
-      const furtherTaxPct = Math.min(100, Math.max(0, Number(it.furtherTaxPct ?? 0) || 0))
-      const furtherTax = Math.round(netAmount * furtherTaxPct) / 100
-      const totalTax = Math.round((salesTax + furtherTax) * 100) / 100
-      // 5) Trade Offer Rs (scheme value) — net + tax se minus
-      const tradeOfferAmt = Math.min(netAmount + totalTax, Math.max(0, Number(it.tradeOfferAmt ?? 0) || 0))
-      // 6) Advance Tax 236H = advPct% x (net + totalTax − tradeOffer)
-      const advanceTax = Math.round(Math.max(0, netAmount + totalTax - tradeOfferAmt) * advPct) / 100
-      // 7) Amount Inclusive of All Tax
-      const amountInclusive = Math.round((netAmount + totalTax - tradeOfferAmt + advanceTax) * 100) / 100
+      // 4-7) Task 108: tax ladder ab COMPANY KE TAX MODE se — shared pure helper
+      //   CLAIM (default/Cadbury): GST poore net par, TO baad me minus
+      //   INVOICE_DISCOUNT (Noms): TO pehle kaata → GST (net − TO) par
+      const tax = computePurchaseLineTaxes({
+        gross,
+        discAmt,
+        gstRate,
+        furtherTaxPct: Number(it.furtherTaxPct ?? 0) || 0,
+        tradeOfferRequest: Number(it.tradeOfferAmt ?? 0) || 0,
+        advanceTaxPct: advPct,
+        taxMode: companyTaxMode,
+      })
       clean.push({
         productId: p.id,
         cartons,
@@ -209,15 +214,15 @@ export async function POST(req: Request) {
         lineTotal: gross,
         discountPct: discPct,
         discountAmt: discAmt,
-        netAmount,
+        netAmount: tax.netAmount,
         gstRate,
-        salesTax,
-        furtherTaxPct,
-        furtherTax,
-        totalTax,
-        tradeOfferAmt,
-        advanceTax,
-        amountInclusive,
+        salesTax: tax.salesTax,
+        furtherTaxPct: tax.furtherTaxPct,
+        furtherTax: tax.furtherTax,
+        totalTax: tax.totalTax,
+        tradeOfferAmt: tax.tradeOfferAmt,
+        advanceTax: tax.advanceTax,
+        amountInclusive: tax.amountInclusive,
       })
     }
 
@@ -255,6 +260,7 @@ export async function POST(req: Request) {
           advanceTaxPct: advPct,
           advanceTaxTotal,
           tradeOfferTotal,
+          taxMode: companyTaxMode,
           total,
           paidAmount: paidNow,
           status: paidNow >= total - 0.01 ? 'PAID' : paidNow > 0 ? 'PARTIAL' : 'UNPAID',

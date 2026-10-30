@@ -66,6 +66,8 @@ export function CblPurchaseInvoiceDoc({ inv, dist }: { inv: PurchaseInvoiceDTO; 
   const billDisc = Math.round((inv.discount - S.passOn - inv.tradeOfferTotal) * 100) / 100
   const balance = Math.round((inv.total - inv.paidAmount) * 100) / 100
   const bizName = (dist?.businessName || dist?.distributorName || '').trim()
+  // Task 108: invoice ka tax mode snapshot — INVOICE_DISCOUNT = Noms ladder (TO pehle, GST net−TO par)
+  const modeAInv = inv.taxMode === 'INVOICE_DISCOUNT'
 
   // ---- Task 34 pattern: DATA-AWARE column widths (water-filling) — bill table jaisa hi ----
   const colSpecs: { key?: string; hw: number; vl: number; min: number; d: number; need: number }[] = []
@@ -86,8 +88,14 @@ export function CblPurchaseInvoiceDoc({ inv, dist }: { inv: PurchaseInvoiceDTO; 
   addCol(inv.items.map((it) => fmtCell(it.lineTotal, 2)), 'Gross Amount', 'gross')
   addCol(inv.items.map((it) => fmtCell(it.discountAmt, 2)), 'Pass On', 'passon')
   addCol(inv.items.map((it) => fmtCell(it.netAmount, 2)), 'Net Amount (Excluding Sales Tax)', 'net')
-  addCol(inv.items.map((it) => fmt2(it.totalTax)), 'Sales Tax', 'st')
-  addCol(inv.items.map((it) => fmt2(it.tradeOfferAmt)), 'Trade Offer', 'to')
+  // Task 108: column order tax mode par depend — Noms ladder me Trade Offer Sales Tax se PEHLE aata hai
+  if (modeAInv) {
+    addCol(inv.items.map((it) => fmt2(it.tradeOfferAmt)), 'Less: Trade Offer', 'to')
+    addCol(inv.items.map((it) => fmt2(it.totalTax)), 'Sales Tax (GST)', 'st')
+  } else {
+    addCol(inv.items.map((it) => fmt2(it.totalTax)), 'Sales Tax', 'st')
+    addCol(inv.items.map((it) => fmt2(it.tradeOfferAmt)), 'Trade Offer', 'to')
+  }
   addCol(inv.items.map((it) => fmt2(it.advanceTax)), 'Advance Tax 236H', 'adv')
   addCol(inv.items.map((it) => fmtCell(it.amountInclusive || it.lineTotal, 2)), 'Amount Inclusive of All Tax', 'incl')
   const TABLE_W = 730 // .cbl-page portrait 794px − px-8 (2 x 32)
@@ -162,8 +170,17 @@ export function CblPurchaseInvoiceDoc({ inv, dist }: { inv: PurchaseInvoiceDTO; 
               <th>Gross Amount</th>
               <th>Pass On</th>
               <th>Net Amount (Excluding Sales Tax)</th>
-              <th>Sales Tax</th>
-              <th>Trade Offer</th>
+              {modeAInv ? (
+                <>
+                  <th>Less: Trade Offer</th>
+                  <th>Sales Tax (GST)</th>
+                </>
+              ) : (
+                <>
+                  <th>Sales Tax</th>
+                  <th>Trade Offer</th>
+                </>
+              )}
               <th>Advance Tax 236H</th>
               <th>Amount Inclusive of All Tax</th>
             </tr>
@@ -182,8 +199,17 @@ export function CblPurchaseInvoiceDoc({ inv, dist }: { inv: PurchaseInvoiceDTO; 
                 <M v={it.lineTotal} fit={fitOf('gross')} />
                 <M v={it.discountAmt} fit={fitOf('passon')} />
                 <M v={it.netAmount} fit={fitOf('net')} />
-                <M v={it.totalTax} fit={fitOf('st')} />
-                <M v={it.tradeOfferAmt} fit={fitOf('to')} />
+                {modeAInv ? (
+                  <>
+                    <M v={it.tradeOfferAmt} fit={fitOf('to')} />
+                    <M v={it.totalTax} fit={fitOf('st')} />
+                  </>
+                ) : (
+                  <>
+                    <M v={it.totalTax} fit={fitOf('st')} />
+                    <M v={it.tradeOfferAmt} fit={fitOf('to')} />
+                  </>
+                )}
                 <M v={it.advanceTax} fit={fitOf('adv')} />
                 <M v={it.amountInclusive || it.lineTotal} fit={fitOf('incl')} />
               </tr>
@@ -197,8 +223,17 @@ export function CblPurchaseInvoiceDoc({ inv, dist }: { inv: PurchaseInvoiceDTO; 
               <M v={S.gross} fit={fitOf('gross')} />
               <M v={S.passOn} fit={fitOf('passon')} />
               <M v={S.net} fit={fitOf('net')} />
-              <M v={S.gst} fit={fitOf('st')} />
-              <M v={S.to} fit={fitOf('to')} />
+              {modeAInv ? (
+                <>
+                  <M v={S.to} fit={fitOf('to')} />
+                  <M v={S.gst} fit={fitOf('st')} />
+                </>
+              ) : (
+                <>
+                  <M v={S.gst} fit={fitOf('st')} />
+                  <M v={S.to} fit={fitOf('to')} />
+                </>
+              )}
               <M v={S.adv} fit={fitOf('adv')} />
               <M v={S.incl} fit={fitOf('incl')} />
             </tr>
@@ -213,10 +248,11 @@ export function CblPurchaseInvoiceDoc({ inv, dist }: { inv: PurchaseInvoiceDTO; 
                 <tr><td style={{ textAlign: 'center' }}>Gross Amount:</td><td className="num" style={{ width: 110 }}>{fmt2(inv.subtotal)}</td></tr>
                 {S.passOn > 0 && <tr><td style={{ textAlign: 'center' }}>− Pass On (items):</td><td className="num">{fmt2(S.passOn)}</td></tr>}
                 <tr><td style={{ textAlign: 'center', fontWeight: 'bold' }}>Net Amount:</td><td className="num" style={{ fontWeight: 'bold' }}>{fmt2(S.net)}</td></tr>
-                {inv.tradeOfferTotal > 0 && <tr><td style={{ textAlign: 'center' }}>Trade Offer:</td><td className="num">- {fmt2(inv.tradeOfferTotal)}</td></tr>}
+                {modeAInv && inv.tradeOfferTotal > 0 && <tr><td style={{ textAlign: 'center' }}>Less: Trade Offer:</td><td className="num">- {fmt2(inv.tradeOfferTotal)}</td></tr>}
                 {billDisc > 0 && <tr><td style={{ textAlign: 'center' }}>Bill Discount{inv.discountPct > 0 ? ` (${inv.discountPct}%)` : ''}:</td><td className="num">- {fmt2(billDisc)}</td></tr>}
-                {inv.taxTotal > 0 && <tr><td style={{ textAlign: 'center' }}>GST:</td><td className="num">+ {fmt2(inv.taxTotal)}</td></tr>}
+                {inv.taxTotal > 0 && <tr><td style={{ textAlign: 'center' }}>{modeAInv ? 'Sales Tax (GST):' : 'GST:'}</td><td className="num">+ {fmt2(inv.taxTotal)}</td></tr>}
                 {inv.advanceTaxTotal > 0 && <tr><td style={{ textAlign: 'center' }}>Advance Tax 236H ({inv.advanceTaxPct}%):</td><td className="num">+ {fmt2(inv.advanceTaxTotal)}</td></tr>}
+                {!modeAInv && inv.tradeOfferTotal > 0 && <tr><td style={{ textAlign: 'center' }}>Trade Offer:</td><td className="num">- {fmt2(inv.tradeOfferTotal)}</td></tr>}
                 <tr><td style={{ textAlign: 'right', fontWeight: 'bold' }}>Net Invoice Amount:</td><td className="num" style={{ fontWeight: 'bold' }}>{fmt2(inv.total)}</td></tr>
                 <tr><td style={{ textAlign: 'center' }}>Paid:</td><td className="num">{fmt2(inv.paidAmount)}</td></tr>
                 {balance > 0 && <tr><td style={{ textAlign: 'right', fontWeight: 'bold' }}>Balance Payable:</td><td className="num" style={{ fontWeight: 'bold' }}>{fmt2(balance)}</td></tr>}
