@@ -297,11 +297,11 @@ export function OrderNewView() {
   }
 
   const computed = useMemo(() => {
-    if (!outlet) return { subtotal: 0, discount: 0, gstTotal: 0, toTotal: 0, rows: [] as { name: string; qtyPcs: number; freeQty: number; discount: number; total: number; gross: number; stack: PreviewStackEntry[]; ratePc: number; upc: number; pcsPerBox: number; tradeOffer: number; gstRate: number; gstAmt: number; modeA: boolean; retail: boolean }[] }
+    if (!outlet) return { subtotal: 0, discount: 0, gstTotal: 0, toTotal: 0, rows: [] as { name: string; qtyPcs: number; freeQty: number; discount: number; total: number; gross: number; stack: PreviewStackEntry[]; ratePc: number; upc: number; pcsPerBox: number; tradeOffer: number; gstRate: number; gstAmt: number; modeA: boolean; retail: boolean; retailMode: boolean }[] }
     let subtotal = 0, discount = 0, gstTotal = 0, toTotal = 0
     const rows = lines.map((l) => {
       const p = products.find((x) => x.id === l.productId)
-      if (!p) return { name: '', qtyPcs: l.qtyPcs, freeQty: 0, discount: 0, total: 0, gross: 0, stack: [] as PreviewStackEntry[], ratePc: 0, upc: 1, pcsPerBox: 0, tradeOffer: 0, gstRate: 0, gstAmt: 0, modeA: false, retail: false }
+      if (!p) return { name: '', qtyPcs: l.qtyPcs, freeQty: 0, discount: 0, total: 0, gross: 0, stack: [] as PreviewStackEntry[], ratePc: 0, upc: 1, pcsPerBox: 0, tradeOffer: 0, gstRate: 0, gstAmt: 0, modeA: false, retail: false, retailMode: false }
       const upc = Math.max(1, p.unitsPerCarton)
       const pcsPerBox = p.pcsPerBox > 0 ? p.pcsPerBox : 0
       const ratePc = p.tradePrice / upc
@@ -355,7 +355,7 @@ export function OrderNewView() {
       discount += disc
       gstTotal += gstAmt
       toTotal += tradeOffer
-      return { name: p.name, qtyPcs: l.qtyPcs, freeQty, discount: disc, total: lineTotal, gross, stack: stackAgg, ratePc, upc, pcsPerBox, tradeOffer, gstRate, gstAmt, modeA, retail: retailGst != null }
+      return { name: p.name, qtyPcs: l.qtyPcs, freeQty, discount: disc, total: lineTotal, gross, stack: stackAgg, ratePc, upc, pcsPerBox, tradeOffer, gstRate, gstAmt, modeA, retail: retailGst != null, retailMode: p.company?.taxMode === 'RETAIL_GST' }
     })
     return { subtotal, discount, gstTotal: Math.round(gstTotal * 100) / 100, toTotal: Math.round(toTotal * 100) / 100, rows }
   }, [lines, products, schemes, outlet])
@@ -425,6 +425,12 @@ export function OrderNewView() {
   // Task 109: SAARI lines retail (Cadbury) hon to GST label 'Retail Basis' ka (ladder default jaisa).
   const previewModeA = computed.rows.length > 0 && computed.rows.every((r) => r.modeA)
   const previewRetail = computed.rows.length > 0 && computed.rows.every((r) => r.retail)
+  // Task 110: Retail GST fallback visibility — company RETAIL_GST ho magar product par
+  // Consumer Price na ho to wo line SILENTLY net-base GST par fall back hoti hai (purana
+  // system jaisa lagta hai). Ye count booking par visible warning deta hai — user ko
+  // pata ho ke numbers retail-basis se alag kyun hain aur kya set karna hai.
+  const retailActive = selectedCompany?.taxMode === 'RETAIL_GST'
+  const retailFallbackCount = computed.rows.filter((r) => r.retailMode && !r.retail).length
 
   function deleteDiscount() {
     setDiscType('NONE')
@@ -588,13 +594,13 @@ export function OrderNewView() {
                 </SelectContent>
               </Select>
               {selectedCompany?.taxMode === 'INVOICE_DISCOUNT' ? (
-                <p className="text-[11px] leading-snug text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">⚡ <b>Invoice Discount mode</b> — is bill par Trade Offer pehle minus hoga, GST baad mein (Noms/SalesFlo style — GST kam aati hai)</p>
+                <p className="text-[11px] leading-snug text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">⚡ <b>Invoice Discount mode</b> — Trade Offer is deducted first on this bill, GST is applied on the reduced net (Noms/SalesFlo style — lower GST)</p>
               ) : selectedCompany?.taxMode === 'RETAIL_GST' ? (
-                <p className="text-[11px] leading-snug text-violet-800 bg-violet-50 border border-violet-200 rounded-md px-2 py-1">⚡ <b>Retail GST mode (Cadbury)</b> — GST is bill par RETAIL price se lagegi (Consumer Price × qty × 18/118), Pass On/Trade Offer ka GST par asar nahi — company invoice sheet jaisa</p>
+                <p className="text-[11px] leading-snug text-violet-800 bg-violet-50 border border-violet-200 rounded-md px-2 py-1">⚡ <b>Retail GST mode (Cadbury)</b> — GST is calculated on the retail price (Consumer Price × qty × 18/118); Pass On / Trade Offer do not affect GST — exactly like the company invoice sheet</p>
               ) : selectedCompany ? (
-                <p className="text-[11px] text-slate-500">Claim/Rebate mode — GST pehle net par lagti hai, Trade Offer baad mein minus (default mechanism)</p>
+                <p className="text-[11px] text-slate-500">Claim/Rebate mode — GST applies on net first, Trade Offer is deducted afterwards (default mechanism)</p>
               ) : (
-                <p className="text-[11px] text-slate-500">Pehle company select karein — <b>usi ke order bookers</b> aur <b>usi ke products</b> list hongi</p>
+                <p className="text-[11px] text-slate-500">Select a company first — <b>its order bookers</b> and <b>its products</b> will load here</p>
               )}
             </div>
             <div className="grid gap-1.5">
@@ -774,9 +780,9 @@ export function OrderNewView() {
                 {/* Task 26-b: Mode A line par TO chip GST se PEHLE (Noms ladder — print jaisa) */}
                 {r.modeA && r.tradeOffer > 0 && <span className="text-violet-600 font-semibold whitespace-nowrap">Less TO − {fmtPKR(r.tradeOffer)}</span>}
                 {(mr?.gstAmt ?? r.gstAmt) > 0 ? (
-                  <span className="text-blue-600 font-medium whitespace-nowrap">GST {r.gstRate}% + {fmtPKR(mr?.gstAmt ?? r.gstAmt)}</span>
+                  <span className="text-blue-600 font-medium whitespace-nowrap">GST{r.retail ? ' (retail)' : ''} {r.gstRate}% + {fmtPKR(mr?.gstAmt ?? r.gstAmt)}</span>
                 ) : (
-                  <span className="text-slate-400 whitespace-nowrap">GST nahi lagta</span>
+                  <span className="text-slate-400 whitespace-nowrap">No GST applies</span>
                 )}
                 {!r.modeA && r.tradeOffer > 0 && <span className="text-violet-600 font-semibold whitespace-nowrap">TO − {fmtPKR(r.tradeOffer)}</span>}
                 <span className="text-slate-500 ml-auto whitespace-nowrap">Line payable: <b className="text-slate-700">{fmtPKR(Math.max(0, Math.round(((mr?.total ?? r.total) - r.tradeOffer + (mr?.gstAmt ?? r.gstAmt)) * 100) / 100))}</b></span>
@@ -841,6 +847,12 @@ export function OrderNewView() {
         {/* bill summary — poora ladder (print jaisa) */}
         <Card className="border-slate-200"><CardContent className="p-4 space-y-1 text-sm">
           <p className="font-semibold text-slate-800 mb-1">Bill Summary</p>
+          {retailActive && retailFallbackCount > 0 && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] leading-snug text-amber-900">
+              <b>Consumer Price missing on {retailFallbackCount} line{retailFallbackCount !== 1 ? 's' : ''}.</b>{' '}
+              Retail GST (Cadbury) mode is ON, but those lines are falling back to net-price GST. Set the Consumer (retail) Price on the Products page for the exact retail-basis GST.
+            </div>
+          )}
           <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>{fmtPKR(computed.subtotal)}</span></div>
           {schemePromos.map((p) => (
             <div key={p.id} className="flex justify-between text-emerald-600 font-medium">
@@ -864,7 +876,10 @@ export function OrderNewView() {
             <div className="flex justify-between font-bold text-emerald-700 border-t border-slate-200 pt-1"><span>Total Payable</span><span>{fmtPKR(grandPayable)}</span></div>
           )}
           {previewModeA && computed.toTotal > 0 && (
-            <p className="text-[11px] text-amber-600 font-medium">Invoice Discount mode active — is company ka Trade Offer GST se PEHLE kata gaya (Noms/SalesFlo style)</p>
+            <p className="text-[11px] text-amber-600 font-medium">Invoice Discount mode active — this company&apos;s Trade Offer is deducted before GST (Noms/SalesFlo style)</p>
+          )}
+          {retailActive && computed.rows.length > 0 && (
+            <p className="text-[11px] text-violet-600 font-medium">Retail GST (Cadbury) mode active — GST is calculated on each product&apos;s Consumer (retail) price and is not affected by discounts or Trade Offer</p>
           )}
         </CardContent></Card>
         </>
