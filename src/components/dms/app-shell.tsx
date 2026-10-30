@@ -30,7 +30,7 @@ import {
   LayoutDashboard, ShoppingCart, Warehouse, Package, Store, Network, Route,
   Users, Gift, Undo2, BarChart3, Package2, LogOut, Building2, PackageX,
   ClipboardList, FileStack, Wallet, BookText, BookLock, HandCoins, Landmark,
-  Database, Map as MapIcon, TrendingUp, Receipt, Target, Boxes, Coins,
+  Database, Map as MapIcon, TrendingUp, Receipt, ReceiptText, Target, Boxes, Coins,
   Settings as SettingsIcon, ChevronRight, ChevronLeft, Search, Calendar, Menu, PanelLeftClose, PanelLeftOpen, X,
 } from 'lucide-react'
 
@@ -49,6 +49,8 @@ const NAV: { key: string; label: string; icon: typeof LayoutDashboard; roles: st
   { key: 'unprocessed', label: 'Unprocessed Bills', icon: ClipboardList, roles: ['DISTRIBUTOR'], group: 'Sales', desc: 'Pending bills process karein' },
   { key: 'summaries', label: 'Delivery Summaries', icon: FileStack, roles: ['DISTRIBUTOR'], group: 'Sales', desc: 'Van delivery status' },
   { key: 'settlement', label: 'Settlement', icon: Wallet, roles: ['DISTRIBUTOR'], group: 'Sales', desc: 'Cash & udhaar hisaab' },
+  // Task 33 — posted (settled) summaries ki history apna page — settlement page par sirf unsettled kaam
+  { key: 'posted-summaries', label: 'Posted Summaries', icon: ReceiptText, roles: ['DISTRIBUTOR'], group: 'Sales', desc: 'Settled summaries history — cash, udhaar, returns' },
   // Finance — khata / wapasi / returns
   { key: 'ledgers', label: 'Shop Ledgers', icon: BookText, roles: ['DISTRIBUTOR'], group: 'Finance', desc: 'Har shop ka khata' },
   { key: 'recovery', label: 'Recovery (Wasooli)', icon: HandCoins, roles: ['DISTRIBUTOR'], group: 'Finance', desc: 'Wasooli & pending amounts' },

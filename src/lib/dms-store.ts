@@ -12,6 +12,7 @@ export type ViewKey =
   | 'unprocessed'
   | 'summaries'
   | 'settlement'
+  | 'posted-summaries'
   | 'ledgers'
   | 'recovery'
   | 'inventory'

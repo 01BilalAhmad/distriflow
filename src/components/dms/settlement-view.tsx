@@ -12,13 +12,14 @@ import { Separator } from '@/components/ui/separator'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import Link from 'next/link'
 import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR, fmtDate, STATUS_STYLES, statusLabel } from '@/lib/dms-api'
 import { returnTypeLabel } from '@/lib/dms-return-core'
 import type { SummaryDTO, SummaryDetailDTO, SummaryOrderDTO } from '@/lib/dms-types'
 import { UnitQtyInputs, fmtQty } from '@/components/dms/unit-qty'
 import { PrintFrame, CblSettlementDoc } from '@/components/dms/cbl-print'
-import { Wallet, Loader2, CheckCircle2, History, PackageOpen, Undo2, ReceiptText, X, RotateCcw } from 'lucide-react'
+import { Wallet, Loader2, CheckCircle2, PackageOpen, Undo2, ReceiptText, X, RotateCcw } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
 interface SettleRow { cash: string }
@@ -227,8 +228,9 @@ function ReturnDialog({ order, initial, onConfirm, onClose, onClear }: {
  * Late Stock Return — SETTLED summary ke bill par return (ghalti se settlement ke waqt
  * return reh gaya ho). SaleReturn + stock wapas + shop ledger CREDIT => shop ka balance
  * cum ho jata hai. Cap: per product billed - pehle se returned (settlement + late).
+ * Task 33: Posted Summaries page bhi isi dialog ko reuse karta hai (export).
  */
-function LateReturnDialog({ summaryId, onClose, onDone }: {
+export function LateReturnDialog({ summaryId, onClose, onDone }: {
   summaryId: string
   onClose: () => void
   onDone: (summaryId: string) => void
@@ -544,10 +546,9 @@ export function SettlementView() {
   const [confirmOpen, setConfirmOpen] = useState(false)
   // Task 32: detail fetch ka loading state — pehle placeholder dikhta tha jab tak fetch chal raha tha
   const [detailLoading, setDetailLoading] = useState(false)
-  // Post-settlement sheet preview — settle hote hi khulti hai + history se bhi (RET numbers fresh detail se aate hain)
+  // Post-settlement sheet preview — settle hote hi khulti hai (RET numbers fresh detail se aate hain)
+  // Task 33: settled history ka Late Return + Sheet print ab Posted Summaries page (/posted-summaries) par hai
   const [postPrint, setPostPrint] = useState<SummaryDetailDTO | null>(null)
-  // Late stock return — SETTLED summary ke bill par (ghalti se return reh gaya ho)
-  const [lateRetId, setLateRetId] = useState<string | null>(null)
 
   async function load(keepActive = false) {
     if (!user) return
@@ -601,7 +602,6 @@ export function SettlementView() {
   }, [focusSummaryId])
 
   const unsettled = summaries.filter((s) => s.status === 'UNSETTLED')
-  const settled = summaries.filter((s) => s.status === 'SETTLED')
 
   const rows = useMemo(() => {
     if (!detail) return []
@@ -746,37 +746,45 @@ export function SettlementView() {
   const retDlgRow = rows.find((r) => r.order.id === retDlgOrder)
   const retDlgDraft = retDlgOrder ? retInputs[retDlgOrder] : undefined
 
-  // History se settlement sheet print — koi editor state disturb nahi hota
-  async function printSettled(id: string) {
-    try {
-      const r = await api<{ summary: SummaryDetailDTO }>(`/api/summaries/${id}`)
-      setPostPrint(r.summary)
-    } catch (e) {
-      toast({ title: 'Error', description: e instanceof Error ? e.message : 'Failed', variant: 'destructive' })
-    }
-  }
-
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
-      <div>
-        <h2 className="text-xl font-bold text-slate-900">Delivery Settlement</h2>
-        <p className="text-sm text-slate-500">Sham ko van wapis — per shop cash adjust karein, wapas items return karein, baqi udhaar ledger mein chala jayega</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-xl font-bold text-slate-900">Delivery Settlement</h2>
+          <p className="text-sm text-slate-500">Sham ko van wapis — per shop cash adjust karein, wapas items return karein, baqi udhaar ledger mein chala jayega</p>
+        </div>
+        {/* Task 33: settled history apne page par — settlement page par sirf unsettled ka kaam */}
+        <Button asChild variant="outline" className="border-violet-200 text-violet-700 hover:bg-violet-50 shrink-0">
+          <Link href="/posted-summaries"><ReceiptText className="h-4 w-4 mr-1.5" />Posted Summaries</Link>
+        </Button>
       </div>
 
       <div className="grid lg:grid-cols-[320px_1fr] gap-4 flex-1 min-h-0">
         {/* RIGHT wala form mobile par PEHLE (order-1) — Task 32: pehle lambi list scroll
             kar ke form tak jana parta tha, ab form upar aur list neeche */}
-        {/* LEFT: summaries to post/settle (desktop left / mobile neeche) */}
+        {/* LEFT: summaries to post/settle (desktop left / mobile neeche)
+            Task 33: Settled History card HATA — ab Posted Summaries page (/posted-summaries)
+            par hai, is page par sirf unsettled ka kaam => list ko poori jagah milti hai */}
         <div className="space-y-4 order-2 lg:order-1">
           <Card className="border-slate-200 shadow-sm">
             <CardContent className="p-3">
-              <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Unsettled Summaries ({unsettled.length})</p>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Unsettled Summaries ({unsettled.length})</p>
+                <Link href="/posted-summaries" className="text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 hover:underline whitespace-nowrap">
+                  Posted History →
+                </Link>
+              </div>
               {loading ? (
                 <div className="space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-14" />)}</div>
               ) : unsettled.length === 0 ? (
-                <p className="text-sm text-slate-400 py-4 text-center">Sab settled ✓</p>
+                <div className="py-6 text-center">
+                  <p className="text-sm text-slate-400">Sab settled ✓ — koi delivery pending nahi</p>
+                  <Link href="/posted-summaries" className="mt-2 inline-block text-xs font-semibold text-emerald-700 hover:underline">
+                    Posted summaries ki history dekhein →
+                  </Link>
+                </div>
               ) : (
-                <div className="space-y-2 max-h-[calc(100vh-430px)] min-h-[140px] overflow-y-auto">
+                <div className="space-y-2 max-h-[50vh] lg:max-h-[calc(100vh-250px)] min-h-[140px] overflow-y-auto">
                   {unsettled.map((s) => (
                     <button key={s.id} onClick={() => loadDetail(s.id)}
                       className={`w-full text-left rounded-lg border p-2.5 transition-colors ${activeId === s.id ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/40'}`}>
@@ -787,48 +795,6 @@ export function SettlementView() {
                       <p className="text-xs text-slate-600 mt-0.5">{s.salesmanName} • {s.billsCount} bills • <span className="font-semibold">Payable {fmtPKR(s.payable ?? s.subtotal)}</span></p>
                       <p className="text-[10px] text-slate-400">Delivery: {fmtDate(s.deliveryDate)}</p>
                     </button>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="border-slate-200 shadow-sm">
-            <CardContent className="p-3">
-              <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-1.5"><History className="h-3.5 w-3.5" /> Settled History</p>
-              {settled.length === 0 ? (
-                <p className="text-sm text-slate-400 py-3 text-center">Abhi koi settlement nahi hui</p>
-              ) : (
-                <div className="space-y-2 max-h-[38vh] overflow-y-auto">
-                  {settled.map((s) => (
-                    <div key={s.id} className="rounded-lg border border-slate-200 p-2.5">
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-slate-700 text-sm">{s.summaryNo}</span>
-                        <div className="flex items-center gap-1">
-                          <Badge variant="outline" className={`${STATUS_STYLES.SETTLED} text-[9px]`}>Settled</Badge>
-                          <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-slate-400 hover:text-orange-600" title="Late Stock Return — ghalti se return reh gaya tha? Ab items wapas karein, shop ka balance cum ho jayega"
-                            onClick={() => setLateRetId(s.id)}>
-                            <PackageOpen className="h-4 w-4" />
-                          </Button>
-                          <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-slate-400 hover:text-violet-700" title="Settlement Sheet print karein — cash + return detail"
-                            onClick={() => printSettled(s.id)}>
-                            <ReceiptText className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                      <p className="text-xs text-slate-600 mt-0.5">{s.salesmanName} • {s.billsCount} bills • <span className="font-semibold">Payable {fmtPKR(s.payable ?? s.subtotal)}</span></p>
-                      <p className="text-[11px] mt-1">
-                        <span className="text-emerald-700 font-semibold">Cash {fmtPKR(s.settledCash)}</span>
-                        {' • '}
-                        {/* negative credit = return zyada hua (late return) — "Udhaar -X" reader ko
-                            confuse karta hai, sheet ki tarah "Shop Ko Wapasi" positive dikhate hain */}
-                        {s.settledCredit < 0
-                          ? <span className="text-orange-600 font-semibold">Shop Ko Wapasi {fmtPKR(Math.abs(s.settledCredit))}</span>
-                          : <span className="text-red-600 font-semibold">Udhaar {fmtPKR(s.settledCredit)}</span>}
-                        {(s.settledReturns ?? 0) > 0 && <> • <span className="text-orange-600 font-semibold">Return {fmtPKR(s.settledReturns)}</span></>}
-                      </p>
-                      <p className="text-[10px] text-slate-400">{s.settledByName ? `By ${s.settledByName}` : ''} {s.settledAt ? `• ${fmtDate(s.settledAt)}` : ''}</p>
-                    </div>
                   ))}
                 </div>
               )}
@@ -1034,24 +1000,9 @@ export function SettlementView() {
         </DialogContent>
       </Dialog>
 
-      {/* Late stock return — settled summary ke bill par */}
-      {lateRetId && (
-        <LateReturnDialog
-          summaryId={lateRetId}
-          onClose={() => setLateRetId(null)}
-          onDone={async (id) => {
-            setLateRetId(null)
-            await load(true)
-            // updated settlement sheet preview — late return ka asar foran nazar aaye
-            try {
-              const fr = await api<{ summary: SummaryDetailDTO }>(`/api/summaries/${id}`)
-              setPostPrint(fr.summary)
-            } catch { /* print optional */ }
-          }}
-        />
-      )}
+      {/* Task 33: Late Stock Return + settled history ab Posted Summaries page (/posted-summaries) par */}
 
-      {/* Settlement Sheet preview — post karte hi khulti hai, history button se bhi */}
+      {/* Settlement Sheet preview — settle karte hi khulti hai (fresh fetch: RET numbers + posted amounts) */}
       {postPrint && (
         <PrintFrame title={`Settlement Sheet ${postPrint.summaryNo}`} pdfName={`settlement-${postPrint.summaryNo}`} onClose={() => setPostPrint(null)}>
           <CblSettlementDoc detail={postPrint} />
