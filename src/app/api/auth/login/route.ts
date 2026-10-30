@@ -145,7 +145,14 @@ export async function POST(req: Request) {
     }
 
     // Task 65: signed httpOnly session cookie — middleware isi se page routes protect karta hai
+    // Task 104 (Orderbooker App): mobile client (x-df-client: mobile) ko token JSON mein bhi
+    // milta hai — React Native Set-Cookie header reliably nahi parhta (iOS strips it).
+    // Browsers ye header kabhi nahi bhejte, is liye web response UNCHANGED rehta hai
+    // (token sirf mobile app ke SecureStore ke liye, HTTPS par hi).
+    const sessionToken = await makeAuthToken(user.id)
+    const isMobileClient = req.headers.get('x-df-client') === 'mobile'
     const res = NextResponse.json({
+      ...(isMobileClient ? { mobileToken: sessionToken } : {}),
       user: {
         id: user.id,
         name: user.name,
@@ -168,7 +175,7 @@ export async function POST(req: Request) {
           : null,
       },
     })
-    res.cookies.set(AUTH_COOKIE, await makeAuthToken(user.id), authCookieOptions())
+    res.cookies.set(AUTH_COOKIE, sessionToken, authCookieOptions())
     // Task 35: LOGIN audit — kaun, kab, kis role se (profile tenant ke sath)
     await audit(
       { id: user.id, name: user.name, role: user.role, tenantId: user.profile?.id ?? null },

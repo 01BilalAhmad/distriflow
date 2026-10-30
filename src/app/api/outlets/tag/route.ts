@@ -9,9 +9,11 @@ import { Prisma } from '@prisma/client'
 /**
  * Task 85 — OFFLINE-FIRST NEW SHOP TAGGING (booker app / web booker portal)
  * POST /api/outlets/tag
- * Body: { clientRef, name, address, city, ownerName, ownerPhone, cnic, ntn, channel, lat, lng }
+ * Body: { clientRef, name, address, city, ownerName, ownerPhone?, cnic, ntn, channel, lat, lng }
  * (userId ab IGNORE — identity signed cookie se aati hai)
  * - SALESMAN only — booker apni nayi shop tag karta hai (mobile offline app ya web portal se)
+ * - Task 104: ownerPhone OPTIONAL — user requirement: Name/Address/Owner lazmi,
+ *   Phone/CNIC/NTN optional (schema phone String? nullable hai)
  * - GPS LAZMI — location ke bagair shop tag nahi hogi
  * - Shop status = PENDING — admin approve kare tab Outlets/route/orders mein aayegi
  * - Idempotent: same clientRef dobara aaye to wahi outlet wapas (duplicate nahi banti)
@@ -36,7 +38,6 @@ export async function POST(req: Request) {
     if (!name || !String(name).trim()) return jsonError('Shop ka naam lazmi hai')
     if (!address || !String(address).trim()) return jsonError('Shop ka address lazmi hai (owner ke sath GPS tag)')
     if (!ownerName || !String(ownerName).trim()) return jsonError('Owner ka naam lazmi hai')
-    if (!ownerPhone || !String(ownerPhone).trim()) return jsonError('Owner ka phone number lazmi hai')
 
     const tenantId = await getTenantIdForSalesman(user.id)
     if (!tenantId) return jsonError('Aap kisi distributor se attached nahi hain', 403)
@@ -68,7 +69,7 @@ export async function POST(req: Request) {
       code,
       name: String(name).trim(),
       ownerName: String(ownerName).trim(),
-      phone: String(ownerPhone).trim(),
+      phone: String(ownerPhone ?? '').trim() || null,
       address: String(address).trim(),
       city: (city ?? '').trim() || 'Lahore',
       channel: resolvedChannel,
