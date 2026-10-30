@@ -43,10 +43,10 @@ function expired(u: GateUser): boolean {
 /** Distributor account gate — null = OK, warna error message */
 function distributorGate(u: GateUser): string | null {
   if (!u.isActive) {
-    return 'Aap ka distributor account INACTIVE hai — subscription renew ke liye Mega Admin se rabta karein'
+    return 'Your distributor account is INACTIVE — contact the Mega Admin to renew the subscription'
   }
   if (expired(u)) {
-    return 'Aap ki monthly subscription khatam ho gayi hai — renew ke liye Mega Admin se rabta karein'
+    return 'Your monthly subscription has expired — contact the Mega Admin to renew'
   }
   return null
 }
@@ -58,13 +58,13 @@ export async function POST(req: Request) {
     const rl = rateLimit(`login:${ip}`, { windowMs: 5 * 60 * 1000, max: 10 })
     if (!rl.ok) {
       return Response.json(
-        { error: `Bohat zyada login attempts — ${rl.retryAfterSec} second baad koshish karein` },
+        { error: `Too many login attempts — try again in ${rl.retryAfterSec} seconds` },
         { status: 429, headers: { 'Retry-After': String(rl.retryAfterSec) } },
       )
     }
 
     const { email, password } = await req.json()
-    if (!email || !password) return jsonError('Email aur password required hai')
+    if (!email || !password) return jsonError('Email and password are required')
 
     const user = await db.user.findUnique({
       where: { email: email.toLowerCase().trim() },
@@ -74,13 +74,13 @@ export async function POST(req: Request) {
       await bcrypt.compare(String(password), DUMMY_HASH) // timing equalizer
       // Task 35: security trail — kaunsa email login try kar raha tha (password KABHI log nahi)
       await audit(null, 'LOGIN_FAILED', { req, entity: 'auth', detail: `Login fail — email registered nahi: ${String(email).toLowerCase().trim().slice(0, 120)}` })
-      return jsonError('Invalid credentials - ye email registered nahi hai', 401)
+      return jsonError('Invalid credentials — this email is not registered', 401)
     }
 
     // ---- Account lock check (DB-backed — saare serverless instances par effective) ----
     if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
       const mins = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60000)
-      return jsonError(`Account lock hai — ${mins} minute baad koshish karein`, 429)
+      return jsonError(`Account is locked — try again in ${mins} minute${mins === 1 ? '' : 's'}`, 429)
     }
 
     // ---- Password verify: bcrypt hash YA legacy plaintext (lazy upgrade) ----
@@ -105,10 +105,10 @@ export async function POST(req: Request) {
       await audit(
         { id: user.id, name: user.name, role: user.role },
         'LOGIN_FAILED',
-        { req, entity: 'auth', detail: `Galat password${lock ? ' — account lock ho gaya' : ''} (attempt ${failed}/${MAX_FAILED_ATTEMPTS})` },
+        { req, entity: 'auth', detail: `Wrong password${lock ? ' — account is now locked' : ''} (attempt ${failed}/${MAX_FAILED_ATTEMPTS})` },
       )
       if (lock) {
-        return jsonError(`Bohat galat attempts — account ${LOCK_MINUTES} minute ke liye lock ho gaya`, 429)
+        return jsonError(`Too many failed attempts — account is locked for ${LOCK_MINUTES} minutes`, 429)
       }
       return jsonError('Invalid credentials', 401)
     }

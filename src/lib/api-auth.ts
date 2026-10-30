@@ -62,7 +62,7 @@ export async function requireUser(req: Request): Promise<AuthResult> {
         await audit(null, 'AUTH_REJECTED', { req, entity: url.pathname, detail: 'Invalid/expired session token' })
       } catch { /* audit fire-safe */ }
     }
-    return { error: jsonError('Login required — session invalid hai', 401) }
+    return { error: jsonError('Login required — your session is invalid or expired', 401) }
   }
 
   const user = await db.user.findUnique({
@@ -70,10 +70,10 @@ export async function requireUser(req: Request): Promise<AuthResult> {
     include: { profile: true },
   })
   if (!user || !user.isActive) {
-    return { error: jsonError('Account inactive ya nahi mila — dobara login karein', 401) }
+    return { error: jsonError('Account is inactive or not found — please sign in again', 401) }
   }
   if (user.role === 'DISTRIBUTOR' && user.subscriptionExpiry && user.subscriptionExpiry.getTime() < Date.now()) {
-    return { error: jsonError('Subscription khatam — renew ke liye Mega Admin se rabta karein', 403) }
+    return { error: jsonError('Subscription expired — contact the Mega Admin to renew', 403) }
   }
 
   // Task 35 — GENERIC auto-audit: HAR mutation (POST/PATCH/PUT/DELETE) yahan se log
@@ -114,7 +114,7 @@ export function salesmanGuard(
 ): { value: string | null; error?: never } | { value?: never; error: Response } {
   if (user.role === 'SALESMAN') {
     if (requested && requested !== user.id) {
-      return { error: jsonError('Sirf apni data dekh sakte hain', 403) }
+      return { error: jsonError('You can only view your own data', 403) }
     }
     return { value: user.id }
   }
@@ -128,7 +128,7 @@ export function salesmanGuard(
  */
 export async function tenantMismatch(user: AuthedUser, resourceDistributorId: string): Promise<Response | null> {
   if (user.role === 'MEGA_ADMIN') {
-    return jsonError('Mega Admin sirf distributor accounts manage karta hai — business data locked hai', 403)
+    return jsonError('Mega Admin manages distributor accounts only — business data is locked', 403)
   }
   let tenantId: string | null = user.profile?.id ?? null
   if (!tenantId && user.parentId) {
@@ -136,7 +136,7 @@ export async function tenantMismatch(user: AuthedUser, resourceDistributorId: st
     tenantId = owner?.profile?.id ?? null
   }
   if (!tenantId || tenantId !== resourceDistributorId) {
-    return jsonError('Yeh record aap ke scope mein nahi hai', 403)
+    return jsonError('This record is outside your access scope', 403)
   }
   return null
 }
@@ -147,10 +147,10 @@ export async function tenantMismatch(user: AuthedUser, resourceDistributorId: st
  */
 export async function outletScopeError(user: AuthedUser, outlet: { distributorId: string; salesmanId: string | null }): Promise<Response | null> {
   if (user.role === 'MEGA_ADMIN') {
-    return jsonError('Mega Admin sirf distributor accounts manage karta hai — business data locked hai', 403)
+    return jsonError('Mega Admin manages distributor accounts only — business data is locked', 403)
   }
   if (user.role === 'SALESMAN') {
-    if (outlet.salesmanId !== user.id) return jsonError('Yeh shop aap ki route mein nahi hai', 403)
+    if (outlet.salesmanId !== user.id) return jsonError('This shop is not on your route', 403)
     return null
   }
   return tenantMismatch(user, outlet.distributorId)

@@ -16,10 +16,10 @@ export async function GET(req: Request) {
     const auth = await requireUser(req)
     if ('error' in auth) return auth.error
     const user = auth.user
-    if (user.role !== 'SALESMAN') return jsonError('Sync down sirf order booker ke liye hai', 403)
+    if (user.role !== 'SALESMAN') return jsonError('Sync down is available for order bookers only', 403)
 
     const tenantId = await getTenantIdForSalesman(user.id)
-    if (!tenantId) return jsonError('Aap kisi distributor se attached nahi hain', 403)
+    if (!tenantId) return jsonError('You are not attached to any distributor', 403)
 
     // --- Shops (sirf APPROVED — PENDING shops alag section mein) + grouped ledger balances ---
     // Task 95 perf: pehle har shop ki POORI ledger history load hoti thi (JS agg) — ab EK groupBy

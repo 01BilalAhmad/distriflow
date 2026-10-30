@@ -49,19 +49,19 @@ export async function POST(req: Request) {
     // Identity SIRF signed cookie se (body userId IGNORE — auth bypass tha)
     const m = req.headers.get('cookie')?.match(new RegExp(`${AUTH_COOKIE}=([^;]+)`))
     const userId = await verifyAuthToken(m?.[1] ?? null)
-    if (!userId) return NextResponse.json({ error: 'Session nahi mili' }, { status: 401 })
+    if (!userId) return NextResponse.json({ error: 'Session not found' }, { status: 401 })
 
     const user = await db.user.findUnique({
       where: { id: userId },
       include: { profile: true, parent: { select: { name: true } } },
     })
     if (!user || !user.isActive) {
-      return NextResponse.json({ error: 'User inactive ya nahi mila' }, { status: 401 })
+      return NextResponse.json({ error: 'User is inactive or not found' }, { status: 401 })
     }
 
     // subscription gate mirror — inactive/expired distributor ka session restore na ho
     if (user.role === 'DISTRIBUTOR' && user.subscriptionExpiry && user.subscriptionExpiry.getTime() < Date.now()) {
-      return NextResponse.json({ error: 'Subscription khatam' }, { status: 401 })
+      return NextResponse.json({ error: 'Subscription expired' }, { status: 401 })
     }
 
     const res = NextResponse.json({ user: userDTO(user) })

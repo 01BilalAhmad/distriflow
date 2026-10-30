@@ -152,7 +152,7 @@ export async function POST(req: Request) {
       // Task 85: offline sync idempotency — mobile/booker app ka temp id
       clientRef?: string
     }
-    if (!outletId || !items || items.length === 0) return jsonError('Outlet aur kam az kam 1 item required hai')
+    if (!outletId || !items || items.length === 0) return jsonError('Outlet and at least 1 item are required')
 
     // Task 85: IDEMPOTENT SYNC — same clientRef dobara aaye to wahi order wapas (duplicate bill nahi banta).
     // Offline app crash/retry ke baad double-upload safe.
@@ -186,7 +186,7 @@ export async function POST(req: Request) {
       const latN = Number(body.lat)
       const lngN = Number(body.lng)
       if (!Number.isFinite(latN) || !Number.isFinite(lngN) || Math.abs(latN) > 90 || Math.abs(lngN) > 180) {
-        return jsonError('GPS capture lazmi hai — location ke bagair order create nahi ho sakta. Location ON kar ke dobara koshish karein')
+        return jsonError('GPS capture is required — an order cannot be created without location. Turn location ON and try again')
       }
       orderLat = latN
       orderLng = lngN
@@ -201,12 +201,12 @@ export async function POST(req: Request) {
         if (!inRoute) {
           // Out-of-route shop — sirf tab jab admin ne Unplanned ON rakha ho
           if (!pjp.unplannedEnabled) {
-            return jsonError('Unplanned orders admin ne OFF kar diye hain — ye shop aaj ki route mein nahi hai', 403)
+            return jsonError('The admin has disabled unplanned orders — this shop is not on the route today', 403)
           }
           isUnplanned = true
         } else if (dayCode === 'FRI' && pjp.fridayOff) {
           // Jumma OFF — planned route bilkul band, sirf unplanned allowed
-          return jsonError('Aaj Jumma OFF hai — planned shops par order nahi ho sakta, sirf unplanned shops se order bana sakte hain', 403)
+          return jsonError('Friday booking is OFF — orders on planned shops are not allowed today; only unplanned shops can be booked', 403)
         }
       }
     }
@@ -228,14 +228,14 @@ export async function POST(req: Request) {
     // Task 55: outlet filer status — filerScope wali schemes sirf matching shops par
     const { lines: itemsData, subtotal, schemeDiscount, tradeOfferTotal } = computeOrderLines(calcProducts, schemes, items, outlet.channel, outlet.filerStatus)
 
-    if (itemsData.length === 0) return jsonError('Koi valid item nahi mila')
+    if (itemsData.length === 0) return jsonError('No valid items found')
 
     // ---- Task 45: Trade Offer validation — har line ka TO uski net value se zyada nahi ----
     // (warna line payable negative ho jati — typo pakarne ke liye clear error)
     const pName = new Map(products.map((p) => [p.id, p.name]))
     for (const l of itemsData) {
       if (l.tradeOfferAmt > l.lineTotal) {
-        return jsonError(`Trade offer galat hai — ${pName.get(l.productId) ?? 'Item'}: Rs ${l.tradeOfferAmt} line total Rs ${l.lineTotal} se zyada nahi ho sakta`)
+        return jsonError(`Invalid trade offer — ${pName.get(l.productId) ?? 'Item'}: Rs ${l.tradeOfferAmt} cannot exceed line total Rs ${l.lineTotal}`)
       }
     }
 
@@ -260,8 +260,8 @@ export async function POST(req: Request) {
     let manualDiscValue: number | null = null
     if (body.discount && (body.discount.type === 'PERCENT' || body.discount.type === 'FLAT')) {
       const v = Number(body.discount.value)
-      if (!Number.isFinite(v) || v <= 0) return jsonError('Discount value 0 se bara hona chahiye')
-      if (body.discount.type === 'PERCENT' && v > 100) return jsonError('Percent discount 100% se zyada nahi ho sakta')
+      if (!Number.isFinite(v) || v <= 0) return jsonError('Discount must be greater than 0')
+      if (body.discount.type === 'PERCENT' && v > 100) return jsonError('Percent discount cannot exceed 100%')
       const r = recalcManualDiscount(body.discount.type, v, subtotal, schemeDiscount)
       manualDiscount = r.manualDiscount
       manualDiscType = r.manualDiscType as 'PERCENT' | 'FLAT' | null
@@ -276,7 +276,7 @@ export async function POST(req: Request) {
     const gstTotal = applyManualMerge(itemsData, manualDiscount)
     for (const l of itemsData) {
       if (l.tradeOfferAmt > l.lineTotal) {
-        return jsonError(`Trade offer galat hai — ${pName.get(l.productId) ?? 'Item'}: Rs ${l.tradeOfferAmt} line total Rs ${l.lineTotal} se zyada nahi ho sakta (discount ke baad)`)
+        return jsonError(`Invalid trade offer — ${pName.get(l.productId) ?? 'Item'}: Rs ${l.tradeOfferAmt} cannot exceed line total Rs ${l.lineTotal} (after discount)`)
       }
     }
 

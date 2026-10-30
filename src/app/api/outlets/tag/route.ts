@@ -26,7 +26,7 @@ export async function POST(req: Request) {
     const user = auth.user
     const mb = megaBlocked(user.role)
     if (mb) return mb
-    if (user.role !== 'SALESMAN') return jsonError('Sirf order booker nayi shop tag kar sakta hai', 403)
+    if (user.role !== 'SALESMAN') return jsonError('Only an order booker can tag a new shop', 403)
 
     const body = await req.json()
     const { clientRef, name, address, city, ownerName, ownerPhone, cnic, ntn, channel, lat, lng } = body as {
@@ -35,18 +35,18 @@ export async function POST(req: Request) {
       ownerName?: string; ownerPhone?: string; cnic?: string; ntn?: string; channel?: string
       lat?: number; lng?: number
     }
-    if (!name || !String(name).trim()) return jsonError('Shop ka naam lazmi hai')
-    if (!address || !String(address).trim()) return jsonError('Shop ka address lazmi hai (owner ke sath GPS tag)')
-    if (!ownerName || !String(ownerName).trim()) return jsonError('Owner ka naam lazmi hai')
+    if (!name || !String(name).trim()) return jsonError('Shop name is required')
+    if (!address || !String(address).trim()) return jsonError('Shop address is required')
+    if (!ownerName || !String(ownerName).trim()) return jsonError('Owner name is required')
 
     const tenantId = await getTenantIdForSalesman(user.id)
-    if (!tenantId) return jsonError('Aap kisi distributor se attached nahi hain', 403)
+    if (!tenantId) return jsonError('You are not attached to any distributor', 403)
 
     // GPS LAZMI — shop jahan tag ki gayi wahan ke coordinates ke bagair entry nahi hogi
     const latN = Number(lat)
     const lngN = Number(lng)
     if (!Number.isFinite(latN) || !Number.isFinite(lngN) || Math.abs(latN) > 90 || Math.abs(lngN) > 180) {
-      return jsonError('GPS capture lazmi hai — location ke bagair nayi shop tag nahi ho sakti. Location ON kar ke dobara koshish karein')
+      return jsonError('GPS capture is required — a new shop cannot be tagged without location. Turn location ON and try again')
     }
 
     // Idempotent sync — same clientRef pehle se server par ho to wahi shop wapas
@@ -98,11 +98,11 @@ export async function POST(req: Request) {
         code4 = padCode4(Math.min((await currentMaxCode4(db)) + 1, CODE4_MAX))
       }
     }
-    if (!outlet) return jsonError('Shop tag failed — code4 range exhaust', 500)
+    if (!outlet) return jsonError('Shop tag failed — code4 range exhausted', 500)
 
     return Response.json({
       outlet: { id: outlet.id, code: outlet.code, name: outlet.name, status: outlet.status },
-      message: 'Shop tag ho gayi — admin approval ke baad route aur orders mein nazar aayegi',
+      message: 'Shop tagged successfully — it will appear in the route and orders after admin approval',
     })
   } catch (e) {
     console.error(e)

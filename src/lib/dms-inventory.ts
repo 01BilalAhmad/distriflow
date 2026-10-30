@@ -77,9 +77,9 @@ export function oversellMessage(
     const name = productNames.get(productId) ?? 'Product'
     const upc = Math.max(1, upcOf(productId))
     const availCtn = Math.max(0, atp.get(productId)?.available ?? 0) / upc
-    return `${name}: available ${availCtn.toFixed(2)} ctn, aap ne ${(qty / upc).toFixed(2)} ctn book kiye`
+    return `${name}: available ${availCtn.toFixed(2)} ctn, you booked ${(qty / upc).toFixed(2)} ctn`
   })
-  if (over.length > 3) parts.push(`+${over.length - 3} aur products`)
+  if (over.length > 3) parts.push(`+${over.length - 3} more products`)
   return parts.join(' | ')
 }
 

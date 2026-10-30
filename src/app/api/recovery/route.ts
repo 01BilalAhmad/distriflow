@@ -186,7 +186,7 @@ export async function GET(req: Request) {
         || (bookerId === 'none'
           ? routeOutlets.some((o) => o.salesmanId === null)
           : bookerStats.some((b) => b.id === bookerId))
-      if (!allowed) return jsonError('Yeh order booker aap ke scope mein nahi hai', 403)
+      if (!allowed) return jsonError('This order booker is outside your scope', 403)
       shops = (selfBucket
         ? routeOutlets // apna poora route — assigned + planned dono
         : routeOutlets.filter((o) => (o.salesmanId ?? null) === bucketId))
@@ -241,15 +241,15 @@ export async function POST(req: Request) {
       date?: string
       entries: Array<{ outletId: string; amount: number; method?: string; reference?: string; note?: string; clientRef?: string }>
     }
-    if (!Array.isArray(entries) || entries.length === 0) return jsonError('Kam az kam ek shop ki entry zaroori hai')
+    if (!Array.isArray(entries) || entries.length === 0) return jsonError('At least one shop entry is required')
 
     const bucketId: string | null = bookerId && bookerId !== 'none' ? bookerId : null
     if (bucketId) {
       const booker = await db.user.findUnique({ where: { id: bucketId } })
-      if (!booker || booker.role !== 'SALESMAN') return jsonError('Order booker valid nahi hai')
+      if (!booker || booker.role !== 'SALESMAN') return jsonError('Invalid order booker')
       // Scope: outlet-level guards (distributorId + bucket consistency) transaction mein hain —
       // yahan sirf salesman self-check (booker khud sirf apni route ki recovery kar sakta hai)
-      if (me.role === 'SALESMAN' && bucketId !== me.id) return jsonError('Booker sirf apni route ki recovery kar sakta hai', 403)
+      if (me.role === 'SALESMAN' && bucketId !== me.id) return jsonError('A booker can only submit recovery for their own route', 403)
     }
 
     // Entries sanitize
@@ -265,8 +265,8 @@ export async function POST(req: Request) {
         clientRef: (e.clientRef ?? '').trim() || null, // Task 85: offline sync idempotency
       }
     })
-    if (clean.some((e) => !e.outletId || !(e.amount > 0))) return jsonError('Amount 0 se bara hona chahiye har entry mein')
-    if (clean.some((e) => e.method !== 'CASH' && !e.reference)) return jsonError('Cheque/Bank ke liye reference number zaroori hai')
+    if (clean.some((e) => !e.outletId || !(e.amount > 0))) return jsonError('Amount must be greater than 0 in every entry')
+    if (clean.some((e) => e.method !== 'CASH' && !e.reference)) return jsonError('A reference number is required for Cheque/Bank payments')
 
     // Task 85: IDEMPOTENT SYNC — clientRef pehle se posted ho to wo entry skip (duplicate wasooli nahi)
     const allRefs = clean.map((c) => c.clientRef).filter((v): v is string => !!v)
@@ -275,7 +275,7 @@ export async function POST(req: Request) {
       : new Set<string>()
     const fresh = clean.filter((c) => !c.clientRef || !existingRefs.has(c.clientRef))
     if (fresh.length === 0) {
-      return Response.json({ posted: [], duplicates: clean.length, message: 'Ye recoveries pehle sync ho chuki hain' })
+      return Response.json({ posted: [], duplicates: clean.length, message: 'These recoveries were already synced' })
     }
 
     const recoveredAt = date ? new Date(date) : new Date()
@@ -419,19 +419,19 @@ export async function PATCH(req: Request) {
     const body = await req.json()
     const { bookerId, allRoutesOpen } = body as { userId?: string; bookerId: string; allRoutesOpen: boolean }
     if (!bookerId) return jsonError('bookerId required')
-    if (typeof allRoutesOpen !== 'boolean') return jsonError('allRoutesOpen boolean hona chahiye')
+    if (typeof allRoutesOpen !== 'boolean') return jsonError('allRoutesOpen must be a boolean')
 
     if (me.role !== 'DISTRIBUTOR') {
-      return jsonError('Sirf distributor All Routes access on/off kar sakta hai', 403)
+      return jsonError('Only the distributor can toggle All Routes access', 403)
     }
 
     const booker = await db.user.findUnique({ where: { id: bookerId } })
-    if (!booker || booker.role !== 'SALESMAN') return jsonError('Order booker valid nahi hai')
+    if (!booker || booker.role !== 'SALESMAN') return jsonError('Invalid order booker')
 
     // Scope guard: distributor sirf apne outlets wale booker ko toggle kar sakta hai
     if (me.role === 'DISTRIBUTOR') {
       const hasOutlet = await db.outlet.findFirst({ where: { salesmanId: bookerId, distributorId: me.profile!.id } })
-      if (!hasOutlet) return jsonError('Yeh order booker aap ke scope mein nahi hai', 403)
+      if (!hasOutlet) return jsonError('This order booker is outside your scope', 403)
     }
 
     const updated = await db.user.update({ where: { id: bookerId }, data: { allRoutesOpen }, select: { id: true, allRoutesOpen: true } })
