@@ -92,9 +92,32 @@ export async function GET(req: Request) {
     // --- Meri aaj ki recoveries pending approval count (context ke liye) ---
     const pendingRecoveries = await db.recovery.count({ where: { bookerId: user.id, status: 'PENDING' } })
 
+    // --- Booker target progress (home progress bar) — current Karachi month ---
+    // SalesTarget (overall row pehle, warna brand-wise ka sum) + month-to-date achieved
+    // (Order.total ka sum, CANCELLED exclude) — website /api/targets jaisa hi math.
+    // Karachi = UTC+5: month key + boundaries usi hisaab se (app karachiDate se match).
+    const nowKarachi = new Date(Date.now() + 5 * 3600 * 1000)
+    const perfMonth = `${nowKarachi.getUTCFullYear()}-${String(nowKarachi.getUTCMonth() + 1).padStart(2, '0')}`
+    const perfStartUtc = new Date(Date.UTC(nowKarachi.getUTCFullYear(), nowKarachi.getUTCMonth(), 1) - 5 * 3600 * 1000)
+    const perfEndUtc = new Date(Date.UTC(nowKarachi.getUTCFullYear(), nowKarachi.getUTCMonth() + 1, 1) - 5 * 3600 * 1000)
+    const [perfTargets, perfAchieved] = await Promise.all([
+      db.salesTarget.findMany({ where: { salesmanId: user.id, month: perfMonth }, select: { brandId: true, targetValue: true } }),
+      db.order.aggregate({
+        where: { salesmanId: user.id, orderDate: { gte: perfStartUtc, lt: perfEndUtc }, status: { not: 'CANCELLED' } },
+        _sum: { total: true },
+      }),
+    ])
+    const overallTarget = perfTargets.find((t) => !t.brandId)
+    const perfTargetValue = overallTarget ? overallTarget.targetValue : perfTargets.reduce((s, t) => s + t.targetValue, 0)
+
     return Response.json({
       serverTime: new Date().toISOString(),
       settings: { fridayOff: pjp.fridayOff, unplannedEnabled: pjp.unplannedEnabled, allRoutesOpen: user.allRoutesOpen },
+      performance: {
+        month: perfMonth,
+        target: Math.round(perfTargetValue * 100) / 100,
+        achieved: Math.round((perfAchieved._sum.total ?? 0) * 100) / 100,
+      },
       shops,
       products,
       pendingShops: pendingShops.map((s) => ({
