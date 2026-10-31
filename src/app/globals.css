@@ -394,6 +394,14 @@
   text-align: center;
   color: #000;
 }
+/* Task 117: invoice items table — har cell ka text cell ke DARMIYAN center
+   (user: "boxes k ander text box k darmiyan ho"). Specificity (0,2,1) —
+   .cbl-doc .num ki right-align (0,2,0) ko sirf isi table par override karta hai;
+   Load Form / Settlement docs ki alignment untouched. nowrap (.num) barqarar. */
+.cbl-doc .cbl-inv-items th,
+.cbl-doc .cbl-inv-items td {
+  text-align: center;
+}
 /* Load Form customers sheet: invoice number link — click = sirf wohi invoice preview khulti hai.
    Screen-only styles (@media screen). Print alag, Download PDF onclone class hata deta hai. */
 .cbl-inv-link {

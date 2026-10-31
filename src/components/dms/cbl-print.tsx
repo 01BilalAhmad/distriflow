@@ -724,8 +724,11 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
           مال موقے پر چیک کریں، بعد کی ذمہ داری نہ ہوگی۔ ڈسٹریبیوٹر / آرڈربوکر کے کسی بھی ذاتی لین دین کا ذمہ دار نہیں ہوگا۔ شکریہ
         </p>
 
-        {/* items table — Task 59: portrait 12 columns (khali/duplicate columns hatay) */}
-        <table style={{ fontSize: INV_ITEM_FS }}>
+        {/* items table — Task 59: portrait 12 columns (khali/duplicate columns hatay);
+            Task 117: har cell ka text cell ke DARMIYAN center (user request — numbers
+            border se chipke nahi lagne chahiye). Alignment CSS se (.cbl-inv-items),
+            sirf is table par — Load Form / Settlement docs ki alignment untouched. */}
+        <table className="cbl-inv-items" style={{ fontSize: INV_ITEM_FS }}>
           <colgroup>
             {colW.map((w, i) => (
               <col key={`c${i}`} style={{ width: w }} />
@@ -733,7 +736,7 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
           </colgroup>
           <thead>
             <tr>
-              <th style={{ textAlign: 'left' }}>Item / Product Name</th>
+              <th>Item / Product Name</th>
               <th>CTN</th><th>Box</th><th>Units</th><th>Free Units</th>
               <th>Trade Price (Excluding Sales Tax)</th>
               <th>Gross Amount (Excluding Sales Tax)</th>
@@ -747,7 +750,7 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
           <tbody>
             {rows2.map((r) => (
               <tr key={r.it.id} className="cbl-break-avoid">
-                <td style={{ textAlign: 'left' }}>{r.it.sku} {r.it.productName}</td>
+                <td>{r.it.sku} {r.it.productName}</td>
                 <Num v={r.ctn} />
                 <Num v={r.box} />
                 <Num v={r.pcs} />
@@ -762,7 +765,7 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
               </tr>
             ))}
             <tr style={{ fontWeight: 'bold', backgroundColor: '#f7f7f7' }}>
-              <td style={{ textAlign: 'left' }}>Total</td>
+              <td>Total</td>
               <Num v={S.ctn} />
               <Num v={S.box} />
               <Num v={S.pcs} />
