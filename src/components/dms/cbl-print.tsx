@@ -27,16 +27,22 @@ const fmtI = (v: number) => v.toLocaleString('en-US', { maximumFractionDigits: 0
 const fmtCell = (v: number, dec: 0 | 2) => (dec === 2 && Math.abs(v) >= 100_000 ? fmtI(v) : dec === 2 ? fmt2(v) : fmtI(v))
 const dash = <td className="dash">-</td>
 // fit = column ki delivered px capacity (chars mein). Value is se lambi ho to cell font
-// 7.4px kar dete hain — amount KABHI column se bahir nahi jati (Task 34).
+// 8.6px kar dete hain — amount KABHI column se bahir nahi jati (Task 34; Task 116 mein
+// items table font 10 hua to shrink bhi 8.6 rakha — readable magar phir bhi fit valve).
 const Num = ({ v, dec = 0, compact = false, fit }: { v: number | null | undefined; dec?: 0 | 2; compact?: boolean; fit?: number }) => {
   if (v === null || v === undefined || v === 0) return dash
   const s = compact ? fmtCell(v, dec) : dec === 2 ? fmt2(v) : fmtI(v)
-  return <td className="num" style={fit && s.length > fit ? { fontSize: 7.4 } : undefined}>{s}</td>
+  return <td className="num" style={fit && s.length > fit ? { fontSize: 8.6 } : undefined}>{s}</td>
 }
 // Task 51: money cell — real invoice ke money columns 0 ko bhi "0.00" print karte hain (dash nahi)
 const M = ({ v, fit }: { v: number; fit?: number }) => (
-  <td className="num" style={fit && fmt2(v).length > fit ? { fontSize: 7.4 } : undefined}>{fmt2(v)}</td>
+  <td className="num" style={fit && fmt2(v).length > fit ? { fontSize: 8.6 } : undefined}>{fmt2(v)}</td>
 )
+// Task 116: invoice items table font 8.6 -> 10 (shopkeeper / burha admin ko print par saaf
+// nazar aaye — user: "thora sa bara, bohot ziyada nai"). Column water-filling ke glyph
+// widths bhi ISI scale par barhe hain (textW +10/8.6, fitOf divisor 5.6) warna fixed
+// 12-column portrait layout mein amounts wrap/overflow kar ke format kharab hota.
+const INV_ITEM_FS = 10
 const iso = (d: string | Date) => new Date(d).toISOString().slice(0, 10)
 const printDate = () => {
   const d = new Date()
@@ -621,8 +627,9 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
 
   // ---- Task 34: DATA-AWARE column widths (water-filling) — Task 59: portrait TABLE_W par ----
   const colSpecs: { key?: string; hw: number; vl: number; min: number; d: number; need: number }[] = []
+  // glyph widths 10px bold Arial par (purane 8.6px wale 2.4/4.8/6.2 × 10/8.6 scale — Task 116)
   const textW = (s: string) =>
-    [...s].reduce((a, ch) => a + (/[.,:]/.test(ch) ? 2.4 : /[0-9a-z/-]/.test(ch) ? 4.8 : 6.2), 0)
+    [...s].reduce((a, ch) => a + (/[.,:]/.test(ch) ? 2.8 : /[0-9a-z/-]/.test(ch) ? 5.6 : 7.2), 0)
   const addCol = (vals: string[], header: string, key?: string, min = 20) => {
     const hw = header.split(' ').reduce((a, w) => Math.max(a, textW(w)), 0) // header ka sab se lambe WORD ka width
     const vl = vals.reduce((a, s) => Math.max(a, textW(s)), 0) // sab se lambi RENDERED value (no-wrap)
@@ -655,7 +662,7 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
   const fitOf = (key?: string) => {
     const i = colSpecs.findIndex((x) => x.key === key)
     if (i < 0) return undefined
-    return Math.floor((colPx[i] - 10) / 4.8) // 8px td padding + 2 border, ~4.8px/digit bold
+    return Math.floor((colPx[i] - 10) / 5.6) // 8px td padding + 2 border, ~5.6px/digit bold @10px (Task 116)
   }
 
   // Task 57: Promotions Applied — HAR promotion apni ALAG row (ek column mein ek hi
@@ -718,7 +725,7 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
         </p>
 
         {/* items table — Task 59: portrait 12 columns (khali/duplicate columns hatay) */}
-        <table style={{ fontSize: 8.6 }}>
+        <table style={{ fontSize: INV_ITEM_FS }}>
           <colgroup>
             {colW.map((w, i) => (
               <col key={`c${i}`} style={{ width: w }} />
@@ -774,7 +781,7 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
         {/* bottom: promotions (left) + totals (right) — har number kisi column ka total hai */}
         <div className="mt-4 flex justify-between">
           <div style={{ width: '46%' }}>
-            <table className="cbl-break-avoid" style={{ fontSize: 10 }}>
+            <table className="cbl-break-avoid" style={{ fontSize: 10.5 }}>
               <colgroup><col style={{ width: '70%' }} /><col style={{ width: '30%' }} /></colgroup>
               <thead>
                 <tr><th colSpan={2} style={{ background: '#000', color: '#fff' }}>Promotions Applied</th></tr>
@@ -804,7 +811,7 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
             </table>
           </div>
           <div style={{ width: '30%' }}>
-            <table className="cbl-break-avoid" style={{ fontSize: 10 }}>
+            <table className="cbl-break-avoid" style={{ fontSize: 10.5 }}>
               <tbody>
                 {/* Task 26: ladder tax-mode par depend — amounts dono modes mein SAME chain
                  * (Net Invoice = Gross − Disc − TO + GST + Adv), sirf presentation ka farq:
@@ -831,7 +838,7 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
             </table>
             {/* Task 102: user ki "chhoti detail" — deduction kis return ki hai (RET-xxx (ORD-yyy) Rs z) */}
             {advAdjust > 0.005 && inv.advanceAppliedNote ? (
-              <p className="mt-1 text-[8.5px] leading-snug" style={{ textAlign: 'right', color: '#333' }}>
+              <p className="mt-1 text-[9.5px] leading-snug" style={{ textAlign: 'right', color: '#333' }}>
                 Claim adjust: {inv.advanceAppliedNote}
               </p>
             ) : null}
@@ -839,7 +846,7 @@ export function CblInvoiceDoc({ inv }: { inv: InvoiceData; gst?: { enabled: bool
         </div>
 
         {inv.summaryNo && (
-          <p className="mt-3 text-[9px] font-bold" style={{ marginLeft: 24 }}>Load Form # {inv.summaryNo}</p>
+          <p className="mt-3 text-[10px] font-bold" style={{ marginLeft: 24 }}>Load Form # {inv.summaryNo}</p>
         )}
 
         {/* signature boxes */}
@@ -1089,7 +1096,7 @@ export function CblSettlementDoc({ detail }: { detail: SummaryDetailDTO }) {
             </table>
           </div>
           <div style={{ width: '38%' }}>
-            <table className="cbl-break-avoid" style={{ fontSize: 10 }}>
+            <table className="cbl-break-avoid" style={{ fontSize: 10.5 }}>
               <tbody>
                 <tr><td style={{ textAlign: 'center' }}>Total Bill Amount:</td><td className="num" style={{ width: 95 }}>{fmt2(T.bills)}</td></tr>
                 <tr><td style={{ textAlign: 'center' }}>Less: Stock Returns:</td><td className="num">- {fmt2(T.ret)}</td></tr>
