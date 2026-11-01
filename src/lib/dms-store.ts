@@ -6,6 +6,7 @@ import type { SessionUser } from '@/lib/dms-types'
 export type ViewKey =
   | 'mega-accounts'
   | 'backup'
+  | 'system'
   | 'dashboard'
   | 'orders'
   | 'orders-new'

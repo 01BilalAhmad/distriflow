@@ -1,4 +1,5 @@
 import { db, type DbClient } from '@/lib/db'
+import { captureError, routeFromStack } from '@/lib/error-log'
 import type { Role } from '@/lib/dms-types'
 
 export interface ScopeContext {
@@ -80,6 +81,18 @@ export async function scopedOutletIds(userId: string): Promise<string[] | null> 
 }
 
 export function jsonError(message: string, status = 400) {
+  // Task 128 — error capture (portal-only): >=500 ERROR, 4xx WARN (60s dedupe
+  // error-log.ts khud karta hai). Fire-and-forget — response path bilkul nahi badalta.
+  try {
+    const stack = new Error().stack ?? null
+    void captureError({
+      level: status >= 500 ? 'ERROR' : 'WARN',
+      source: 'server',
+      message,
+      route: routeFromStack(stack),
+      stack,
+    })
+  } catch { /* capture kabhi jsonError nahi todta */ }
   return Response.json({ error: message }, { status })
 }
 

@@ -508,6 +508,9 @@ export interface MegaDistributorDTO {
   subscriptionExpiry: string | null
   daysLeft: number | null
   status: 'ACTIVE' | 'INACTIVE' | 'EXPIRED'
+  // Task 127 — maintenance window (soft pause) — active hone par UI badge + End action
+  maintenanceUntil: string | null
+  maintenanceNote: string | null
   teamUsers: number
   createdAt: string
 }

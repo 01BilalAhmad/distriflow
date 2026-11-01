@@ -26,12 +26,14 @@ import { VIEW_PATH, viewFromPath } from '@/lib/dms-nav'
 import { SalesmanApp } from './salesman-app'
 import { QuickNav } from './quick-nav'
 import { ThemeToggle } from './theme-toggle'
+import { MaintenanceScreen } from './maintenance-screen'
 import {
   LayoutDashboard, ShoppingCart, Warehouse, Package, Store, Network, Route,
   Users, Gift, Undo2, BarChart3, Package2, LogOut, Building2, PackageX,
   ClipboardList, FileStack, Wallet, BookText, BookLock, HandCoins, Landmark,
   Database, Map as MapIcon, TrendingUp, Receipt, ReceiptText, Target, Boxes, Coins, ScrollText,
   Settings as SettingsIcon, ChevronRight, ChevronLeft, Search, Calendar, Menu, PanelLeftClose, PanelLeftOpen, X,
+  Activity, Wrench,
 } from 'lucide-react'
 
 // group = sidebar section header — items usi order mein neeche aate hain
@@ -42,6 +44,8 @@ const NAV: { key: string; label: string; icon: typeof LayoutDashboard; roles: st
   // Mega Admin — sirf account management, koi business view nahi
   { key: 'mega-accounts', label: 'Distributor Accounts', icon: Landmark, roles: ['MEGA_ADMIN'], group: 'Overview', desc: 'Sab distributors ke accounts' },
   { key: 'backup', label: 'Backup & Safety', icon: Database, roles: ['MEGA_ADMIN'], group: 'Overview', desc: 'Data safety & restore' },
+  // Task 128 — error capture + uptime + maintenance (portal-only monitoring)
+  { key: 'system', label: 'System Health', icon: Activity, roles: ['MEGA_ADMIN'], group: 'Overview', desc: 'Errors, DB status aur maintenance mode' },
   // Overview
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['DISTRIBUTOR'], group: 'Overview', desc: 'Aaj ka business snapshot' },
   // Sales — rozana cycle order: booking → bills → van → cash settlement
@@ -234,6 +238,8 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
   const [quickOpen, setQuickOpen] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
+  // Task 127 — session 503 maintenance payload → full-screen maintenance screen
+  const [maint, setMaint] = useState<{ until: string | null; note: string | null } | null>(null)
   // Task 72 — folder (accordion) open/close state: kaunse module folders khule hain
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
   const [groupsInit, setGroupsInit] = useState(false)
@@ -395,9 +401,20 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
         if (res.ok) {
           const data = (await res.json()) as { user: Parameters<typeof setUser>[0] }
           if (data.user) {
+            setMaint(null)
             setUser(data.user)
             saveSession(data.user)
           }
+        } else if (res.status === 503) {
+          // Task 127 — maintenance window → full-screen maintenance screen (portal band)
+          const data = (await res.json().catch(() => null)) as { maintenance?: { until: string | null; note: string | null } } | null
+          if (data?.maintenance) {
+            setMaint(data.maintenance)
+            return
+          }
+          saveSession(null)
+          setUser(null)
+          router.replace('/login')
         } else {
           saveSession(null)
           setUser(null)
@@ -469,6 +486,12 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
         <div className="h-10 w-10 rounded-full border-4 border-emerald-600 border-t-transparent animate-spin" />
       </div>
     )
+  }
+
+  // Task 127 — maintenance window: distributor/salesman ka portal band, friendly screen.
+  // MEGA_ADMIN ko ye screen KABHI nahi milti (gate usay pass karta hai).
+  if (maint) {
+    return <MaintenanceScreen until={maint.until} note={maint.note} />
   }
 
   if (!user) {

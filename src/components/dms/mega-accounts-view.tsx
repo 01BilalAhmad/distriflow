@@ -26,7 +26,7 @@ import { api, fmtDate } from '@/lib/dms-api'
 import type { MegaDistributorDTO, MegaDistributorsData } from '@/lib/dms-types'
 import {
   Landmark, UserPlus, Loader2, ShieldCheck, ShieldOff, RefreshCw, KeyRound,
-  CalendarDays, Users, Building2, Mail, Phone, MapPin, Lock, AlertTriangle,
+  CalendarDays, Users, Building2, Mail, Phone, MapPin, Lock, AlertTriangle, Wrench, Clock,
 } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
@@ -58,6 +58,11 @@ export function MegaAccountsView() {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [pwTarget, setPwTarget] = useState<MegaDistributorDTO | null>(null)
   const [newPw, setNewPw] = useState('')
+  // Task 127 — per-distributor maintenance dialog state
+  const [maintTarget, setMaintTarget] = useState<MegaDistributorDTO | null>(null)
+  const [maintPreset, setMaintPreset] = useState<'1h' | '3h' | '6h' | 'custom'>('1h')
+  const [maintCustom, setMaintCustom] = useState('')
+  const [maintNote, setMaintNote] = useState('')
   const [form, setForm] = useState<NewDistForm>(EMPTY_NEW)
 
   const load = () => {
@@ -81,6 +86,41 @@ export function MegaAccountsView() {
       load()
     } catch (e) {
       toast({ title: 'Action failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' })
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  // Task 127 — per-distributor maintenance (soft pause): window max 7 din, note 160 chars
+  const setMaintenance = async (on: boolean) => {
+    if (!user || !maintTarget) return
+    setBusyId(maintTarget.id + 'maint')
+    try {
+      let until: string | null = null
+      if (on) {
+        if (maintPreset === 'custom') {
+          if (!maintCustom) {
+            toast({ title: 'Custom time select karein', variant: 'destructive' })
+            setBusyId(null)
+            return
+          }
+          until = new Date(maintCustom).toISOString()
+        } else {
+          const hrs = maintPreset === '1h' ? 1 : maintPreset === '3h' ? 3 : 6
+          until = new Date(Date.now() + hrs * 3600_000).toISOString()
+        }
+      }
+      const r = await api<{ message: string }>(`/api/mega/distributors/${maintTarget.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ userId: user.id, action: on ? 'maintenanceOn' : 'maintenanceOff', until, note: maintNote.trim() || null }),
+      })
+      toast({ title: on ? 'Maintenance ON' : 'Maintenance OFF', description: r.message })
+      setMaintTarget(null)
+      setMaintNote('')
+      setMaintCustom('')
+      load()
+    } catch (e) {
+      toast({ title: 'Maintenance action failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' })
     } finally {
       setBusyId(null)
     }
@@ -215,6 +255,9 @@ export function MegaAccountsView() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-bold text-slate-900 text-sm truncate">{d.businessName ?? d.name}</p>
                       <Badge variant="outline" className={`text-[10px] px-1.5 ${meta.cls}`}>{meta.label}</Badge>
+                      {d.maintenanceUntil ? (
+                        <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-700 text-[10px] px-1.5">MAINTENANCE</Badge>
+                      ) : null}
                     </div>
                     <p className="text-xs text-slate-400 truncate">{d.name}</p>
                   </div>
@@ -260,12 +303,63 @@ export function MegaAccountsView() {
                   <Button variant="outline" size="sm" className="h-8 gap-1.5 border-slate-300 text-slate-600" onClick={() => { setPwTarget(d); setNewPw('') }}>
                     <KeyRound className="h-3.5 w-3.5" /> Password
                   </Button>
+                  {d.maintenanceUntil ? (
+                    <Button variant="outline" size="sm" className="h-8 gap-1.5 border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                      disabled={busyId === d.id + 'maint'} onClick={() => { setMaintTarget(d); void setMaintenance(false) }}>
+                      {busyId === d.id + 'maint' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Clock className="h-3.5 w-3.5" />}
+                      End Maintenance
+                    </Button>
+                  ) : (
+                    <Button variant="outline" size="sm" className="h-8 gap-1.5 border-slate-300 text-slate-600 hover:bg-amber-50 hover:text-amber-700 hover:border-amber-200"
+                      disabled={busyId === d.id + 'maint'} onClick={() => { setMaintTarget(d); setMaintPreset('1h'); setMaintCustom(''); setMaintNote('') }}>
+                      <Wrench className="h-3.5 w-3.5" /> Maintenance
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>
           )
         })}
       </div>
+
+      {/* Task 127 — per-distributor maintenance dialog */}
+      <Dialog open={!!maintTarget} onOpenChange={(o) => { if (!o) setMaintTarget(null) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Wrench className="h-4 w-4 text-amber-600" /> Maintenance — {maintTarget?.businessName ?? maintTarget?.name}</DialogTitle>
+            <DialogDescription>
+              Ye distributor + uski team temporarily band ho jayegi (login/API). Window khatam hote hi khud-ba-khud wapis. Aap ka panel chalta rahega.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-1">
+            <div className="space-y-2">
+              <Label>Kitni der tak?</Label>
+              <div className="grid grid-cols-4 gap-2">
+                {(['1h', '3h', '6h', 'custom'] as const).map((k) => (
+                  <Button key={k} type="button" size="sm" variant={maintPreset === k ? 'default' : 'outline'}
+                    className={maintPreset === k ? 'bg-[#2f56d6] hover:bg-[#2546b8]' : ''}
+                    onClick={() => setMaintPreset(k)}>
+                    {k === 'custom' ? 'Custom' : k}
+                  </Button>
+                ))}
+              </div>
+              {maintPreset === 'custom' ? (
+                <Input type="datetime-local" value={maintCustom} onChange={(e) => setMaintCustom(e.target.value)} />
+              ) : null}
+            </div>
+            <div className="space-y-1.5">
+              <Label>Note (optional) — distributor ko maintenance screen par dikhega</Label>
+              <Input placeholder="e.g. Payment verification in progress" value={maintNote} onChange={(e) => setMaintNote(e.target.value)} maxLength={160} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMaintTarget(null)}>Cancel</Button>
+            <Button className="bg-amber-600 hover:bg-amber-700" disabled={busyId === (maintTarget?.id ?? '') + 'maint'} onClick={() => void setMaintenance(true)}>
+              {busyId === (maintTarget?.id ?? '') + 'maint' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock className="h-4 w-4" />} Start maintenance
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* New distributor dialog */}
       <Dialog open={createOpen} onOpenChange={(o) => { if (!o) setCreateOpen(false) }}>

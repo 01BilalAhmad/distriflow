@@ -7,6 +7,7 @@ import type { ViewKey } from '@/lib/dms-store'
 export const VIEW_PATH: Record<ViewKey, string> = {
   'mega-accounts': '/mega-accounts',
   backup: '/backup',
+  system: '/system',
   dashboard: '/',
   orders: '/orders',
   // Task 31 — order booking apna poora page (dialog nahi)

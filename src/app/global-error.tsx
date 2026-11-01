@@ -14,6 +14,18 @@ export default function GlobalError({
 }) {
   useEffect(() => {
     console.error('[global-error]', { message: error.message, digest: error.digest })
+    // Task 128 — client error capture (portal-only, fire-and-forget)
+    try {
+      void fetch('/api/client-errors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: `[global] ${error.message}`,
+          stack: error.stack ?? null,
+          path: typeof window !== 'undefined' ? window.location.pathname : null,
+        }),
+      }).catch(() => { /* noop */ })
+    } catch { /* noop */ }
   }, [error])
 
   return (

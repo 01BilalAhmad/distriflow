@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { AUTH_COOKIE, authCookieOptions, makeAuthToken, verifyAuthToken } from '@/lib/auth-token'
+import { checkMaintenance } from '@/lib/maintenance'
 
 /**
  * Task 65 — Session sync / restore (cookie refresh):
@@ -63,6 +64,11 @@ export async function POST(req: Request) {
     if (user.role === 'DISTRIBUTOR' && user.subscriptionExpiry && user.subscriptionExpiry.getTime() < Date.now()) {
       return NextResponse.json({ error: 'Subscription expired' }, { status: 401 })
     }
+
+    // Task 127 — maintenance: 503 + maintenance payload (shell full-screen maintenance
+    // screen dikhata hai). MEGA_ADMIN pass — seller ka panel hamesha chalta hai.
+    const maintErr = await checkMaintenance(user)
+    if (maintErr) return maintErr
 
     const res = NextResponse.json({ user: userDTO(user) })
     res.cookies.set(AUTH_COOKIE, await makeAuthToken(user.id), authCookieOptions())

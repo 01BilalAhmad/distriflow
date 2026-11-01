@@ -5,6 +5,7 @@ import { jsonError } from '@/lib/dms-scope'
 import { AUTH_COOKIE, authCookieOptions, makeAuthToken } from '@/lib/auth-token'
 import { rateLimit, clientIp } from '@/lib/rate-limit'
 import { audit } from '@/lib/audit'
+import { checkMaintenance } from '@/lib/maintenance'
 
 /**
  * MEGA ADMIN subscription model (Task 22):
@@ -137,12 +138,20 @@ export async function POST(req: Request) {
         if (owner.role === 'DISTRIBUTOR') {
           const msg = distributorGate(owner)
           if (msg) return jsonError(`${owner.name}: ${msg}`, 403)
+          // Task 127 — owner distributor maintenance par ho to booker ka login bhi block
+          const ownerMaint = await checkMaintenance(owner)
+          if (ownerMaint) return ownerMaint
           break
         }
         cursorId = owner.parentId
         hops++
       }
     }
+
+    // Task 127 — global maintenance (ya khud distributor ka per-user window) → 503 + payload.
+    // MEGA_ADMIN pass. Login route bhi gate hota hai taake naya session na bane.
+    const maintErr = await checkMaintenance(user)
+    if (maintErr) return maintErr
 
     // Task 65: signed httpOnly session cookie — middleware isi se page routes protect karta hai
     // Task 104 (Orderbooker App): mobile client (x-df-client: mobile) ko token JSON mein bhi

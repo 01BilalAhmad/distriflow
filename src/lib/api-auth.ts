@@ -17,6 +17,7 @@ import { db } from '@/lib/db'
 import { AUTH_COOKIE, verifyAuthToken } from '@/lib/auth-token'
 import { jsonError } from '@/lib/dms-scope'
 import { auditApiCall, audit, resolveTenantId } from '@/lib/audit'
+import { checkMaintenance } from '@/lib/maintenance'
 import type { DistributorProfile } from '@prisma/client'
 
 /** Route handlers ko milne wala authed user — profile relation ke sath */
@@ -75,6 +76,12 @@ export async function requireUser(req: Request): Promise<AuthResult> {
   if (user.role === 'DISTRIBUTOR' && user.subscriptionExpiry && user.subscriptionExpiry.getTime() < Date.now()) {
     return { error: jsonError('Subscription expired — contact the Mega Admin to renew', 403) }
   }
+
+  // Task 127 — maintenance gate: global ya per-distributor window active ho to 503.
+  // MEGA_ADMIN pass (seller ka panel hamesha chalta hai). Audit se PEHLE — maintenance
+  // mein koi business request process ya log nahi hoti.
+  const maintErr = await checkMaintenance(user)
+  if (maintErr) return { error: maintErr }
 
   // Task 35 — GENERIC auto-audit: HAR mutation (POST/PATCH/PUT/DELETE) yahan se log
   // ho jata hai ("hr choti activity ka log"). Reads (GET) spam na ho is liye nahi —

@@ -16,6 +16,18 @@ export default function Error({
   useEffect(() => {
     // Console structured — baad mein Sentry/logger yahan plug hoga
     console.error('[app-error]', { message: error.message, digest: error.digest })
+    // Task 128 — client error capture (portal-only, fire-and-forget): System Health feed
+    try {
+      void fetch('/api/client-errors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: error.message,
+          stack: error.stack ?? null,
+          path: typeof window !== 'undefined' ? window.location.pathname : null,
+        }),
+      }).catch(() => { /* capture kabhi UI nahi todta */ })
+    } catch { /* noop */ }
   }, [error])
 
   return (

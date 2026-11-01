@@ -46,6 +46,7 @@ export async function GET(req: Request) {
       const exp = d.subscriptionExpiry ? d.subscriptionExpiry.getTime() : null
       const daysLeft = exp != null ? Math.ceil((exp - now) / DAY) : null
       const status = !d.isActive ? 'INACTIVE' : exp != null && exp < now ? 'EXPIRED' : 'ACTIVE'
+      const maintActive = !!d.maintenanceUntil && d.maintenanceUntil.getTime() > now
       return {
         id: d.id,
         name: d.name,
@@ -60,6 +61,9 @@ export async function GET(req: Request) {
         subscriptionExpiry: d.subscriptionExpiry ? d.subscriptionExpiry.toISOString() : null,
         daysLeft,
         status,
+        // Task 127 — maintenance window (soft pause) — UI badge + End action ke liye
+        maintenanceUntil: maintActive ? d.maintenanceUntil!.toISOString() : null,
+        maintenanceNote: maintActive ? d.maintenanceNote : null,
         teamUsers: d.children.length,
         createdAt: d.createdAt.toISOString(),
       }

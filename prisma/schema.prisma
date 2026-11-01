@@ -52,7 +52,43 @@ model User {
   // sab route shops dekh sakta hai (end-of-month max recovery). OFF = sirf day-wise.
   allRoutesOpen Boolean             @default(false)
 
+  // Task 127 — per-distributor maintenance mode (MEGA_ADMIN toggle): maintenanceUntil
+  // active hone par ye distributor + uski team login/API se block (MEGA_ADMIN panel upar
+  // rehta hai). isActive/subscription se alag hai — ye SOFT, temporary, note ke sath.
+  maintenanceUntil DateTime?
+  maintenanceNote  String?
+
   @@index([parentId])
+}
+
+// Task 127 — global system flags (single-row KV): global maintenance window + note.
+// User model par per-distributor flags hain, ye GLOBAL switches ke liye hai
+// (backend deploy / DB migration ke waqt sab distributors ek sath down).
+model SystemFlag {
+  id        String   @id @default(cuid())
+  key       String   @unique // maintenance_until | maintenance_note
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+// Task 128 — error capture (portal-only): API 5xx/4xx, unhandled route errors aur
+// client-side errors ki central log. MEGA_ADMIN System Health page isi ko dekhta hai.
+// External alerting (WhatsApp/Telegram) deliberately NAHI — baad mein integrate hoga.
+model ErrorLog {
+  id            String   @id @default(cuid())
+  level         String // ERROR (>=500 / unhandled) | WARN (4xx / client)
+  source        String   @default("server") // server | client | unhandled
+  route         String? // /api/... (jsonError/instrumentation) ya client path
+  method        String?
+  message       String
+  stack         String? @db.Text
+  userId        String?
+  distributorId String?
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([level, createdAt])
+  @@index([route, createdAt])
 }
 
 model DistributorProfile {
@@ -812,3 +848,4 @@ model AuditLog {
   @@index([userId, createdAt])
   @@index([action, createdAt])
 }
+
