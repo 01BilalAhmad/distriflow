@@ -90,7 +90,8 @@ const NAV: { key: string; label: string; icon: typeof LayoutDashboard; roles: st
   { key: 'companies', label: 'Companies (Procurement)', icon: Building2, roles: ['DISTRIBUTOR'], group: 'Business Network', desc: 'Procurement & purchase rates' },
   { key: 'distributors', label: 'My Network', icon: Network, roles: ['DISTRIBUTOR'], group: 'Business Network', desc: 'Distribution network tree' },
   // Task 78 — System: distributor apni profile + bill/tax settings khud manage kare
-  { key: 'settings', label: 'Settings', icon: SettingsIcon, roles: ['DISTRIBUTOR'], group: 'System', desc: 'Distributor profile, bill print & tax rates' },
+  // Task 129 — MEGA_ADMIN ko bhi Settings (apna password change karne ke liye)
+  { key: 'settings', label: 'Settings', icon: SettingsIcon, roles: ['DISTRIBUTOR', 'MEGA_ADMIN'], group: 'System', desc: 'Profile, bill print, tax rates & password' },
   // Task 35 — audit log: website par har activity ka record (distributor apni, mega sab)
   { key: 'audit', label: 'Audit Log', icon: ScrollText, roles: ['DISTRIBUTOR', 'MEGA_ADMIN'], group: 'System', desc: 'Har activity ka record — login, bills, settlement, returns' },
   // SALESMAN top nav tak pohanchta hi nahi (SalesmanApp render hota hai) — sirf type fallback

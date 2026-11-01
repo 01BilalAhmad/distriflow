@@ -9,7 +9,7 @@ import { Switch } from '@/components/ui/switch'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useDMS, saveSession } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
-import { Loader2, Save, Store, Receipt, Phone, Percent, MapPin, Route, CalendarOff, Store as StoreIcon2 } from 'lucide-react'
+import { Loader2, Save, Store, Receipt, Phone, Percent, MapPin, Route, CalendarOff, Store as StoreIcon2, KeyRound } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
 /**
@@ -55,12 +55,21 @@ export function SettingsView() {
   const [savingProfile, setSavingProfile] = useState(false)
   const [savingTax, setSavingTax] = useState(false)
   const [savingPjp, setSavingPjp] = useState(false)
+  // Task 129 — Change Password (sab roles; MEGA_ADMIN ke liye Settings ka main card)
+  const [pw, setPw] = useState({ current: '', next: '', confirm: '' })
+  const [savingPw, setSavingPw] = useState(false)
+  const isMega = user?.role === 'MEGA_ADMIN'
   const [profile, setProfile] = useState<ProfileForm>({ businessName: '', distributorName: '', phone: '', address: '', city: '' })
   const [tax, setTax] = useState<TaxForm>({ filerTaxRate: '0.5', nonFilerTaxRate: '2.5', gstEnabled: true, gstRate: '18' })
   const [pjp, setPjp] = useState<PjpForm>({ fridayOff: true, unplannedEnabled: true })
 
   async function load() {
     if (!user) return
+    // Task 129 — MEGA_ADMIN ki distributor settings nahi hotin (GET 500 na de) — usay sirf password card
+    if (user.role !== 'DISTRIBUTOR') {
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
       const res = await api<{
@@ -200,6 +209,39 @@ export function SettingsView() {
     }
   }
 
+  async function savePassword() {
+    if (!user) return
+    if (!pw.current || !pw.next || !pw.confirm) {
+      toast({ title: 'Tamam fields bharein', variant: 'destructive' })
+      return
+    }
+    if (pw.next.length < 8) {
+      toast({ title: 'Naya password kam az kam 8 characters ka ho', variant: 'destructive' })
+      return
+    }
+    if (pw.next !== pw.confirm) {
+      toast({ title: 'New password aur Confirm same nahi hain', variant: 'destructive' })
+      return
+    }
+    if (pw.next === pw.current) {
+      toast({ title: 'Naya password purane password jaisa nahi ho sakta', variant: 'destructive' })
+      return
+    }
+    setSavingPw(true)
+    try {
+      await api<{ ok: boolean }>('/api/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword: pw.current, newPassword: pw.next }),
+      })
+      setPw({ current: '', next: '', confirm: '' })
+      toast({ title: 'Password Change ✓', description: 'Naya password ab se login ke liye active hai' })
+    } catch (e) {
+      toast({ title: 'Error', description: e instanceof Error ? e.message : 'Password change failed', variant: 'destructive' })
+    } finally {
+      setSavingPw(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex h-full min-h-0 flex-col gap-3">
@@ -213,10 +255,42 @@ export function SettingsView() {
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto pr-0.5">
       <div>
         <h2 className="text-xl font-bold text-slate-900">Settings</h2>
-        <p className="text-sm text-slate-500">Distributor profile, bill print aur tax rates — sab kuch aik jagah</p>
+        <p className="text-sm text-slate-500">{isMega ? 'Mega Admin account — apna password yahan se change karein' : 'Distributor profile, bill print aur tax rates — sab kuch aik jagah'}</p>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
+        {/* ===== Task 129: Change Password — sab roles (MEGA_ADMIN ka main card) ===== */}
+        <Card className="border-slate-200 shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base text-slate-900">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-100"><KeyRound className="h-4 w-4 text-amber-600" /></span>
+              Change Password
+            </CardTitle>
+            <CardDescription>Apna password change karein — naya password kam az kam 8 characters ka ho aur strong rakhein</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3.5">
+            <div className="space-y-1.5">
+              <Label htmlFor="pwCurrent">Current Password</Label>
+              <Input id="pwCurrent" type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw((p) => ({ ...p, current: e.target.value }))} placeholder="Abhi wala password" />
+            </div>
+            <div className="grid gap-3.5 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="pwNew">New Password</Label>
+                <Input id="pwNew" type="password" autoComplete="new-password" value={pw.next} onChange={(e) => setPw((p) => ({ ...p, next: e.target.value }))} placeholder="Kam az kam 8 characters" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="pwConfirm">Confirm New Password</Label>
+                <Input id="pwConfirm" type="password" autoComplete="new-password" value={pw.confirm} onChange={(e) => setPw((p) => ({ ...p, confirm: e.target.value }))} placeholder="Naya password dobara likhein" />
+              </div>
+            </div>
+            <Button onClick={savePassword} disabled={savingPw} className="w-full bg-amber-600 hover:bg-amber-700">
+              {savingPw ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <KeyRound className="h-4 w-4 mr-1.5" />}
+              Password Change Karein
+            </Button>
+          </CardContent>
+        </Card>
+
+        {!isMega && (<>
         {/* ===== Distributor Profile — bill print ke naam/cell ===== */}
         <Card className="border-slate-200 shadow-sm">
           <CardHeader className="pb-3">
@@ -336,6 +410,7 @@ export function SettingsView() {
             </Button>
           </CardContent>
         </Card>
+        </>)}
       </div>
     </div>
   )
