@@ -12,6 +12,9 @@ import { unitCostMap, r2 } from '@/lib/reports-kit-server'
 //     slowDays) mein ek bhi unit nahi biki — last sold date ke sath
 //   • EXPIRING: batches jo N dino (default 60 — param expDays) mein
 //     expire ho rahi hain (FMCG ke liye critical)
+// Task 131 — REORDER SUGGESTION: sale velocity (last velDays, default 30)
+//   se avg daily sale → cover days (stock ÷ velocity) → suggested order
+//   (velocity × reorderDays default 14 − current stock), units + cartons.
 // ============================================================
 
 export async function GET(req: Request) {
@@ -30,6 +33,9 @@ export async function GET(req: Request) {
     const lowCtns = Math.max(1, Number(url.searchParams.get('lowCtns')) || 5)
     const slowDays = Math.max(1, Number(url.searchParams.get('slowDays')) || 30)
     const expDays = Math.max(1, Number(url.searchParams.get('expDays')) || 60)
+    // Task 131 — reorder params
+    const velDays = Math.max(7, Number(url.searchParams.get('velDays')) || 30)
+    const reorderDays = Math.max(1, Number(url.searchParams.get('reorderDays')) || 14)
 
     const products = await db.product.findMany({
       where: { distributorId: profileId, isActive: true },
@@ -86,11 +92,27 @@ export async function GET(req: Request) {
     const lastSoldEver = new Map<string, Date>()
     for (const it of anySold) if (!lastSoldEver.has(it.productId)) lastSoldEver.set(it.productId, it.order.orderDate)
 
+    // Task 131 — sale velocity (last velDays billed units per product)
+    const velSince = new Date()
+    velSince.setDate(velSince.getDate() - velDays)
+    const velRows = await db.orderItem.groupBy({
+      by: ['productId'],
+      where: { order: { distributorId: profileId, orderDate: { gte: velSince }, status: { not: 'CANCELLED' } } },
+      _sum: { qty: true },
+    })
+    const soldVel = new Map<string, number>()
+    for (const r of velRows) soldVel.set(r.productId, r._sum.qty ?? 0)
+
     const rows = products.map((p) => {
       const a = agg.get(p.id) ?? { qty: 0, expSoonQty: 0, expSoonMin: null as Date | null }
       const upc = Math.max(1, p.unitsPerCarton || 1)
       const uc = unitCost(p.id)
       const ls = lastSoldEver.get(p.id)
+      // Task 131 — velocity + reorder
+      const sold = soldVel.get(p.id) ?? 0
+      const avgDaily = r2(sold / velDays)
+      const coverDays = a.qty > 0 ? (avgDaily > 0 ? r2(a.qty / avgDaily) : null) : 0
+      const suggestedUnits = Math.max(0, Math.ceil(avgDaily * reorderDays - a.qty))
       return {
         productId: p.id,
         productName: p.name,
@@ -105,6 +127,11 @@ export async function GET(req: Request) {
         expSoonDate: a.expSoonMin?.toISOString() ?? null,
         lastSoldDate: ls?.toISOString() ?? null,
         daysSinceSold: ls ? Math.floor((Date.now() - ls.getTime()) / 86400000) : null,
+        soldVelDays: sold,
+        avgDaily,
+        coverDays,
+        suggestedUnits,
+        suggestedCtns: r2(suggestedUnits / upc),
       }
     })
 
@@ -119,9 +146,13 @@ export async function GET(req: Request) {
       .filter((x) => x.expSoonQty > 0)
       .sort((x, y) => new Date(x.expSoonDate!).getTime() - new Date(y.expSoonDate!).getTime())
     const outRows = rows.filter((x) => x.qtyUnits === 0)
+    // Task 131 — reorder suggestions (jahan mangwana hai — velocity par based)
+    const reorderRows = rows
+      .filter((x) => x.suggestedUnits > 0)
+      .sort((a, b) => b.suggestedUnits * b.unitCost - a.suggestedUnits * a.unitCost)
 
     return Response.json({
-      params: { lowCtns, slowDays, expDays },
+      params: { lowCtns, slowDays, expDays, velDays, reorderDays },
       summary: {
         skus: products.length,
         inStockSkus: stockRows.length,
@@ -132,12 +163,16 @@ export async function GET(req: Request) {
         slowCount: slowRows.length,
         expCount: expRows.length,
         expQtyValue: r2(expRows.reduce((t, x) => t + x.costValue, 0)),
+        reorderSkus: reorderRows.length,
+        reorderUnits: reorderRows.reduce((t, x) => t + x.suggestedUnits, 0),
+        reorderCostValue: r2(reorderRows.reduce((t, x) => t + x.suggestedUnits * x.unitCost, 0)),
       },
       stock: stockRows.sort((x, y) => y.costValue - x.costValue),
       lowStock: lowRows,
       slowMoving: slowRows,
       expiring: expRows,
       outOfStock: outRows,
+      reorder: reorderRows,
     })
   } catch (e) {
     console.error('reports/stock', e)

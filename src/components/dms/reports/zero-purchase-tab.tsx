@@ -33,6 +33,7 @@ export function ZeroPurchaseTab() {
   const now = new Date()
   const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
   const [booker, setBooker] = useState('')
+  const [city, setCity] = useState('')
   const fopts = useFilterOptions(user?.id)
 
   // Task 67: zero shop par foran action — /orders/new full-page form isi shop ke sath
@@ -47,9 +48,10 @@ export function ZeroPurchaseTab() {
     fetcher: async () => {
       const p = new URLSearchParams({ userId: user!.id, month })
       if (booker) p.set('bookerId', booker)
+      if (city) p.set('city', city)
       return api<Resp>(`/api/reports/zero-purchase?${p}`)
     },
-    filtersKey: `${month}|${booker}`,
+    filtersKey: `${month}|${booker}|${city}`,
   })
   const { data, loading } = gate
 
@@ -91,6 +93,7 @@ export function ZeroPurchaseTab() {
     <div className="space-y-3">
       <FilterBar
         booker={booker} setBooker={setBooker} bookers={fopts.bookers}
+        city={city} setCity={setCity} cities={fopts.cities}
         onRefresh={gate.load} loading={loading} armed={gate.armed} stale={gate.stale}
         extra={
           <input

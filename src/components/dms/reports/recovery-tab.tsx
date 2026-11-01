@@ -8,19 +8,23 @@ import { useDMS } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
 import {
   FilterBar, useRangeFilter, KpiRow, DataTable, SectionCard, ExportButtons,
-  useReportGate, useFilterOptions, ReportEmptyGate, fmtDay, rangeLabel, type Col,
+  useReportGate, useFilterOptions, ReportEmptyGate, fmtDay, fmtMoney, rangeLabel, type Col,
 } from './reports-kit'
 
 interface OutRow extends Record<string, unknown> {
   shop: string; code: string; city: string; channel: string; booker: string; creditDays: number
   balance: number; totalBilled: number; totalCollected: number
   lastPaymentDate: string | null; daysSinceLastPayment: number | null; overdue: boolean
+  // Task 131 — aging
+  oldestUnpaidDate: string | null; oldestDays: number | null
+  b0_30: number; b31_60: number; b61_90: number; b90plus: number
 }
 interface HistRow extends Record<string, unknown> {
   date: string; kind: 'RECOVERY' | 'CASH'; refNo: string; shop: string; booker: string; amount: number; method: string; status: string
 }
 interface Resp extends Record<string, unknown> {
   summary: { outstandingShops: number; outstandingTotal: number; overdueShops: number; overdueTotal: number; collectedInPeriod: number; historyEntries: number }
+  aging: { bucket: string; amount: number; shops: number }[]
   outstanding: OutRow[]; history: HistRow[]
   bookerSummary: { booker: string; collected: number; entries: number; shops: number }[]
 }
@@ -54,6 +58,14 @@ export function RecoveryTab() {
     { key: 'totalCollected', label: 'Total Collected', align: 'right', money: true, total: true, cls: 'text-emerald-600' },
     { key: 'lastPaymentDate', label: 'Last Payment', align: 'right', render: (r) => fmtDay(r.lastPaymentDate) },
     { key: 'daysSinceLastPayment', label: 'Din se', align: 'right', render: (r) => r.daysSinceLastPayment != null ? `${r.daysSinceLastPayment}` : '—' },
+    // Task 131 — aging columns
+    { key: 'oldestUnpaidDate', label: 'Oldest Unpaid', align: 'right', render: (r) => (
+      <span>
+        {fmtDay(r.oldestUnpaidDate)}
+        {r.oldestDays != null && <span className="ml-1 text-[10px] text-slate-400">({r.oldestDays}d)</span>}
+      </span>
+    ) },
+    { key: 'b90plus', label: '90+ Din', align: 'right', money: true, total: true, cls: 'font-semibold text-red-600', render: (r) => r.b90plus > 0 ? fmtMoney(r.b90plus) : '—' },
   ]
 
   const hcols: Col<HistRow>[] = [
@@ -102,7 +114,7 @@ export function RecoveryTab() {
         />
       )}
       <SectionCard
-        title="Shop-wise Outstanding (Udhaar)"
+        title="Shop-wise Outstanding (Udhaar) — Aging ke sath"
         right={
           <ExportButtons
             opts={{
@@ -112,14 +124,26 @@ export function RecoveryTab() {
               period: rangeLabel(range),
               filename: `recovery-outstanding-${range.from}_${range.to}`,
               cols: ocols.map((c) => ({ label: c.label, align: c.align, money: c.money })),
-              rows: (data?.outstanding ?? []).map((r) => [r.shop, r.city, r.booker, r.creditDays, r.balance, r.totalBilled, r.totalCollected, r.lastPaymentDate ? fmtDay(r.lastPaymentDate) : '—', r.daysSinceLastPayment ?? '—']),
-              totalsRow: ['TOTAL', '', '', '', data?.summary.outstandingTotal ?? 0, '', '', '', ''],
+              rows: (data?.outstanding ?? []).map((r) => [r.shop, r.city, r.booker, r.creditDays, r.balance, r.totalBilled, r.totalCollected, r.lastPaymentDate ? fmtDay(r.lastPaymentDate) : '—', r.daysSinceLastPayment ?? '—', r.oldestUnpaidDate ? fmtDay(r.oldestUnpaidDate) : '—', r.b90plus]),
+              totalsRow: ['TOTAL', '', '', '', data?.summary.outstandingTotal ?? 0, '', '', '', '', '', (data?.outstanding ?? []).reduce((t, r) => t + r.b90plus, 0)],
             }}
           />
         }
       >
         <DataTable cols={ocols} rows={data?.outstanding ?? []} empty="Kisi shop ka outstanding nahi — sab clear ✓" />
       </SectionCard>
+      {data && data.aging && (
+        <SectionCard title="Aging Summary — Kitna Udhaar Kitna Purana (FIFO)">
+          <DataTable
+            cols={[
+              { key: 'bucket', label: 'Umar Bucket' },
+              { key: 'shops', label: 'Shops', align: 'right', total: true },
+              { key: 'amount', label: 'Amount', align: 'right', money: true, total: true, cls: 'font-semibold' },
+            ] as Col<Record<string, unknown>>[]}
+            rows={(data.aging ?? []) as unknown as Record<string, unknown>[]}
+          />
+        </SectionCard>
+      )}
       <SectionCard
         title={`Collection History (${rangeLabel(range)})`}
         right={

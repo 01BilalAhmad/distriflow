@@ -3,11 +3,12 @@
 // Task 66 — Top Shops (ABC analysis) tab — Pareto 80/20
 
 import { Store } from 'lucide-react'
+import { useState } from 'react'
 import { useDMS } from '@/lib/dms-store'
 import { api } from '@/lib/dms-api'
 import {
   FilterBar, useRangeFilter, KpiRow, DataTable, SectionCard, ExportButtons,
-  useReportGate, ReportEmptyGate, fmtDay, rangeLabel, type Col,
+  useReportGate, ReportEmptyGate, useFilterOptions, fmtDay, rangeLabel, type Col,
 } from './reports-kit'
 
 interface ShopRow extends Record<string, unknown> {
@@ -29,13 +30,15 @@ const ABC_BADGE: Record<string, string> = {
 export function TopShopsTab() {
   const { user } = useDMS()
   const { range, setRange, preset, setPreset } = useRangeFilter()
+  const [city, setCity] = useState('')
+  const fopts = useFilterOptions(user?.id)
 
   // Task 74 — filter-first: data sirf "Report Load Karein" par load hota hai
   const gate = useReportGate<Resp>({
     fetcher: async () => {
-      return api<Resp>(`/api/reports/top-shops?userId=${user!.id}&from=${range.from}&to=${range.to}`)
+      return api<Resp>(`/api/reports/top-shops?userId=${user!.id}&from=${range.from}&to=${range.to}${city ? `&city=${encodeURIComponent(city)}` : ''}`)
     },
-    filtersKey: `${range.from}|${range.to}`,
+    filtersKey: `${range.from}|${range.to}|${city}`,
   })
   const { data, loading } = gate
 
@@ -64,6 +67,7 @@ export function TopShopsTab() {
     <div className="space-y-3">
       <FilterBar
         range={range} setRange={setRange} preset={preset} setPreset={setPreset}
+        city={city} setCity={setCity} cities={fopts.cities}
         onRefresh={gate.load} loading={loading} armed={gate.armed} stale={gate.stale}
       />
       {!gate.armed ? (

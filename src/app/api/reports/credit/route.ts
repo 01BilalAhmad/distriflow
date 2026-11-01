@@ -1,7 +1,7 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
 import { requireUser } from '@/lib/api-auth'
-import { r2 } from '@/lib/reports-kit-server'
+import { cityWhere, r2 } from '@/lib/reports-kit-server'
 import { backfillBalances, creditStatus, oldestUnpaid, agingBucket } from '@/lib/dms-credit'
 
 // ============================================================
@@ -29,13 +29,14 @@ export async function GET(req: Request) {
 
     const url = new URL(req.url)
     const bookerId = url.searchParams.get('bookerId') || undefined
+    const city = url.searchParams.get('city') || undefined
 
     // Legacy outlets pehle sync (one-time per outlet — report hamesha fresh)
     await backfillBalances(profileId)
 
     // ---- shops + booker ----
     const outlets = await db.outlet.findMany({
-      where: { distributorId: profileId, ...(bookerId ? { salesmanId: bookerId } : {}) },
+      where: { distributorId: profileId, ...(bookerId ? { salesmanId: bookerId } : {}), ...cityWhere(city) },
       select: {
         id: true, name: true, code: true, city: true, channel: true,
         creditDays: true, creditLimit: true, balance: true,

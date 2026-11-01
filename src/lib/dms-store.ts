@@ -43,6 +43,10 @@ export type ViewKey =
   | 'reports-returns-claims'
   | 'reports-floor-stock'
   | 'reports-top-shops'
+  | 'reports-day-book'
+  | 'reports-aging'
+  | 'reports-visits'
+  | 'reports-fill-rate'
   | 'sales-app'
   | 'settings'
 

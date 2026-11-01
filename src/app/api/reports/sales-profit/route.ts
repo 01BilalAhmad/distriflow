@@ -1,7 +1,7 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
 import { requireUser } from '@/lib/api-auth'
-import { parseRange, unitCostMap, bookerList, companyList, r2 } from '@/lib/reports-kit-server'
+import { parseRange, unitCostMap, bookerList, companyList, cityWhere, r2 } from '@/lib/reports-kit-server'
 
 // ============================================================
 // Task 66 — SALES & PROFIT REPORT
@@ -37,6 +37,7 @@ export async function GET(req: Request) {
     const { from, to } = parseRange(url)
     const bookerId = url.searchParams.get('bookerId') || undefined
     const companyId = url.searchParams.get('companyId') || undefined
+    const city = url.searchParams.get('city') || undefined
 
     // ---- products (name/sku/company/fallback cost) ----
     const products = await db.product.findMany({
@@ -66,6 +67,7 @@ export async function GET(req: Request) {
         orderDate: { gte: from, lte: to },
         status: { not: 'CANCELLED' },
         ...(bookerId ? { salesmanId: bookerId } : {}),
+        outlet: cityWhere(city),
       },
       select: {
         id: true, salesmanId: true, outletId: true,
@@ -77,7 +79,7 @@ export async function GET(req: Request) {
 
     // ---- approved returns in period ----
     const returns = await db.saleReturn.findMany({
-      where: { outlet: { distributorId: profileId }, status: 'APPROVED', createdAt: { gte: from, lte: to } },
+      where: { outlet: { distributorId: profileId, ...cityWhere(city) }, status: 'APPROVED', createdAt: { gte: from, lte: to } },
       select: { items: { select: { productId: true, qty: true, value: true } } },
     })
 

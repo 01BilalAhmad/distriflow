@@ -1,7 +1,7 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
 import { requireUser } from '@/lib/api-auth'
-import { parseRange, r2 } from '@/lib/reports-kit-server'
+import { parseRange, cityWhere, r2 } from '@/lib/reports-kit-server'
 
 // ============================================================
 // Task 66 — TOP SHOPS REPORT (ABC analysis)
@@ -25,9 +25,10 @@ export async function GET(req: Request) {
     if (!user.profile) return jsonError('Distributor profile not found', 404)
     const profileId = user.profile.id
     const { from, to } = parseRange(url)
+    const city = url.searchParams.get('city') || undefined
 
     const orders = await db.order.findMany({
-      where: { distributorId: profileId, orderDate: { gte: from, lte: to }, status: { not: 'CANCELLED' } },
+      where: { distributorId: profileId, orderDate: { gte: from, lte: to }, status: { not: 'CANCELLED' }, outlet: cityWhere(city) },
       select: {
         outletId: true, total: true, orderDate: true,
         outlet: { select: { name: true, code: true, city: true, channel: true, salesman: { select: { name: true } } } },

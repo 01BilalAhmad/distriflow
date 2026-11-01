@@ -1,7 +1,7 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
 import { requireUser } from '@/lib/api-auth'
-import { parseRange, r2 } from '@/lib/reports-kit-server'
+import { parseRange, cityWhere, r2 } from '@/lib/reports-kit-server'
 
 // ============================================================
 // Task 66 — ORDER BOOKER PERFORMANCE REPORT
@@ -24,6 +24,7 @@ export async function GET(req: Request) {
     if (!user.profile) return jsonError('Distributor profile not found', 404)
     const profileId = user.profile.id
     const { from, to } = parseRange(url)
+    const city = url.searchParams.get('city') || undefined
 
     const dist = await db.distributorProfile.findUnique({ where: { id: profileId }, select: { userId: true } })
     if (!dist) return jsonError('Distributor profile not found', 404)
@@ -37,13 +38,13 @@ export async function GET(req: Request) {
     // assigned shops per booker
     const assignedRows = await db.outlet.groupBy({
       by: ['salesmanId'],
-      where: { distributorId: profileId, isActive: true, salesmanId: { in: bIds } },
+      where: { distributorId: profileId, isActive: true, salesmanId: { in: bIds }, ...cityWhere(city) },
       _count: { _all: true },
     })
     const assigned = new Map(assignedRows.map((r) => [r.salesmanId!, r._count._all]))
 
     const orders = await db.order.findMany({
-      where: { distributorId: profileId, orderDate: { gte: from, lte: to }, status: { not: 'CANCELLED' }, salesmanId: { in: bIds } },
+      where: { distributorId: profileId, orderDate: { gte: from, lte: to }, status: { not: 'CANCELLED' }, salesmanId: { in: bIds }, outlet: cityWhere(city) },
       select: {
         id: true, salesmanId: true, outletId: true, total: true, schemeDiscount: true, manualDiscount: true, orderDate: true,
         items: { select: { qty: true, freeQty: true } },
@@ -66,7 +67,7 @@ export async function GET(req: Request) {
     // recovery (APPROVED) per booker in period
     const rec = await db.recovery.groupBy({
       by: ['bookerId'],
-      where: { outlet: { distributorId: profileId }, recoveredAt: { gte: from, lte: to }, status: 'APPROVED', bookerId: { in: bIds } },
+      where: { outlet: { distributorId: profileId, ...cityWhere(city) }, recoveredAt: { gte: from, lte: to }, status: 'APPROVED', bookerId: { in: bIds } },
       _sum: { amount: true },
     })
     const recMap = new Map(rec.map((r) => [r.bookerId!, r._sum.amount ?? 0]))

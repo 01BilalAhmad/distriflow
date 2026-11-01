@@ -26,11 +26,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR, fmtNum } from '@/lib/dms-api'
+import { isoDay } from './reports/reports-kit'
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import {
   BarChart3, TrendingUp, Percent, ShoppingCart, Receipt, HandCoins, Target,
   Boxes, Users, Building2, Undo2, Store, Coins, BookLock, PackageX,
+  NotebookPen, Hourglass, MapPinned, PackageCheck, ArrowUpRight, ArrowDownRight, Minus,
 } from 'lucide-react'
+import Link from 'next/link'
 import { SalesProfitTab } from './reports/sales-profit-tab'
 import { SkuProfitTab } from './reports/sku-profit-tab'
 import { ZeroPurchaseTab } from './reports/zero-purchase-tab'
@@ -44,6 +47,10 @@ import { CompanyPurchaseTab } from './reports/company-purchase-tab'
 import { ReturnsClaimsTab } from './reports/returns-claims-tab'
 import { FloorStockTab } from './reports/floor-stock-tab'
 import { TopShopsTab } from './reports/top-shops-tab'
+import { DayBookTab } from './reports/day-book-tab'
+import { AgingTab } from './reports/aging-tab'
+import { VisitsTab } from './reports/visits-tab'
+import { FillRateTab } from './reports/fill-rate-tab'
 
 const COLORS = ['#059669', '#10b981', '#34d399', '#6ee7b7', '#f59e0b', '#a7f3d0']
 
@@ -62,6 +69,10 @@ const TABS = [
   { key: 'returns-claims', label: 'Returns', icon: Undo2 },
   { key: 'floor-stock', label: 'Damage & Expiry Floor', icon: PackageX }, // Task 30
   { key: 'top-shops', label: 'Top Shops', icon: Store },
+  { key: 'day-book', label: 'Day Book', icon: NotebookPen }, // Task 131
+  { key: 'aging', label: 'Aging 30/60/90', icon: Hourglass }, // Task 131
+  { key: 'visits', label: 'Visit Compliance', icon: MapPinned }, // Task 131
+  { key: 'fill-rate', label: 'Fill Rate', icon: PackageCheck }, // Task 131
 ] as const
 
 type TabKey = (typeof TABS)[number]['key']
@@ -81,7 +92,7 @@ export function ReportsView({ tab: tabProp }: { tab?: string }) {
           {active && active.key !== 'overview' ? (
             <>Business ka poora hisaab — <b className="text-emerald-700">{active.label}</b> report • Pehle filters set karein, phir &quot;Report Load Karein&quot; — sirf selected data load hoga (Excel, PDF, CSV, print sab mojood)</>
           ) : (
-            'Business ka poora hisaab — 13 detailed reports • Har report filter-first hai: filters set karein, phir load karein'
+            'Business ka poora hisaab — 17 detailed reports • Har report filter-first hai: filters set karein, phir load karein'
           )}
         </p>
       </div>
@@ -102,13 +113,19 @@ export function ReportsView({ tab: tabProp }: { tab?: string }) {
         {tab === 'returns-claims' && <ReturnsClaimsTab />}
         {tab === 'floor-stock' && <FloorStockTab />}
         {tab === 'top-shops' && <TopShopsTab />}
+        {tab === 'day-book' && <DayBookTab />}
+        {tab === 'aging' && <AgingTab />}
+        {tab === 'visits' && <VisitsTab />}
+        {tab === 'fill-rate' && <FillRateTab />}
       </div>
     </div>
   )
 }
 
 // ============================================================
-// OVERVIEW TAB — pehle wala analytics dashboard (charts)
+// OVERVIEW TAB — analytics dashboard (charts)
+// Task 131 — date presets (6m / month / 30d / 7d), MoM comparison cards
+// (is mahine vs pichla mahine % delta) + naye reports ke quick links.
 // ============================================================
 interface ReportsData {
   summary: { totalSales: number; totalDiscount: number; totalOrders: number; avgOrderValue: number }
@@ -117,26 +134,80 @@ interface ReportsData {
   topOutlets: { name: string; value: number }[]
   brandPerf: { name: string; value: number }[]
   cityPerf: { city: string; value: number }[]
+  mom: {
+    thisMonth: { sales: number; orders: number }
+    lastMonth: { sales: number; orders: number }
+    salesDeltaPct: number | null
+    ordersDeltaPct: number | null
+  }
 }
+
+type OvPreset = '6m' | 'thisMonth' | 'lastMonth' | '30d' | '7d'
+const OV_PRESETS: { key: OvPreset; label: string }[] = [
+  { key: '6m', label: '6 Mahine' },
+  { key: 'thisMonth', label: 'Is Month' },
+  { key: 'lastMonth', label: 'Pichla Month' },
+  { key: '30d', label: '30 Din' },
+  { key: '7d', label: '7 Din' },
+]
+function ovPresetFrom(p: OvPreset): string {
+  const now = new Date()
+  switch (p) {
+    case '6m': { const d = new Date(now.getFullYear(), now.getMonth() - 5, 1); return isoDay(d) }
+    case 'thisMonth': return isoDay(new Date(now.getFullYear(), now.getMonth(), 1))
+    case 'lastMonth': return isoDay(new Date(now.getFullYear(), now.getMonth() - 1, 1))
+    case '30d': { const d = new Date(now); d.setDate(d.getDate() - 29); return isoDay(d) }
+    case '7d': { const d = new Date(now); d.setDate(d.getDate() - 6); return isoDay(d) }
+  }
+}
+
+function DeltaBadge({ pct }: { pct: number | null }) {
+  if (pct == null) return <span className="inline-flex items-center gap-0.5 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500"><Minus className="h-3 w-3" /> naya</span>
+  const up = pct >= 0
+  return (
+    <span className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-bold ${up ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+      {up ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
+      {Math.abs(pct)}%
+    </span>
+  )
+}
+
+const QUICK_LINKS: { href: string; label: string; desc: string }[] = [
+  { href: '/reports/day-book', label: 'Day Book', desc: 'Roz ka cash hisaab' },
+  { href: '/reports/aging', label: 'Aging 30/60/90', desc: 'Purana udhaar' },
+  { href: '/reports/visits', label: 'Visit Compliance', desc: 'Plan vs actual' },
+  { href: '/reports/fill-rate', label: 'Fill Rate', desc: 'Manga vs mila' },
+  { href: '/reports/recovery', label: 'Recovery', desc: 'Wasooli report' },
+  { href: '/reports/sales-profit', label: 'Sales & Profit', desc: 'Revenue analysis' },
+]
 
 function OverviewTab() {
   const user = useDMS((s) => s.user)
   const [data, setData] = useState<ReportsData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [preset, setPreset] = useState<OvPreset>('6m')
 
   useEffect(() => {
     if (!user) return
-    api<ReportsData>(`/api/reports?userId=${user.id}`)
-      .then(setData)
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [user])
+    let alive = true
+    Promise.resolve().then(() => {
+      if (!alive) return
+      setLoading(true)
+      return api<ReportsData>(`/api/reports?userId=${user.id}&from=${ovPresetFrom(preset)}`)
+        .then((d) => { if (alive) setData(d) })
+        .catch(() => {})
+        .finally(() => { if (alive) setLoading(false) })
+    })
+    return () => { alive = false }
+  }, [user, preset])
 
   if (loading || !data) return <div className="space-y-4"><Skeleton className="h-24 rounded-xl" /><div className="grid gap-4 lg:grid-cols-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-72 rounded-xl" />)}</div></div>
 
   const s = data.summary
+  const m = data.mom
+  const periodLabel = OV_PRESETS.find((p) => p.key === preset)?.label ?? ''
   const cards = [
-    { t: 'Total Sales (6 mo)', v: fmtPKR(s.totalSales), i: TrendingUp },
+    { t: `Total Sales (${periodLabel})`, v: fmtPKR(s.totalSales), i: TrendingUp },
     { t: 'Total Orders', v: fmtNum(s.totalOrders), i: ShoppingCart },
     { t: 'Scheme Discounts', v: fmtPKR(s.totalDiscount), i: Percent },
     { t: 'Avg Order Value', v: fmtPKR(s.avgOrderValue), i: Receipt },
@@ -144,6 +215,55 @@ function OverviewTab() {
 
   return (
     <div className="space-y-4">
+      {/* Task 131 — date presets */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {OV_PRESETS.map((p) => (
+          <button
+            key={p.key}
+            onClick={() => setPreset(p.key)}
+            className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition-colors ${
+              preset === p.key ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700'
+            }`}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Task 131 — MoM comparison (is mahine vs pichla mahine) */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Card className="border-emerald-200 bg-gradient-to-br from-emerald-50/60 to-white shadow-sm">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-slate-500">Is Mahine ki Sale</p>
+                <p className="mt-1 text-xl font-bold text-slate-900">{fmtPKR(m.thisMonth.sales)}</p>
+                <p className="mt-0.5 text-[11px] text-slate-400">Pichla mahina: {fmtPKR(m.lastMonth.sales)}</p>
+              </div>
+              <div className="text-right">
+                <DeltaBadge pct={m.salesDeltaPct} />
+                <p className="mt-1 text-[10px] text-slate-400">sale delta</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border-blue-200 bg-gradient-to-br from-blue-50/60 to-white shadow-sm">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-slate-500">Is Mahine ke Orders</p>
+                <p className="mt-1 text-xl font-bold text-slate-900">{fmtNum(m.thisMonth.orders)}</p>
+                <p className="mt-0.5 text-[11px] text-slate-400">Pichla mahina: {fmtNum(m.lastMonth.orders)}</p>
+              </div>
+              <div className="text-right">
+                <DeltaBadge pct={m.ordersDeltaPct} />
+                <p className="mt-1 text-[10px] text-slate-400">orders delta</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {cards.map((c) => (
           <Card key={c.t} className="border-slate-200 shadow-sm">
@@ -157,6 +277,20 @@ function OverviewTab() {
               </div>
             </CardContent>
           </Card>
+        ))}
+      </div>
+
+      {/* Task 131 — naye reports quick links */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        {QUICK_LINKS.map((q) => (
+          <Link
+            key={q.href}
+            href={q.href}
+            className="group rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition-colors hover:border-emerald-300 hover:bg-emerald-50/50"
+          >
+            <p className="text-xs font-bold text-slate-700 group-hover:text-emerald-700">{q.label}</p>
+            <p className="mt-0.5 text-[10px] text-slate-400">{q.desc}</p>
+          </Link>
         ))}
       </div>
 

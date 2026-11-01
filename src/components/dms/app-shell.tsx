@@ -33,7 +33,7 @@ import {
   ClipboardList, FileStack, Wallet, BookText, BookLock, HandCoins, Landmark,
   Database, Map as MapIcon, TrendingUp, Receipt, ReceiptText, Target, Boxes, Coins, ScrollText,
   Settings as SettingsIcon, ChevronRight, ChevronLeft, Search, Calendar, Menu, PanelLeftClose, PanelLeftOpen, X,
-  Activity, Wrench,
+  Activity, Wrench, NotebookPen, Hourglass, MapPinned, PackageCheck,
 } from 'lucide-react'
 
 // group = sidebar section header — items usi order mein neeche aate hain
@@ -75,6 +75,11 @@ const NAV: { key: string; label: string; icon: typeof LayoutDashboard; roles: st
   // Task 30 — Damage & Expiry Floor apni report tile (pehle sirf Returns ke andar section tha — nazar nai aati thi)
   { key: 'reports-floor-stock', label: 'Damage & Expiry Floor', icon: PackageX, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'Floor par jama damage/expired stock (inventory ke baghair)' },
   { key: 'reports-top-shops', label: 'Top Shops', icon: Store, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'Sab se baray buyers' },
+  // Task 131 — naye reports (Day Book / Aging / Visits / Fill Rate)
+  { key: 'reports-day-book', label: 'Day Book', icon: NotebookPen, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'Roz ka hisaab — bills, cash, wasooli' },
+  { key: 'reports-aging', label: 'Aging 30/60/90', icon: Hourglass, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'Kitna udhaar kitna purana' },
+  { key: 'reports-visits', label: 'Visit Compliance', icon: MapPinned, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'PJP plan vs actual visits' },
+  { key: 'reports-fill-rate', label: 'Fill Rate', icon: PackageCheck, roles: ['DISTRIBUTOR'], group: 'Reports', desc: 'Manga vs mila — supply gap' },
   // Stock & Catalog — stock aur items
   { key: 'inventory', label: 'Inventory', icon: Warehouse, roles: ['DISTRIBUTOR'], group: 'Stock & Catalog', desc: 'Live stock levels' },
   { key: 'products', label: 'Products', icon: Package, roles: ['DISTRIBUTOR'], group: 'Stock & Catalog', desc: 'Items, rates & cartons' },

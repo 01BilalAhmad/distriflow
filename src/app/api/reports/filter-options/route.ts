@@ -1,6 +1,6 @@
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
 import { requireUser } from '@/lib/api-auth'
-import { bookerList, companyList } from '@/lib/reports-kit-server'
+import { bookerList, companyList, cityList } from '@/lib/reports-kit-server'
 
 // ============================================================
 // Task 74 — FILTER-OPTIONS (light endpoint — filter-first reports)
@@ -22,10 +22,11 @@ export async function GET(req: Request) {
     if (user.role !== 'DISTRIBUTOR') return jsonError('Reports sirf distributor account ke liye hain', 403)
     if (!user.profile) return jsonError('Distributor profile not found', 404)
     const profileId = user.profile.id
-    const [bookers, companies] = await Promise.all([bookerList(profileId), companyList(profileId)])
+    const [bookers, companies, cities] = await Promise.all([bookerList(profileId), companyList(profileId), cityList(profileId)])
     return Response.json({
       bookers: bookers.map((b) => ({ id: b.id, label: b.name })),
       companies: companies.map((c) => ({ id: c.id, label: c.name })),
+      cities: cities.map((c) => ({ id: c, label: c })),
     })
   } catch (e) {
     console.error('reports/filter-options error', e)

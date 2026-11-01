@@ -1,7 +1,7 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
 import { requireUser } from '@/lib/api-auth'
-import { parseRange, bookerList, companyList, r2 } from '@/lib/reports-kit-server'
+import { parseRange, bookerList, companyList, cityWhere, r2, fifoUncoveredDebits, agingBucket } from '@/lib/reports-kit-server'
 
 // ============================================================
 // Task 66 — RECOVERY REPORT (wasooli)
@@ -31,10 +31,11 @@ export async function GET(req: Request) {
     const { from, to } = parseRange(url)
     const bookerId = url.searchParams.get('bookerId') || undefined
     const companyId = url.searchParams.get('companyId') || undefined
+    const city = url.searchParams.get('city') || undefined
 
     // ---- shops + assigned booker ----
     const outlets = await db.outlet.findMany({
-      where: { distributorId: profileId, ...(bookerId ? { salesmanId: bookerId } : {}) },
+      where: { distributorId: profileId, ...(bookerId ? { salesmanId: bookerId } : {}), ...cityWhere(city) },
       select: { id: true, name: true, code: true, city: true, channel: true, creditDays: true, salesman: { select: { name: true } } },
       orderBy: { name: 'asc' },
     })
@@ -58,6 +59,7 @@ export async function GET(req: Request) {
       select: { outletId: true, type: true, amount: true, date: true, refType: true },
     })
     const bal = new Map<string, { balance: number; billed: number; collected: number; lastEntry: Date | null; lastPay: Date | null }>()
+    const ledgerByOutlet = new Map<string, { type: string; amount: number; date: Date }[]>()
     for (const e of ledger) {
       const b = bal.get(e.outletId) ?? { balance: 0, billed: 0, collected: 0, lastEntry: null as Date | null, lastPay: null as Date | null }
       if (e.type === 'DEBIT') {
@@ -70,6 +72,33 @@ export async function GET(req: Request) {
       }
       if (!b.lastEntry || e.date > b.lastEntry) b.lastEntry = e.date
       bal.set(e.outletId, b)
+      const arr = ledgerByOutlet.get(e.outletId) ?? []
+      arr.push({ type: e.type, amount: e.amount, date: e.date })
+      ledgerByOutlet.set(e.outletId, arr)
+    }
+
+    // Task 131 — FIFO aging per shop (oldest unpaid invoice + bucket amounts)
+    const nowMs = Date.now()
+    const agingByOutlet = new Map<string, { oldestUnpaidDate: string | null; oldestDays: number | null; b0_30: number; b31_60: number; b61_90: number; b90plus: number }>()
+    for (const [oid, entries] of ledgerByOutlet) {
+      const { uncovered } = fifoUncoveredDebits(entries)
+      if (uncovered.length === 0) continue
+      let oldest: Date | null = null
+      const buckets = { b0_30: 0, b31_60: 0, b61_90: 0, b90plus: 0 }
+      for (const d of uncovered) {
+        const days = Math.max(0, Math.floor((nowMs - d.date.getTime()) / 86400000))
+        const b = agingBucket(days)
+        if (b === '0-30') buckets.b0_30 = r2(buckets.b0_30 + d.amount)
+        else if (b === '31-60') buckets.b31_60 = r2(buckets.b31_60 + d.amount)
+        else if (b === '61-90') buckets.b61_90 = r2(buckets.b61_90 + d.amount)
+        else buckets.b90plus = r2(buckets.b90plus + d.amount)
+        if (!oldest || d.date < oldest) oldest = d.date
+      }
+      agingByOutlet.set(oid, {
+        oldestUnpaidDate: oldest?.toISOString() ?? null,
+        oldestDays: oldest ? Math.floor((nowMs - oldest.getTime()) / 86400000) : null,
+        ...buckets,
+      })
     }
 
     const now = new Date()
@@ -77,6 +106,7 @@ export async function GET(req: Request) {
       .map((o) => {
         const b = bal.get(o.id)
         const balance = b?.balance ?? 0
+        const ag = agingByOutlet.get(o.id)
         const overDays = b?.lastPay ? Math.floor((now.getTime() - b.lastPay.getTime()) / 86400000) : (b?.lastEntry ? Math.floor((now.getTime() - b.lastEntry.getTime()) / 86400000) : null)
         return {
           outletId: o.id,
@@ -91,6 +121,13 @@ export async function GET(req: Request) {
           totalCollected: b?.collected ?? 0,
           lastPaymentDate: b?.lastPay?.toISOString() ?? null,
           daysSinceLastPayment: overDays,
+          // Task 131 — aging
+          oldestUnpaidDate: ag?.oldestUnpaidDate ?? null,
+          oldestDays: ag?.oldestDays ?? null,
+          b0_30: ag?.b0_30 ?? 0,
+          b31_60: ag?.b31_60 ?? 0,
+          b61_90: ag?.b61_90 ?? 0,
+          b90plus: ag?.b90plus ?? 0,
           overdue: o.creditDays > 0 && overDays != null ? overDays > o.creditDays && balance > 0 : false,
         }
       })
@@ -143,9 +180,17 @@ export async function GET(req: Request) {
     const outTotal = r2(outstanding.reduce((t, x) => t + x.balance, 0))
     const histTotal = r2(history.reduce((t, x) => t + x.amount, 0))
 
+    // Task 131 — aging summary (uncovered FIFO buckets across outstanding shops)
+    const agingSummary = [
+      { bucket: '0-30', amount: r2(outstanding.reduce((t, x) => t + x.b0_30, 0)), shops: outstanding.filter((x) => x.b0_30 > 0.005).length },
+      { bucket: '31-60', amount: r2(outstanding.reduce((t, x) => t + x.b31_60, 0)), shops: outstanding.filter((x) => x.b31_60 > 0.005).length },
+      { bucket: '61-90', amount: r2(outstanding.reduce((t, x) => t + x.b61_90, 0)), shops: outstanding.filter((x) => x.b61_90 > 0.005).length },
+      { bucket: '90+', amount: r2(outstanding.reduce((t, x) => t + x.b90plus, 0)), shops: outstanding.filter((x) => x.b90plus > 0.005).length },
+    ]
+
     return Response.json({
       range: { from: from.toISOString(), to: to.toISOString() },
-      filters: { bookerId: bookerId ?? null, companyId: companyId ?? null },
+      filters: { bookerId: bookerId ?? null, companyId: companyId ?? null, city: city ?? null },
       summary: {
         outstandingShops: outstanding.length,
         outstandingTotal: outTotal,
@@ -154,6 +199,7 @@ export async function GET(req: Request) {
         collectedInPeriod: histTotal,
         historyEntries: history.length,
       },
+      aging: agingSummary,
       outstanding,
       history,
       bookerSummary,

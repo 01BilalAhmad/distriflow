@@ -65,6 +65,11 @@ export function fmtDay(iso: string | null | undefined): string {
   if (!iso) return '—'
   return new Date(iso).toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: '2-digit' })
 }
+/** Task 131 — date + time (visit check-ins waghera) */
+export function fmtDT(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleString('en-PK', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+}
 export function rangeLabel(r: DateRange): string {
   const f = (s: string) => new Date(s + 'T00:00:00').toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' })
   return f(r.from) + ' — ' + f(r.to)
@@ -84,13 +89,16 @@ export function FilterBar(props: {
   setCompany?: (v: string) => void
   bookers?: Option[]
   companies?: Option[]
+  city?: string
+  setCity?: (v: string) => void
+  cities?: Option[]
   extra?: React.ReactNode
   onRefresh: () => void
   loading?: boolean
   armed?: boolean // Task 74: false = report abhi load nahi hui → "Report Load Karein"
   stale?: boolean // Task 74: filters badal gaye load ke baad → "Report Update Karein" (amber)
 }) {
-  const { range, setRange, preset, setPreset, booker, setBooker, company, setCompany, bookers, companies, extra, onRefresh, loading, armed, stale } = props
+  const { range, setRange, preset, setPreset, booker, setBooker, company, setCompany, bookers, companies, city, setCity, cities, extra, onRefresh, loading, armed, stale } = props
   const isArmed = armed ?? true
   const sel = 'h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/30'
   return (
@@ -137,6 +145,12 @@ export function FilterBar(props: {
           {companies.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
         </select>
       )}
+      {cities && setCity && (
+        <select value={city ?? ''} onChange={(e) => setCity(e.target.value)} className={sel}>
+          <option value="">Sab Cities</option>
+          {cities.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+        </select>
+      )}
       {extra}
       <GateRefreshButton armed={isArmed} stale={!!stale} loading={!!loading} onClick={onRefresh} />
     </div>
@@ -165,20 +179,20 @@ export function GateRefreshButton(props: { armed: boolean; stale: boolean; loadi
   )
 }
 
-/** Task 74 — filter dropdowns ke options (bookers + companies) — halka endpoint,
+/** Task 74 — filter dropdowns ke options (bookers + companies + cities) — halka endpoint,
  *  report page mount par ek dafa load hota hai (heavy report query ke bagair) */
-export interface FilterOptions { bookers: Option[]; companies: Option[] }
+export interface FilterOptions { bookers: Option[]; companies: Option[]; cities?: Option[] }
 
 export function useFilterOptions(userId: string | undefined): FilterOptions {
-  const [fopts, setFopts] = useState<FilterOptions>({ bookers: [], companies: [] })
+  const [fopts, setFopts] = useState<FilterOptions>({ bookers: [], companies: [], cities: [] })
   useEffect(() => {
     if (!userId) return
     let alive = true
     Promise.resolve().then(() => {
       if (!alive) return
       return api<FilterOptions>(`/api/reports/filter-options?userId=${userId}`)
-        .then((d) => { if (alive) setFopts({ bookers: d.bookers ?? [], companies: d.companies ?? [] }) })
-        .catch(() => { if (alive) setFopts({ bookers: [], companies: [] }) })
+        .then((d) => { if (alive) setFopts({ bookers: d.bookers ?? [], companies: d.companies ?? [], cities: d.cities ?? [] }) })
+        .catch(() => { if (alive) setFopts({ bookers: [], companies: [], cities: [] }) })
     })
     return () => { alive = false }
   }, [userId])

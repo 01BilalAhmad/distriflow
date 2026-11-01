@@ -98,4 +98,58 @@ export function companyList(profileId: string) {
   })
 }
 
+/** Task 131 — distributor ki shops ke DISTINCT cities — City filter dropdown ke liye */
+export async function cityList(profileId: string): Promise<string[]> {
+  const rows = await db.outlet.findMany({
+    where: { distributorId: profileId },
+    select: { city: true },
+    distinct: ['city'],
+    orderBy: { city: 'asc' },
+  })
+  return rows.map((r) => r.city).filter(Boolean)
+}
+
+/** Task 131 — City filter ke liye outlet where ka city hissa (spread-ready) */
+export function cityWhere(city: string | undefined): { city?: string } {
+  return city ? { city } : {}
+}
+
+export type LedgerEntryLite = { type: string; amount: number; date: Date }
+
+/**
+ * Task 131 — FIFO uncovered debits: ledger entries (kisi bhi order mein) date-asc
+ * sort karke credits sab se PURANE debits par FIFO apply karte hain — jo debits
+ * end tak uncovered reh gaye wo array milta hai (amount bacha hua + date).
+ * Aging reports isi par bucket lagati hain (aaj se umar). balance = ΣDEBIT − ΣCREDIT.
+ */
+export function fifoUncoveredDebits(
+  entries: LedgerEntryLite[],
+): { uncovered: Array<{ amount: number; date: Date }>; balance: number } {
+  const sorted = [...entries].sort((a, b) => a.date.getTime() - b.date.getTime())
+  const debits: Array<{ amount: number; date: Date }> = []
+  let balance = 0
+  for (const e of sorted) {
+    if (e.type === 'DEBIT') {
+      debits.push({ amount: e.amount, date: e.date })
+      balance = r2(balance + e.amount)
+    } else {
+      let credit = e.amount
+      while (credit > 0.005 && debits.length > 0) {
+        const head = debits[0]
+        const used = Math.min(head.amount, credit)
+        head.amount = r2(head.amount - used)
+        credit = r2(credit - used)
+        if (head.amount <= 0.005) debits.shift()
+      }
+      balance = r2(balance - e.amount)
+    }
+  }
+  return { uncovered: debits.filter((d) => d.amount > 0.005), balance }
+}
+
+/** Task 131 — umar (din) se bucket label — 0-30 / 31-60 / 61-90 / 90+ */
+export function agingBucket(days: number): '0-30' | '31-60' | '61-90' | '90+' {
+  return days <= 30 ? '0-30' : days <= 60 ? '31-60' : days <= 90 ? '61-90' : '90+'
+}
+
 export type SortOpts = Record<string, 'asc' | 'desc' | undefined>

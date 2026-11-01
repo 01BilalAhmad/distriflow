@@ -50,6 +50,11 @@ export const VIEW_PATH: Record<ViewKey, string> = {
   // Task 30 — Damage & Expiry Floor report apna URL (Task 29 section ab discoverable tile bhi)
   'reports-floor-stock': '/reports/floor-stock',
   'reports-top-shops': '/reports/top-shops',
+  // Task 131 — naye reports: Day Book / Aging / Visits / Fill Rate
+  'reports-day-book': '/reports/day-book',
+  'reports-aging': '/reports/aging',
+  'reports-visits': '/reports/visits',
+  'reports-fill-rate': '/reports/fill-rate',
   'sales-app': '/sales-app',
   // Task 78 — distributor apni profile (bill print ka naam/cell) + tax/GST settings
   settings: '/settings',

@@ -49,15 +49,17 @@ export function CreditTab() {
   const { user } = useDMS()
   const [booker, setBooker] = useState('')
   const [status, setStatus] = useState('')
+  const [city, setCity] = useState('')
   const fopts = useFilterOptions(user?.id)
 
   const gate = useReportGate<Resp>({
     fetcher: async () => {
       const p = new URLSearchParams({ userId: user!.id })
       if (booker) p.set('bookerId', booker)
+      if (city) p.set('city', city)
       return api<Resp>(`/api/reports/credit?${p}`)
     },
-    filtersKey: `${booker}`,
+    filtersKey: `${booker}|${city}`,
   })
   const { data, loading } = gate
 
@@ -94,6 +96,13 @@ export function CreditTab() {
           <select value={booker} onChange={(e) => setBooker(e.target.value)} className="h-9 min-w-40 rounded-lg border border-slate-300 bg-white px-2 text-xs dark:border-slate-600 dark:bg-slate-800">
             <option value="">Sab bookers</option>
             {fopts.bookers.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-500">City</label>
+          <select value={city} onChange={(e) => setCity(e.target.value)} className="h-9 min-w-32 rounded-lg border border-slate-300 bg-white px-2 text-xs dark:border-slate-600 dark:bg-slate-800">
+            <option value="">Sab cities</option>
+            {(fopts.cities ?? []).map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
           </select>
         </div>
         <div>

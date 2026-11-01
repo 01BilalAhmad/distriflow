@@ -39,6 +39,7 @@ export function SalesProfitTab() {
   const { range, setRange, preset, setPreset } = useRangeFilter()
   const [booker, setBooker] = useState('')
   const [company, setCompany] = useState('')
+  const [city, setCity] = useState('')
   const [view, setView] = useState<(typeof VIEW)[number]>('product')
   const fopts = useFilterOptions(user?.id)
 
@@ -48,9 +49,10 @@ export function SalesProfitTab() {
       const p = new URLSearchParams({ userId: user!.id, from: range.from, to: range.to })
       if (booker) p.set('bookerId', booker)
       if (company) p.set('companyId', company)
+      if (city) p.set('city', city)
       return api<Resp>(`/api/reports/sales-profit?${p}`)
     },
-    filtersKey: `${range.from}|${range.to}|${booker}|${company}`,
+    filtersKey: `${range.from}|${range.to}|${booker}|${company}|${city}`,
   })
   const { data, loading } = gate
 
@@ -124,6 +126,7 @@ export function SalesProfitTab() {
         range={range} setRange={setRange} preset={preset} setPreset={setPreset}
         booker={booker} setBooker={setBooker} bookers={fopts.bookers}
         company={company} setCompany={setCompany} companies={fopts.companies}
+        city={city} setCity={setCity} cities={fopts.cities}
         onRefresh={gate.load} loading={loading} armed={gate.armed} stale={gate.stale}
       />
       {!gate.armed ? (

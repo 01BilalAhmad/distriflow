@@ -1,7 +1,7 @@
 import { db } from '@/lib/db'
 import { jsonError, megaBlocked } from '@/lib/dms-scope'
 import { requireUser } from '@/lib/api-auth'
-import { bookerList, r2 } from '@/lib/reports-kit-server'
+import { bookerList, cityWhere, r2 } from '@/lib/reports-kit-server'
 
 // ============================================================
 // Task 66 — ZERO PURCHASE REPORT (month-wise)
@@ -38,10 +38,11 @@ export async function GET(req: Request) {
     const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`
 
     const bookerId = url.searchParams.get('bookerId') || undefined
+    const city = url.searchParams.get('city') || undefined
 
     // ---- active shops (assigned booker filter optional) ----
     const outlets = await db.outlet.findMany({
-      where: { distributorId: profileId, isActive: true, ...(bookerId ? { salesmanId: bookerId } : {}) },
+      where: { distributorId: profileId, isActive: true, ...(bookerId ? { salesmanId: bookerId } : {}), ...cityWhere(city) },
       select: { id: true, name: true, code: true, city: true, channel: true, salesmanId: true, salesman: { select: { name: true } } },
       orderBy: { name: 'asc' },
     })
@@ -49,7 +50,7 @@ export async function GET(req: Request) {
 
     // ---- orders is month ----
     const monthOrders = await db.order.findMany({
-      where: { distributorId: profileId, orderDate: { gte: mStart, lte: mEnd }, status: { not: 'CANCELLED' }, ...(bookerId ? { salesmanId: bookerId } : {}) },
+      where: { distributorId: profileId, orderDate: { gte: mStart, lte: mEnd }, status: { not: 'CANCELLED' }, ...(bookerId ? { salesmanId: bookerId } : {}), outlet: cityWhere(city) },
       select: { outletId: true, total: true },
     })
     const orderedSet = new Set(monthOrders.map((o) => o.outletId))
@@ -59,7 +60,7 @@ export async function GET(req: Request) {
     // ---- last order ever (per outlet) + pichle 3 mahine ka average ----
     const histStart = new Date(year, month - 3, 1, 0, 0, 0, 0) // 3 pooray mahine (is month se pehle)
     const histOrders = await db.order.findMany({
-      where: { distributorId: profileId, orderDate: { gte: histStart }, status: { not: 'CANCELLED' } },
+      where: { distributorId: profileId, orderDate: { gte: histStart }, status: { not: 'CANCELLED' }, outlet: cityWhere(city) },
       select: { outletId: true, orderDate: true, total: true },
       orderBy: { orderDate: 'desc' },
     })
