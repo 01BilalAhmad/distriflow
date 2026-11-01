@@ -3,6 +3,9 @@ import { jsonError, megaBlocked } from '@/lib/dms-scope'
 import { requireUser } from '@/lib/api-auth'
 import { matchShopCategory, readShopCategories } from '@/lib/dms-settings'
 import { padCode4, CODE4_MAX } from '@/lib/dms-code4'
+import { postLedgerEntry } from '@/lib/dms-credit'
+import { openingNote, parseAmountCell, parseDateCell } from '@/lib/dms-outlet-import'
+import { audit } from '@/lib/audit'
 
 // Task 30 — BULK SHOPS IMPORT: Excel/CSV se ek sath saari shops import.
 // Rules:
@@ -10,6 +13,14 @@ import { padCode4, CODE4_MAX } from '@/lib/dms-code4'
 // - salesman column optional — naam/email se match; na mile to outlet phir bhi import (warning)
 // - channel/filerStatus/visitDays normalize (single-add jaisa hi)
 // - code generation single-add wale formula se (count-based), collision par +5 bump
+// Task 132 — PURANA SOFTWARE MIGRATION: distributor apna local software chhor ke aaye to
+// shops ke sath PURANA BALANCE bhi usi sheet se import ho jaye:
+// - openingBalance column (optional): "12,500" / "Rs 12,500/-" / "-500" (shop ke haq mein advance)
+//   Non-zero par OutletLedger mein DEBIT/CREDIT OPENING entry post hoti hai (postLedgerEntry se —
+//   Outlet.balance + ledger list/detail + aging sab isi se consistent rehte hain).
+// - openingDate column (optional): balance kis date ka tha (YYYY-MM-DD ya DD/MM/YYYY) —
+//   Aging 30/60/90 isi date se bucket banata hai; khali = aaj. Future date reject.
+// - creditLimit column (optional): shop ki udhaar had (Rs, 0 = no limit)
 
 const DAY_CODES = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'] as const
 
@@ -77,6 +88,7 @@ export async function POST(req: Request) {
       code: string; code4: string; name: string; ownerName: string | null; phone: string | null; address: string | null
       city: string; channel: string; creditDays: number; ntn: string | null; cnic: string | null
       filerStatus: string; visitDays: string; salesmanId: string | null; distributorId: string
+      creditLimit: number; openingBalance: number; openingDate: Date | null
     }[] = []
 
     for (let i = 0; i < rows.length; i++) {
@@ -115,6 +127,28 @@ export async function POST(req: Request) {
       const fsRaw = get('filerStatus').toUpperCase()
       const filerStatus = fsRaw === 'FILER' || fsRaw === 'NON_FILER' ? fsRaw : (ntn ? 'FILER' : 'NON_FILER')
 
+      // Task 132: opening balance + date + credit limit — ghalat cell par POORI row skip
+      // (aadhi-imported shop se zyada saaf skip behtar hai; user ko wajah dikhti hai)
+      const ob = parseAmountCell(raw['openingBalance'])
+      if (!ob.ok) {
+        skipped.push({ row: rowNum, name, reason: `Opening Balance: ${ob.reason}` })
+        continue
+      }
+      const od = parseDateCell(raw['openingDate'])
+      if (!od.ok) {
+        skipped.push({ row: rowNum, name, reason: `Opening Date: ${od.reason}` })
+        continue
+      }
+      if (od.value && od.value.getTime() > Date.now() + 86400000) {
+        skipped.push({ row: rowNum, name, reason: 'Opening Date future mein nahi ho sakti — purani date likhein (ya khali chhorein)' })
+        continue
+      }
+      const cl = parseAmountCell(raw['creditLimit'])
+      if (!cl.ok) {
+        skipped.push({ row: rowNum, name, reason: `Credit Limit: ${cl.reason}` })
+        continue
+      }
+
       // Unique code — single-add formula + collision bump
       let code = `OUT-${1005 + (baseCount + toCreate.length + 1) * 5}`
       while (usedCodes.has(code)) code = `OUT-${parseInt(code.slice(4), 10) + 5}`
@@ -136,18 +170,51 @@ export async function POST(req: Request) {
         visitDays: sanitizeVisitDays(get('visitDays')),
         salesmanId,
         distributorId: tenantId,
+        creditLimit: Math.max(0, cl.value),
+        openingBalance: ob.value,
+        openingDate: od.value,
       })
     }
 
     const created: { id: string; code: string; code4: string; name: string }[] = []
+    let openingPosted = 0
+    let openingTotal = 0
     await db.$transaction(async (tx) => {
       for (const o of toCreate) {
-        const rec = await tx.outlet.create({ data: o })
+        const { openingBalance, openingDate, ...data } = o
+        const rec = await tx.outlet.create({ data })
+        // Task 132: purana balance real ledger entry banta hai — sirf Outlet.balance set
+        // karna ledger list/detail/aging mein kahin nahi dikhta (Task 98 mechanism)
+        if (openingBalance !== 0) {
+          await postLedgerEntry(tx, {
+            outletId: rec.id,
+            type: openingBalance > 0 ? 'DEBIT' : 'CREDIT',
+            amount: Math.abs(openingBalance),
+            refType: 'OPENING',
+            refNo: rec.code,
+            note: openingNote(openingBalance, 'import'),
+            ...(openingDate ? { date: openingDate } : {}),
+          })
+          openingPosted++
+          openingTotal += Math.abs(openingBalance)
+        }
         created.push({ id: rec.id, code: rec.code, code4: rec.code4 ?? '', name: rec.name })
       }
     })
 
-    return Response.json({ imported: created.length, skipped, warnings, created })
+    // Task 132: rich labeled audit — generic API_POST ke sath human-readable row
+    await audit(
+      { id: me.id, name: me.name, role: me.role, tenantId },
+      'SHOP_IMPORT',
+      {
+        req,
+        entity: 'Outlet',
+        entityId: `${created.length} shops`,
+        detail: `${created.length} shops import • ${skipped.length} skip • ${openingPosted} opening balances Rs ${openingTotal.toFixed(0)} • ${warnings.length} warnings`,
+      },
+    )
+
+    return Response.json({ imported: created.length, skipped, warnings, created, openingPosted, openingTotal: Math.round(openingTotal * 100) / 100 })
   } catch (e) {
     console.error(e)
     return jsonError('Bulk shops import failed', 500)

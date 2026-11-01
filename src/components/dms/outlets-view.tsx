@@ -14,6 +14,7 @@ import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR } from '@/lib/dms-api'
 import type { OutletDTO, SalesmanPerfDTO, ShopCategoryDTO } from '@/lib/dms-types'
 import { BulkImportDialog, type BulkColumn, type ParseOutcome } from '@/components/dms/bulk-import-dialog'
+import { parseAmountCell, parseDateCell } from '@/lib/dms-outlet-import'
 import { Plus, Search, MapPin, Loader2, Phone, Store, Pencil, Settings2, FileText, CalendarDays, Upload, ShoppingCart, UserCheck, Tags, Check, X, Trash2, UserCog } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
@@ -54,15 +55,20 @@ export const OUTLET_IMPORT_COLUMNS: BulkColumn[] = [
   { key: 'filerStatus', label: 'Filer Status', hint: 'FILER ya NON_FILER — khali to NTN se derive' },
   { key: 'visitDays', label: 'Visit Days', hint: 'MON,WED,SAT — khali to roz visit' },
   { key: 'salesman', label: 'Salesman', hint: 'Booker ka naam ya email — match nahi to bina booker import' },
+  // Task 132: purana software migration — shop ke sath uska purana balance bhi isi sheet se
+  { key: 'openingBalance', label: 'Opening Balance', hint: 'Purane software ka balance (Rs) — ledger mein OPENING entry ban jayegi. "12,500" / "Rs 12500/-" likhein; minus (-500) = shop ke haq mein advance; khali = 0' },
+  { key: 'openingDate', label: 'Opening Date', hint: 'Balance kis date ka tha — YYYY-MM-DD ya DD/MM/YYYY (khali = aaj). Aging 30/60/90 isi date se hisaab lagati hai' },
+  { key: 'creditLimit', label: 'Credit Limit', hint: 'Shop ki udhaar had (Rs) — khali = no limit' },
 ]
 
 export const OUTLET_SAMPLE_ROWS = [
-  ['Barkat Kiryana Store', 'Haji Aslam', '0300-1234567', 'Shalimar Colony, Shop 4', 'Multan', 'KIRYANA', '7', '', '31301-0409967-1', 'NON_FILER', 'MON,WED,SAT', ''],
-  ['Al-Karam Super Mart', 'Nadeem Ahmed', '0321-9876543', 'Main Boulevard, Gulberg', 'Lahore', 'SUPERMARKET', '15', '1234567-8', '', 'FILER', 'TUE,FRI', ''],
-  ['Madina Wholesale', 'Sheikh Imran', '0345-1122334', 'Sabzi Mandi Road', 'Faisalabad', 'WHOLESALE', '21', '', '', '', '', ''],
+  ['Barkat Kiryana Store', 'Haji Aslam', '0300-1234567', 'Shalimar Colony, Shop 4', 'Multan', 'KIRYANA', '7', '', '31301-0409967-1', 'NON_FILER', 'MON,WED,SAT', '', '12,500', '01/06/2025', '50000'],
+  ['Al-Karam Super Mart', 'Nadeem Ahmed', '0321-9876543', 'Main Boulevard, Gulberg', 'Lahore', 'SUPERMARKET', '15', '1234567-8', '', 'FILER', 'TUE,FRI', '', '0', '', '200000'],
+  ['Madina Wholesale', 'Sheikh Imran', '0345-1122334', 'Sabzi Mandi Road', 'Faisalabad', 'WHOLESALE', '21', '', '', '', '', '', '45000', '2025-03-15', ''],
 ]
 
-// Task 103-c — UPDATE import: mojooda shops par sirf NTN/CNIC/Owner/Phone update
+// Task 103-c — UPDATE import: mojooda shops par NTN/CNIC/Owner/Phone update
+// Task 132 — opening balance bhi: purani shops (balance ke baghair import hui thin) ka purana udhaar isi sheet se post
 export const OUTLET_UPDATE_COLUMNS: BulkColumn[] = [
   { key: 'code', label: 'Shop Code', hint: 'Shop ka code (1015 ya OUT-1015) — sab se pakka match' },
   { key: 'name', label: 'Shop Name', hint: 'Code khali ho to exact naam se match hoga' },
@@ -70,12 +76,14 @@ export const OUTLET_UPDATE_COLUMNS: BulkColumn[] = [
   { key: 'phone', label: 'Phone', hint: 'Khali cell = koi tabdeeli nahi' },
   { key: 'ntn', label: 'NTN', hint: 'NTN dene par shop FILER ban jayegi — khali = no change' },
   { key: 'cnic', label: 'CNIC', hint: '13 digits (00000-0000000-0) — khali = no change' },
+  { key: 'openingBalance', label: 'Opening Balance', hint: 'Purana udhaar (Rs) jo abhi tak post nahi hua — ledger mein OPENING entry ban jayegi. Pehle se posted ho to dobara NAHI lagega (warning aayegi)' },
+  { key: 'openingDate', label: 'Opening Date', hint: 'Balance kis date ka — YYYY-MM-DD ya DD/MM/YYYY (khali = aaj)' },
 ]
 
 export const OUTLET_UPDATE_SAMPLE_ROWS = [
-  ['1015', 'Irfan K/S', 'Muhammad Irfan', '0300-1112223', '', '31301-0409967-1'],
-  ['', 'Al-Karam Super Mart', 'Nadeem Ahmed', '0321-9876543', '1234567-8', ''],
-  ['1022', 'Madina Wholesale', '', '', '9876543-2', ''],
+  ['1015', 'Irfan K/S', 'Muhammad Irfan', '0300-1112223', '', '31301-0409967-1', '8,500', '01/07/2025'],
+  ['', 'Al-Karam Super Mart', 'Nadeem Ahmed', '0321-9876543', '1234567-8', '', '-2500', ''],
+  ['1022', 'Madina Wholesale', '', '', '9876543-2', '', '', ''],
 ]
 
 export function OutletsView() {
@@ -139,7 +147,7 @@ export function OutletsView() {
             <Button variant="outline" onClick={() => setImportOpen(true)} className="border-emerald-300 text-emerald-700 hover:bg-emerald-50">
               <Upload className="h-4 w-4 mr-1.5" /> Bulk Import
             </Button>
-            <Button variant="outline" onClick={() => setUpdateOpen(true)} className="border-blue-300 text-blue-700 hover:bg-blue-50" title="Mojooda shops ka NTN / CNIC / Owner / Phone Excel se update karein">
+            <Button variant="outline" onClick={() => setUpdateOpen(true)} className="border-blue-300 text-blue-700 hover:bg-blue-50" title="Mojooda shops ka NTN / CNIC / Owner / Phone + Purana Balance Excel se update karein">
               <UserCog className="h-4 w-4 mr-1.5" /> Update Shops
             </Button>
             <Button variant="outline" onClick={() => setCatsOpen(true)} className="border-emerald-300 text-emerald-700 hover:bg-emerald-50" title="Shop categories add / rename / delete karein">
@@ -244,38 +252,51 @@ export function OutletsView() {
       <BulkImportDialog
         open={importOpen}
         onOpenChange={setImportOpen}
-        title="Bulk Shops Import"
-        description="Excel/CSV se saari shops ek sath import karein — duplicate naam wali shops skip ho jayengi"
+        title="Bulk Shops Import (Opening Balance ke sath)"
+        description="Excel/CSV se saari shops ek sath import karein — duplicate naam wali shops skip ho jayengi. Opening Balance column mein purane software ka udhaar likhein to wo shop ki ledger (khata) mein OPENING entry ban jayega."
         accent="bg-emerald-600 hover:bg-emerald-700"
         columns={OUTLET_IMPORT_COLUMNS}
         sampleRows={OUTLET_SAMPLE_ROWS}
         parseRow={parseOutletRow}
         importRequest={async (rows) => {
-          const r = await api<{ imported: number; skipped: { row: number; name: string; reason: string }[]; warnings?: { row: number; name: string; reason: string }[] }>('/api/outlets/import', {
+          const r = await api<{ imported: number; skipped: { row: number; name: string; reason: string }[]; warnings?: { row: number; name: string; reason: string }[]; openingPosted?: number }>('/api/outlets/import', {
             method: 'POST',
             body: JSON.stringify({ userId: user?.id, rows }),
           })
-          toast({ title: `${r.imported} shops import hui ✓`, description: r.skipped.length ? `${r.skipped.length} skip hui — wajah dialog mein dekhein` : 'Sab shops register ho gayin' })
+          toast({
+            title: `${r.imported} shops import hui ✓`,
+            description: [
+              r.openingPosted ? `${r.openingPosted} shops ka purana balance ledger mein post ho gaya` : null,
+              r.skipped.length ? `${r.skipped.length} skip hui — wajah dialog mein dekhein` : null,
+            ].filter(Boolean).join(' • ') || 'Sab shops register ho gayin',
+          })
           return r
         }}
         onDone={load}
       />
       {/* Task 103-c: UPDATE import — match pehle Shop Code (OUT-1015 ya 1015) phir exact naam; khali cell = no change */}
+      {/* Task 132: opening balance column — purani shops ka udhaar ab yahan se bhi post hota hai */}
       <BulkImportDialog
         open={updateOpen}
         onOpenChange={setUpdateOpen}
-        title="Update Shops (NTN / CNIC / Owner / Phone)"
-        description="Mojooda shops ko Excel/CSV se update karein — pehle Shop Code se match, warna exact naam se. Khali cell = us field par koi tabdeeli nahi. Nayi shop yahan NAHI banti (us ke liye Bulk Import)."
+        title="Update Shops (NTN / CNIC / Owner / Phone / Opening Balance)"
+        description="Mojooda shops ko Excel/CSV se update karein — pehle Shop Code se match, warna exact naam se. Khali cell = us field par koi tabdeeli nahi. Opening Balance column se purana udhaar ledger mein OPENING entry ban jata hai (pehle se posted ho to dobara nahi lagega). Nayi shop yahan NAHI banti (us ke liye Bulk Import)."
         accent="bg-blue-600 hover:bg-blue-700"
         columns={OUTLET_UPDATE_COLUMNS}
         sampleRows={OUTLET_UPDATE_SAMPLE_ROWS}
         parseRow={parseOutletUpdateRow}
         importRequest={async (rows) => {
-          const r = await api<{ imported: number; skipped: { row: number; name: string; reason: string }[]; warnings?: { row: number; name: string; reason: string }[] }>('/api/outlets/update-import', {
+          const r = await api<{ imported: number; skipped: { row: number; name: string; reason: string }[]; warnings?: { row: number; name: string; reason: string }[]; openingPosted?: number }>('/api/outlets/update-import', {
             method: 'POST',
             body: JSON.stringify({ rows }),
           })
-          toast({ title: `${r.imported} shops update hui ✓`, description: r.skipped.length ? `${r.skipped.length} skip hui — wajah dialog mein dekhein` : 'Sab shops update ho gayin' })
+          toast({
+            title: `${r.imported} shops update hui ✓`,
+            description: [
+              r.openingPosted ? `${r.openingPosted} shops ka opening balance post ho gaya` : null,
+              r.skipped.length ? `${r.skipped.length} skip hui — wajah dialog mein dekhein` : null,
+            ].filter(Boolean).join(' • ') || 'Sab shops update ho gayin',
+          })
           return r
         }}
         onDone={load}
@@ -292,6 +313,13 @@ function parseOutletRow(r: Record<string, string>): ParseOutcome<Record<string, 
   if (cd && !Number.isFinite(Number(cd))) return { ok: false, error: `Credit days ghalat: "${cd}"` }
   const fs = (r.filerStatus ?? '').trim().toUpperCase()
   if (fs && fs !== 'FILER' && fs !== 'NON_FILER') return { ok: false, error: 'Filer Status FILER ya NON_FILER likhein (ya khali chhorein)' }
+  // Task 132: opening balance/date/limit — preview par hi pakdein (server bhi check karta hai)
+  const ob = parseAmountCell(r.openingBalance)
+  if (!ob.ok) return { ok: false, error: `Opening Balance: ${ob.reason}` }
+  const od = parseDateCell(r.openingDate)
+  if (!od.ok) return { ok: false, error: `Opening Date: ${od.reason}` }
+  const cl = parseAmountCell(r.creditLimit)
+  if (!cl.ok) return { ok: false, error: `Credit Limit: ${cl.reason}` }
   return { ok: true, value: r }
 }
 
@@ -300,8 +328,16 @@ function parseOutletUpdateRow(r: Record<string, string>): ParseOutcome<Record<st
   const code = (r.code ?? '').trim()
   const name = (r.name ?? '').trim()
   if (!code && !name) return { ok: false, error: 'Shop Code ya Shop Name — koi ek zaroori hai (match isi se hoga)' }
-  if (!['ownerName', 'phone', 'ntn', 'cnic'].some((k) => (r[k] ?? '').trim())) {
-    return { ok: false, error: 'Owner/Phone/NTN/CNIC — kam az kam ek value dein (khali cell = no change)' }
+  const obEmpty = (r.openingBalance ?? '').trim() === ''
+  if (!['ownerName', 'phone', 'ntn', 'cnic'].some((k) => (r[k] ?? '').trim()) && obEmpty) {
+    return { ok: false, error: 'Owner/Phone/NTN/CNIC/Opening Balance — kam az kam ek value dein (khali cell = no change)' }
+  }
+  // Task 132: opening cells valid hon (khali openingBalance wali row par date bhi ignore)
+  const od = parseDateCell(obEmpty ? '' : r.openingDate)
+  if (!od.ok) return { ok: false, error: `Opening Date: ${od.reason}` }
+  if (!obEmpty) {
+    const ob = parseAmountCell(r.openingBalance)
+    if (!ob.ok) return { ok: false, error: `Opening Balance: ${ob.reason}` }
   }
   return { ok: true, value: r }
 }

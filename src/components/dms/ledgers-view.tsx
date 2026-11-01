@@ -245,7 +245,8 @@ function LedgerEntries({ outletId, distributorName }: { outletId: string; distri
                 <TableCell className="text-xs font-medium text-emerald-700">{e.refNo}</TableCell>
                 <TableCell className="text-xs text-slate-600">
                   {e.note ?? e.refType}
-                  <Badge variant="outline" className={`ml-2 text-[9px] ${e.type === 'DEBIT' ? 'border-red-200 text-red-600' : 'border-emerald-200 text-emerald-700'}`}>{e.refType}</Badge>
+                  {/* Task 132: OPENING (purana balance import) alag amber badge — ek nazar mein pehchan */}
+                  <Badge variant="outline" className={`ml-2 text-[9px] ${e.refType === 'OPENING' ? 'border-amber-300 bg-amber-50 text-amber-800' : e.type === 'DEBIT' ? 'border-red-200 text-red-600' : 'border-emerald-200 text-emerald-700'}`}>{e.refType}</Badge>
                 </TableCell>
                 <TableCell className="text-right text-red-600 text-sm font-medium">{e.debit > 0 ? fmtPKR(e.debit) : '—'}</TableCell>
                 <TableCell className="text-right text-emerald-700 text-sm font-medium">{e.credit > 0 ? fmtPKR(e.credit) : '—'}</TableCell>
