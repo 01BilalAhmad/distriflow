@@ -35,6 +35,7 @@ const ACTIONS = [
   'ORDER_CREATE', 'ORDER_EDIT', 'ORDER_CANCEL', 'ORDER_DELIVER',
   'BILLS_PROCESS', 'SUMMARY_UNPROCESS', 'SETTLEMENT_POST', 'LATE_RETURN',
   'RETURN_CREATE', 'RETURN_APPROVE', 'RETURN_REJECT', 'RETURN_CANCEL',
+  'RECOVERY_POST', 'RECOVERY_APPROVE', 'RECOVERY_REJECT', 'RECOVERY_EDIT',
   'PURCHASE_CREATE', 'SETTINGS_UPDATE', 'BACKUP_EXPORT',
   'API_POST', 'API_PATCH', 'API_PUT', 'API_DELETE',
 ]
@@ -45,6 +46,9 @@ function actionStyle(action: string): string {
   if (action === 'LOGIN_FAILED' || action === 'AUTH_REJECTED' || action.includes('CANCEL') || action.includes('DELETE')) return 'bg-red-50 text-red-700 border-red-200'
   if (action.includes('DELETE')) return 'bg-red-50 text-red-700 border-red-200'
   if (action === 'ORDER_CREATE' || action === 'BILLS_PROCESS' || action === 'SETTLEMENT_POST' || action === 'PURCHASE_CREATE' || action === 'BACKUP_EXPORT') return 'bg-emerald-50 text-emerald-700 border-emerald-200'
+  if (action === 'RECOVERY_POST' || action === 'RECOVERY_APPROVE') return 'bg-emerald-50 text-emerald-700 border-emerald-200'
+  if (action === 'RECOVERY_REJECT') return 'bg-red-50 text-red-700 border-red-200'
+  if (action === 'RECOVERY_EDIT') return 'bg-orange-50 text-orange-700 border-orange-200'
   if (action.includes('RETURN') || action === 'SUMMARY_UNPROCESS') return 'bg-orange-50 text-orange-700 border-orange-200'
   if (action.startsWith('API_')) return 'bg-slate-50 text-slate-500 border-slate-200'
   return 'bg-violet-50 text-violet-700 border-violet-200'
@@ -95,7 +99,7 @@ export function AuditView() {
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto">
       <div>
         <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2"><ScrollText className="h-5 w-5 text-slate-400" /> Audit Log</h2>
-        <p className="text-sm text-slate-500">Website par ki gayi HAR activity ka record — login, bills, settlements, returns, settings, backup… sab kuch</p>
+        <p className="text-sm text-slate-500">Website par ki gayi HAR activity ka record — login, bills, recovery wasooli (post/approve/reject/edit), settlements, returns, settings, backup… sab kuch</p>
       </div>
 
       {/* Filters */}

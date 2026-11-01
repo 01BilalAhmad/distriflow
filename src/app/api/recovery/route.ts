@@ -3,6 +3,7 @@ import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
 import { requireUser } from '@/lib/api-auth'
 import { postLedgerEntry } from '@/lib/dms-credit'
 import { ensureCode4Backfill } from '@/lib/dms-code4'
+import { audit } from '@/lib/audit'
 
 /**
  * RECOVERY — order-booker wise udhaar wasooli.
@@ -280,9 +281,13 @@ export async function POST(req: Request) {
 
     const recoveredAt = date ? new Date(date) : new Date()
     const postedBy = me.name
+    // Task 130: booker ka naam audit detail ke liye (bucketId set ho to upar fetch ho chuka)
+    const bookerName = bucketId ? (await db.user.findUnique({ where: { id: bucketId }, select: { name: true } }))?.name ?? null : null
 
     const result = await db.$transaction(async (tx) => {
       const posted: Array<{ recoveryNo: string; receiptNo: string | null; outletName: string; amount: number; method: string; status: string }> = []
+      // Task 130: RECOVERY_POST audit rows — transaction commit ke baad likhi jati hain
+      const auditTrail: Array<{ recoveryNo: string; outletName: string; amount: number; method: string; status: string; distributorId: string | null; receiptNo: string | null }> = []
       const isBooker = me.role === 'SALESMAN' // booker ki entry PENDING jati hai — admin approve karega
 
       // Task 95 perf: sab outlets EK query mein (pehle per-entry findUnique) +
@@ -357,6 +362,7 @@ export async function POST(req: Request) {
         if (isBooker) {
           // Booker ki wasooli — sirf voucher; ledger + receipt sirf APPROVE ke baad banenge
           posted.push({ recoveryNo, receiptNo: null, outletName: outlet.name, amount: e.amount, method: e.method, status: 'PENDING' })
+          auditTrail.push({ recoveryNo, outletName: outlet.name, amount: e.amount, method: e.method, status: 'PENDING', distributorId: outlet.distributorId, receiptNo: null })
           continue
         }
 
@@ -386,16 +392,33 @@ export async function POST(req: Request) {
         })
 
         posted.push({ recoveryNo, receiptNo, outletName: outlet.name, amount: e.amount, method: e.method, status: 'APPROVED' })
+        auditTrail.push({ recoveryNo, outletName: outlet.name, amount: e.amount, method: e.method, status: 'APPROVED', distributorId: outlet.distributorId, receiptNo })
       }
 
-      return posted
+      return { posted, auditTrail }
     }, { timeout: 20000 })
 
+    // Task 130: RECOVERY_POST — orderbooker app / direct entry ka permanent transaction log.
+    // Generic API_POST row (requireUser) ke upar ek labeled row per recovery voucher —
+    // RCV number, shop, amount, method, booker sab readable. Audit fire-safe hai.
+    for (const p of result.auditTrail) {
+      await audit(
+        { id: me.id, name: me.name, role: me.role, tenantId: p.distributorId },
+        'RECOVERY_POST',
+        {
+          req,
+          entity: 'Recovery',
+          entityId: p.recoveryNo,
+          detail: `${p.recoveryNo} • ${p.outletName} • Rs ${p.amount.toFixed(2)} • ${p.method}${bookerName ? ` • Booker: ${bookerName}` : ''} — ${p.status === 'PENDING' ? 'PENDING (admin approval ka intezar — ledger abhi update nahi hui)' : `APPROVED • Receipt ${p.receiptNo} • Shop ledger CREDIT`}`,
+        },
+      )
+    }
+
     return Response.json({
-      posted: result,
-      total: round2(result.reduce((s, r) => s + r.amount, 0)),
-      count: result.length,
-      allPending: result.every((r) => r.status === 'PENDING'),
+      posted: result.posted,
+      total: round2(result.posted.reduce((s, r) => s + r.amount, 0)),
+      count: result.posted.length,
+      allPending: result.posted.every((r) => r.status === 'PENDING'),
     })
   } catch (e) {
     console.error(e)

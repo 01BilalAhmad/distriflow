@@ -1,15 +1,22 @@
 import { db } from '@/lib/db'
 import { jsonError, nextSeq, megaBlocked } from '@/lib/dms-scope'
 import { postLedgerEntry } from '@/lib/dms-credit'
+import { requireUser } from '@/lib/api-auth'
+import { audit } from '@/lib/audit'
 
 /**
  * RECOVERY REVIEW — pending recoveries ka approval workflow.
  *
- * POST /api/recovery/review { userId, id, action, amount?, reviewNote? }
+ * POST /api/recovery/review { id, action, amount?, reviewNote? }
  *   action = APPROVE : Recovery APPROVED + OutletLedger CREDIT (RECOVERY) + Collection receipt (RCP-)
  *                      — ledger transaction ke andar banti hai (sirf approve par hi shop ledger update hota hai)
  *   action = REJECT  : Recovery REJECTED — ledger bilkul nahi chedti
  *   action = EDIT    : amount update (sirf PENDING par) — originalAmount audit ke liye preserve
+ *
+ * Identity: Task 130 — SIRF signed cookie (requireUser). Body ka legacy userId IGNORE
+ * (pehle body userId trust hota tha = IDOR + audit mein galat actor likh sakta tha).
+ * Audit: RECOVERY_APPROVE / RECOVERY_REJECT / RECOVERY_EDIT — har action ka labeled row
+ * (RCV no, shop, amount old→new, booker, wajah/note, receipt no). Fire-safe.
  *
  * Role guard: DISTRIBUTOR (booker khud approve nahi kar sakta)
  * Scope: DISTRIBUTOR apni distributor ki shops ki recoveries
@@ -20,26 +27,32 @@ const round2 = (n: number) => Math.round(n * 100) / 100
 
 export async function POST(req: Request) {
   try {
+    // Task 130: identity cookie se — body userId legacy clients bhejte hain, IGNORE
+    const auth = await requireUser(req)
+    if ('error' in auth) return auth.error
+    const me = auth.user
+
     const body = await req.json()
-    const { userId, id, action, amount, reviewNote } = body as {
-      userId: string
+    const { id, action, amount, reviewNote } = body as {
+      userId?: string // legacy — IGNORE (cookie hi identity hai)
       id: string
       action: 'APPROVE' | 'REJECT' | 'EDIT'
       amount?: number
       reviewNote?: string
     }
-    if (!userId || !id || !action) return jsonError('userId, id aur action required hain')
+    if (!id || !action) return jsonError('id aur action required hain')
     if (!['APPROVE', 'REJECT', 'EDIT'].includes(action)) return jsonError('Action valid nahi hai')
 
-    const me = await db.user.findUnique({ where: { id: userId }, include: { profile: true } })
-    if (!me) return jsonError('User not found', 404)
     const mb = megaBlocked(me.role)
     if (mb) return mb
     if (me.role === 'SALESMAN') return jsonError('Order booker approval nahi kar sakta — sirf distributor', 403)
 
     const recovery = await db.recovery.findUnique({
       where: { id },
-      include: { outlet: { select: { id: true, name: true, code: true, distributorId: true } } },
+      include: {
+        outlet: { select: { id: true, name: true, code: true, distributorId: true } },
+        booker: { select: { name: true } },
+      },
     })
     if (!recovery) return jsonError('Recovery entry nahi mili', 404)
 
@@ -50,6 +63,10 @@ export async function POST(req: Request) {
 
     const note = (reviewNote ?? '').trim() || null
 
+    // Task 130: audit actor — tenant = recovery jis distributor ki hai
+    const actor = { id: me.id, name: me.name, role: me.role, tenantId: recovery.outlet.distributorId }
+    const bookerLabel = recovery.booker?.name ? ` • Booker: ${recovery.booker.name}` : ''
+
     // ---------- REJECT ----------
     if (action === 'REJECT') {
       if (recovery.status !== 'PENDING') return jsonError('Sirf pending recoveries reject ho sakti hain')
@@ -57,6 +74,15 @@ export async function POST(req: Request) {
         where: { id },
         data: { status: 'REJECTED', approvedById: me.id, approvedByName: me.name, approvedAt: new Date(), reviewNote: note },
       })
+
+      // Task 130: RECOVERY_REJECT — reject ka permanent record (kis ne, kyun)
+      await audit(actor, 'RECOVERY_REJECT', {
+        req,
+        entity: 'Recovery',
+        entityId: recovery.recoveryNo,
+        detail: `${recovery.recoveryNo} • ${recovery.outlet.name} • Rs ${recovery.amount.toFixed(2)}${bookerLabel} — REJECT (shop ledger bilkul nahi chhooti)${note ? ` • Wajah: ${note}` : ''}`,
+      })
+
       return Response.json({ ok: true, status: 'REJECTED', message: `Recovery ${recovery.recoveryNo} reject ho gayi — shop ledger update nahi hua` })
     }
 
@@ -83,6 +109,14 @@ export async function POST(req: Request) {
           },
         })
       }, { timeout: 15000 })
+
+      // Task 130: RECOVERY_EDIT — amount change ka permanent record (old → new)
+      await audit(actor, 'RECOVERY_EDIT', {
+        req,
+        entity: 'Recovery',
+        entityId: recovery.recoveryNo,
+        detail: `${recovery.recoveryNo} • ${recovery.outlet.name} • Rs ${recovery.amount.toFixed(2)} → Rs ${updated.amount.toFixed(2)}${bookerLabel} — amount EDIT (abhi bhi PENDING — approve ka intezar)${note ? ` • Note: ${note}` : ''}`,
+      })
 
       return Response.json({ ok: true, status: 'PENDING', amount: updated.amount, originalAmount: updated.originalAmount, message: `${recovery.recoveryNo} ka amount Rs ${amt.toFixed(2)} ho gaya — ab Approve dabayein` })
     }
@@ -143,6 +177,15 @@ export async function POST(req: Request) {
 
       return { receiptNo }
     }, { timeout: 20000 })
+
+    // Task 130: RECOVERY_APPROVE — approval ka permanent record (kis ne, kitna, receipt no)
+    const amtChanged = approveAmt !== recovery.amount
+    await audit(actor, 'RECOVERY_APPROVE', {
+      req,
+      entity: 'Recovery',
+      entityId: recovery.recoveryNo,
+      detail: `${recovery.recoveryNo} • ${recovery.outlet.name} • Rs ${recovery.amount.toFixed(2)}${amtChanged ? ` → Rs ${approveAmt.toFixed(2)} (edited)` : ''} • ${recovery.method}${bookerLabel} — APPROVED • Receipt ${result.receiptNo} • Shop ledger CREDIT${note ? ` • Note: ${note}` : ''}`,
+    })
 
     return Response.json({
       ok: true,
