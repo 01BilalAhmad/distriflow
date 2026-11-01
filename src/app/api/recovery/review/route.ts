@@ -174,6 +174,8 @@ export async function POST(req: Request) {
           collectedById: recovery.bookerId,
         },
       })
+      // Task 133: receipt link recovery par — delete/edit isi se RCP void/update karta hai
+      await tx.recovery.update({ where: { id }, data: { receiptNo } })
 
       return { receiptNo }
     }, { timeout: 20000 })

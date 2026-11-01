@@ -35,7 +35,7 @@ const ACTIONS = [
   'ORDER_CREATE', 'ORDER_EDIT', 'ORDER_CANCEL', 'ORDER_DELIVER',
   'BILLS_PROCESS', 'SUMMARY_UNPROCESS', 'SETTLEMENT_POST', 'LATE_RETURN',
   'RETURN_CREATE', 'RETURN_APPROVE', 'RETURN_REJECT', 'RETURN_CANCEL',
-  'RECOVERY_POST', 'RECOVERY_APPROVE', 'RECOVERY_REJECT', 'RECOVERY_EDIT',
+  'RECOVERY_POST', 'RECOVERY_APPROVE', 'RECOVERY_REJECT', 'RECOVERY_EDIT', 'RECOVERY_DELETE',
   'SHOP_IMPORT', 'SHOP_UPDATE_IMPORT',
   'PURCHASE_CREATE', 'SETTINGS_UPDATE', 'BACKUP_EXPORT',
   'API_POST', 'API_PATCH', 'API_PUT', 'API_DELETE',
@@ -48,7 +48,7 @@ function actionStyle(action: string): string {
   if (action.includes('DELETE')) return 'bg-red-50 text-red-700 border-red-200'
   if (action === 'ORDER_CREATE' || action === 'BILLS_PROCESS' || action === 'SETTLEMENT_POST' || action === 'PURCHASE_CREATE' || action === 'BACKUP_EXPORT') return 'bg-emerald-50 text-emerald-700 border-emerald-200'
   if (action === 'RECOVERY_POST' || action === 'RECOVERY_APPROVE' || action === 'SHOP_IMPORT' || action === 'SHOP_UPDATE_IMPORT') return 'bg-emerald-50 text-emerald-700 border-emerald-200'
-  if (action === 'RECOVERY_REJECT') return 'bg-red-50 text-red-700 border-red-200'
+  if (action === 'RECOVERY_REJECT' || action === 'RECOVERY_DELETE') return 'bg-red-50 text-red-700 border-red-200'
   if (action === 'RECOVERY_EDIT') return 'bg-orange-50 text-orange-700 border-orange-200'
   if (action.includes('RETURN') || action === 'SUMMARY_UNPROCESS') return 'bg-orange-50 text-orange-700 border-orange-200'
   if (action.startsWith('API_')) return 'bg-slate-50 text-slate-500 border-slate-200'

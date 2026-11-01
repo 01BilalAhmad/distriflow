@@ -98,7 +98,7 @@ export async function GET(req: Request) {
       : []
 
     const recoveries = await db.recovery.findMany({
-      where: { outlet: scope.outletWhere, status: { not: 'REJECTED' } },
+      where: { outlet: scope.outletWhere, status: { notIn: ['REJECTED', 'DELETED'] } }, // Task 133: deleted wasooli stats mein nahi
       select: { outletId: true, bookerId: true, amount: true, recoveredAt: true, status: true },
     })
 
@@ -139,8 +139,9 @@ export async function GET(req: Request) {
     })
 
     // History — is scope ki shops ki recoveries (latest first, 100) — status ke sath
+    // Task 133: DELETED entries yahan nahi — wo Transactions tab (edit/delete wali) mein rehti hain
     const historyRows = await db.recovery.findMany({
-      where: { outlet: scope.outletWhere },
+      where: { outlet: scope.outletWhere, status: { not: 'DELETED' } },
       include: {
         outlet: { select: { name: true, code: true, code4: true } },
         booker: { select: { name: true } },
@@ -390,6 +391,8 @@ export async function POST(req: Request) {
             collectedById: bucketId,
           },
         })
+        // Task 133: receipt link recovery par bhi — history page edit/delete isi se RCP void/update karta hai
+        await tx.recovery.update({ where: { recoveryNo }, data: { receiptNo } })
 
         posted.push({ recoveryNo, receiptNo, outletName: outlet.name, amount: e.amount, method: e.method, status: 'APPROVED' })
         auditTrail.push({ recoveryNo, outletName: outlet.name, amount: e.amount, method: e.method, status: 'APPROVED', distributorId: outlet.distributorId, receiptNo })

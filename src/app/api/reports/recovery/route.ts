@@ -135,8 +135,9 @@ export async function GET(req: Request) {
       .sort((x, y) => y.balance - x.balance)
 
     // ---- collection history (period) ----
+    // Task 133: DELETED wasooli history/report se bahar (Transactions tab se manage hoti hai)
     const recoveries = await db.recovery.findMany({
-      where: { outlet: { distributorId: profileId }, recoveredAt: { gte: from, lte: to }, status: { not: 'REJECTED' }, ...(bookerId ? { bookerId } : {}) },
+      where: { outlet: { distributorId: profileId }, recoveredAt: { gte: from, lte: to }, status: { notIn: ['REJECTED', 'DELETED'] }, ...(bookerId ? { bookerId } : {}) },
       select: { recoveryNo: true, outletId: true, amount: true, method: true, recoveredAt: true, status: true, booker: { select: { name: true } }, outlet: { select: { name: true } } },
       orderBy: { recoveredAt: 'desc' },
     })

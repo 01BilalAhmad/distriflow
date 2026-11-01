@@ -22,7 +22,8 @@ import { api, fmtPKR, fmtDate } from '@/lib/dms-api'
 import type { ObRecoveryReportDTO, RecoveryData, RecoveryRowDTO, RecoveryShopDTO } from '@/lib/dms-types'
 import { RouteSheetPrint, RecoveryReportPrint, OBRecoveryPrint } from '@/components/dms/recovery-print'
 import { DAY_CODES, DAY_FULL, dayMatches } from '@/lib/dms-day'
-import { HandCoins, Loader2, Printer, ReceiptText, CheckCircle2, Users, AlertTriangle, History, ClipboardCheck, XCircle, Save, Clock3, ShieldCheck, Eye, Lock, Search, ArrowUpDown, FileSpreadsheet, Banknote, CalendarDays } from 'lucide-react'
+import { Label } from '@/components/ui/label'
+import { HandCoins, Loader2, Printer, ReceiptText, CheckCircle2, Users, AlertTriangle, History, ClipboardCheck, XCircle, Save, Clock3, ShieldCheck, Eye, Lock, Search, ArrowUpDown, FileSpreadsheet, Banknote, CalendarDays, Pencil, Trash2 } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 
 const METHOD_LABELS: Record<string, string> = { CASH: 'Cash', CHEQUE: 'Cheque', BANK: 'Bank Transfer' }
@@ -36,8 +37,33 @@ const STATUS_BADGE: Record<string, string> = {
   PENDING: 'border-amber-300 bg-amber-50 text-amber-700',
   APPROVED: 'border-emerald-300 bg-emerald-50 text-emerald-700',
   REJECTED: 'border-red-300 bg-red-50 text-red-700',
+  // Task 133: galti se post/approve hui entry delete hone par bhi record rehta hai (audit)
+  DELETED: 'border-slate-300 bg-slate-100 text-slate-500',
 }
-const STATUS_TEXT: Record<string, string> = { PENDING: 'Approval Pending', APPROVED: 'Approved', REJECTED: 'Rejected' }
+const STATUS_TEXT: Record<string, string> = { PENDING: 'Approval Pending', APPROVED: 'Approved', REJECTED: 'Rejected', DELETED: 'Deleted' }
+
+/** Task 133: Transaction History tab ki row (GET /api/recovery/transactions) */
+interface TxRow {
+  id: string
+  recoveryNo: string
+  date: string
+  createdAt: string
+  shopName: string
+  shopCode: string
+  bookerName: string | null
+  amount: number
+  originalAmount: number | null
+  editedAmount: boolean
+  method: string
+  reference: string | null
+  note: string | null
+  status: string
+  receiptNo: string | null
+  postedByName: string | null
+  approvedByName: string | null
+  reviewNote: string | null
+}
+interface TxSums { approved: number; approvedCount: number; pending: number; rejected: number; deleted: number; deletedCount: number }
 
 /** Aging badge — FIFO oldest unpaid debit se din nikal kar 30/60/90+ color coding */
 function AgingBadge({ oldestDueDate }: { oldestDueDate?: string | null }) {
@@ -97,6 +123,24 @@ export function RecoveryView() {
   const [obReport, setObReport] = useState<ObRecoveryReportDTO | null>(null)
   const [obLoading, setObLoading] = useState(false)
   const [obPrint, setObPrint] = useState(false)
+  // Task 133: Transaction History tab — edit/delete wali full recovery list
+  const [txRows, setTxRows] = useState<TxRow[]>([])
+  const [txTotal, setTxTotal] = useState(0)
+  const [txPages, setTxPages] = useState(1)
+  const [txSums, setTxSums] = useState<TxSums | null>(null)
+  const [txStatus, setTxStatus] = useState('ALL')
+  const [txBooker, setTxBooker] = useState('ALL')
+  const [txFrom, setTxFrom] = useState('')
+  const [txTo, setTxTo] = useState('')
+  const [txQ, setTxQ] = useState('')
+  const [txPage, setTxPage] = useState(1)
+  const [txLoading, setTxLoading] = useState(false)
+  const [editing, setEditing] = useState<TxRow | null>(null)
+  const [editAmount, setEditAmount] = useState('')
+  const [editReason, setEditReason] = useState('')
+  const [deleting, setDeleting] = useState<TxRow | null>(null)
+  const [delReason, setDelReason] = useState('')
+  const [txBusy, setTxBusy] = useState(false)
 
   const load = useCallback(async (uid: string) => {
     try {
@@ -241,6 +285,80 @@ export function RecoveryView() {
       toast({ title: 'Review action failed', description: e instanceof Error ? e.message : '', variant: 'destructive' })
     } finally {
       setBusyId(null)
+    }
+  }
+
+  /* ---------- Task 133: Transaction History — list + edit + delete ---------- */
+  const loadTx = useCallback(async (p?: number) => {
+    if (!userId) return
+    setTxLoading(true)
+    try {
+      const params = new URLSearchParams({ page: String(p ?? txPage) })
+      if (txStatus !== 'ALL') params.set('status', txStatus)
+      if (txBooker !== 'ALL') params.set('bookerId', txBooker)
+      if (txFrom) params.set('from', txFrom)
+      if (txTo) params.set('to', txTo)
+      if (txQ.trim()) params.set('q', txQ.trim())
+      const d = await api<{ rows: TxRow[]; total: number; page: number; pages: number; sums: TxSums }>(`/api/recovery/transactions?${params}`)
+      setTxRows(d.rows)
+      setTxTotal(d.total)
+      setTxPages(d.pages)
+      setTxSums(d.sums)
+      setTxPage(d.page)
+    } catch (e) {
+      toast({ title: 'Transaction history load failed', description: e instanceof Error ? e.message : '', variant: 'destructive' })
+    } finally {
+      setTxLoading(false)
+    }
+  }, [userId, txPage, txStatus, txBooker, txFrom, txTo, txQ])
+
+  // Tab khulte hi + filters badalne par load (search debounce 250ms)
+  useEffect(() => {
+    if (tab !== 'tx') return
+    const t = setTimeout(() => { void loadTx(1) }, 250)
+    return () => clearTimeout(t)
+  }, [tab, loadTx])
+
+  const submitEdit = async () => {
+    if (!editing || !userId) return
+    const amt = parseFloat(editAmount)
+    if (!(amt > 0)) {
+      toast({ title: 'Amount ghalat hai', description: '0 se bara number likhein', variant: 'destructive' })
+      return
+    }
+    setTxBusy(true)
+    try {
+      const res = await api<{ message: string }>(`/api/recovery/${editing.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ amount: amt, reason: editReason.trim() }),
+      })
+      toast({ title: 'Amount theek ho gayi ✓', description: res.message })
+      setEditing(null)
+      setEditReason('')
+      await Promise.all([loadTx(), load(userId)])
+    } catch (e) {
+      toast({ title: 'Amount edit failed', description: e instanceof Error ? e.message : '', variant: 'destructive' })
+    } finally {
+      setTxBusy(false)
+    }
+  }
+
+  const submitDelete = async () => {
+    if (!deleting || !userId) return
+    setTxBusy(true)
+    try {
+      const res = await api<{ message: string }>(`/api/recovery/${deleting.id}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ reason: delReason.trim() }),
+      })
+      toast({ title: 'Transaction delete ho gayi ✓', description: res.message })
+      setDeleting(null)
+      setDelReason('')
+      await Promise.all([loadTx(), load(userId)])
+    } catch (e) {
+      toast({ title: 'Delete failed', description: e instanceof Error ? e.message : '', variant: 'destructive' })
+    } finally {
+      setTxBusy(false)
     }
   }
 
@@ -457,6 +575,9 @@ export function RecoveryView() {
           </TabsTrigger>
           <TabsTrigger value="report" className="data-[state=active]:bg-white data-[state=active]:text-emerald-700">
             <ReceiptText className="h-3.5 w-3.5 mr-1.5" /> History &amp; Report
+          </TabsTrigger>
+          <TabsTrigger value="tx" className="data-[state=active]:bg-white data-[state=active]:text-blue-700">
+            <History className="h-3.5 w-3.5 mr-1.5" /> Transactions
           </TabsTrigger>
           <TabsTrigger value="obreport" className="data-[state=active]:bg-white data-[state=active]:text-emerald-700">
             <Banknote className="h-3.5 w-3.5 mr-1.5" /> OB Recovery Report
@@ -961,6 +1082,217 @@ export function RecoveryView() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* ==================== TAB 5: TRANSACTION HISTORY (Task 133 — edit/delete) ==================== */}
+        <TabsContent value="tx" className="flex-1 min-h-0 mt-3 flex flex-col gap-3">
+          <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 flex items-start gap-2.5 shrink-0">
+            <ShieldCheck className="h-4.5 w-4.5 text-blue-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-bold text-blue-800">Recovery Transaction History — ghalti se post/approve hui wasooli yahan se theek karein</p>
+              <p className="text-xs text-blue-700 mt-0.5 leading-relaxed">
+                <b>Edit</b> par sirf farq ki ledger correction post hoti hai (RECOVERY_EDIT) aur RCP receipt update — <b>Delete</b> par shop ledger mein Rs wapas aati hai (RECOVERY_CANCEL) aur receipt void. Day Book, reports aur aging sab khud theek rehte hain. Har action ka audit log banta hai.
+              </p>
+            </div>
+          </div>
+
+          {/* Filters */}
+          <Card className="border-slate-200 shrink-0">
+            <CardContent className="p-3 flex flex-wrap items-center gap-2">
+              <Select value={txStatus} onValueChange={(v) => { setTxStatus(v); setTxPage(1) }}>
+                <SelectTrigger className="h-8 w-40 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">Sab statuses</SelectItem>
+                  <SelectItem value="PENDING">Approval Pending</SelectItem>
+                  <SelectItem value="APPROVED">Approved</SelectItem>
+                  <SelectItem value="REJECTED">Rejected</SelectItem>
+                  <SelectItem value="DELETED">Deleted</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={txBooker} onValueChange={(v) => { setTxBooker(v); setTxPage(1) }}>
+                <SelectTrigger className="h-8 w-44 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">Sab bookers</SelectItem>
+                  {(data?.bookers ?? []).map((b) => <SelectItem key={b.id ?? 'none'} value={b.id ?? 'UNASSIGNED'}>{b.id ? b.name : 'Unassigned'}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Input type="date" value={txFrom} onChange={(e) => { setTxFrom(e.target.value); setTxPage(1) }} className="h-8 w-36 text-xs" title="From date" />
+              <span className="text-xs text-slate-400">se</span>
+              <Input type="date" value={txTo} onChange={(e) => { setTxTo(e.target.value); setTxPage(1) }} className="h-8 w-36 text-xs" title="To date" />
+              <span className="text-xs text-slate-400">tak</span>
+              <div className="relative flex-1 min-w-44">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                <Input value={txQ} onChange={(e) => { setTxQ(e.target.value); setTxPage(1) }} placeholder="RCV no / receipt no / shop search..." className="h-8 pl-8 text-xs" />
+              </div>
+              {(txStatus !== 'ALL' || txBooker !== 'ALL' || txFrom || txTo || txQ) && (
+                <Button size="sm" variant="ghost" className="h-8 px-2 text-[11px] text-slate-500" onClick={() => { setTxStatus('ALL'); setTxBooker('ALL'); setTxFrom(''); setTxTo(''); setTxQ(''); setTxPage(1) }}>Clear</Button>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Sums — tenant-wide status totals */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 shrink-0">
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+              <p className="text-[10px] font-bold text-emerald-700 uppercase tracking-wide">Approved Total</p>
+              <p className="text-sm font-bold text-emerald-800 whitespace-nowrap">{fmtPKR(txSums?.approved ?? 0)} <span className="text-[10px] font-medium">({txSums?.approvedCount ?? 0} entries)</span></p>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+              <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wide">Pending</p>
+              <p className="text-sm font-bold text-amber-800 whitespace-nowrap">{fmtPKR(txSums?.pending ?? 0)}</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">Deleted</p>
+              <p className="text-sm font-bold text-slate-700 whitespace-nowrap">{fmtPKR(txSums?.deleted ?? 0)} <span className="text-[10px] font-medium">({txSums?.deletedCount ?? 0} entries)</span></p>
+            </div>
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+              <p className="text-[10px] font-bold text-blue-700 uppercase tracking-wide">Filtered</p>
+              <p className="text-sm font-bold text-blue-800 whitespace-nowrap">{txTotal} transactions</p>
+            </div>
+          </div>
+
+          {/* Table */}
+          <Card className="border-slate-200 flex-1 min-h-0 flex flex-col">
+            <CardContent className="p-0 flex-1 min-h-0 overflow-auto">
+              <Table className="min-w-[1020px]">
+                <TableHeader>
+                  <TableRow className="bg-slate-50/70">
+                    <TableHead>Voucher #</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Shop</TableHead>
+                    <TableHead>Booker</TableHead>
+                    <TableHead className="text-center">Method</TableHead>
+                    <TableHead className="text-center">Receipt</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                    <TableHead className="text-center">Status</TableHead>
+                    <TableHead className="text-center">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {txRows.length === 0 ? (
+                    <TableRow><TableCell colSpan={9} className="text-center text-sm text-slate-400 py-8">{txLoading ? 'Load ho raha hai...' : 'Koi transaction nahi mili — filters badal kar dekhein'}</TableCell></TableRow>
+                  ) : txRows.map((r) => (
+                    <TableRow key={r.id} className={r.status === 'DELETED' ? 'opacity-50' : undefined}>
+                      <TableCell className="text-xs font-bold text-emerald-700">
+                        {r.recoveryNo}
+                        {r.editedAmount && r.originalAmount != null && (
+                          <p className="text-[9px] font-medium text-slate-400 whitespace-nowrap" title="Admin ne amount edit kiya — asli amount">asli: {fmtPKR(r.originalAmount)}</p>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs text-slate-500 whitespace-nowrap">{fmtDate(r.date, true)}</TableCell>
+                      <TableCell>
+                        <p className="text-sm text-slate-800">{r.shopName}</p>
+                        <p className="text-[10px] text-slate-400 font-mono">{r.shopCode}</p>
+                      </TableCell>
+                      <TableCell className="text-sm">{r.bookerName ?? <span className="text-slate-300">Unassigned</span>}</TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant="outline" className={`text-[10px] ${r.method === 'CASH' ? 'border-emerald-200 text-emerald-700' : 'border-blue-200 text-blue-700'}`}>{METHOD_LABELS[r.method] ?? r.method}</Badge>
+                        {r.reference && <p className="text-[9px] text-slate-400 mt-0.5">{r.reference}</p>}
+                      </TableCell>
+                      <TableCell className="text-center text-xs text-slate-500 font-mono">{r.receiptNo ?? '—'}</TableCell>
+                      <TableCell className="text-right text-sm font-bold whitespace-nowrap">{fmtPKR(r.amount)}</TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant="outline" className={`${STATUS_BADGE[r.status] ?? ''} text-[9px] whitespace-nowrap`}>{STATUS_TEXT[r.status] ?? r.status}</Badge>
+                        {r.status === 'DELETED' && r.reviewNote && (
+                          <p className="text-[9px] text-slate-400 mt-0.5 max-w-36 truncate" title={r.reviewNote}>{r.reviewNote}</p>
+                        )}
+                        {r.status !== 'PENDING' && r.status !== 'DELETED' && r.approvedByName && (
+                          <p className="text-[9px] text-slate-400 mt-0.5 whitespace-nowrap">by {r.approvedByName}</p>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {r.status !== 'DELETED' ? (
+                          <div className="flex items-center justify-center gap-1">
+                            <Button size="sm" variant="outline" className="h-7 border-blue-200 text-blue-700 hover:bg-blue-50 px-2 text-[11px]"
+                              title="Amount edit karein — approved entry par ledger correction khud post hogi"
+                              onClick={() => { setEditing(r); setEditAmount(String(r.amount)); setEditReason('') }}>
+                              <Pencil className="h-3 w-3 mr-1" /> Edit
+                            </Button>
+                            <Button size="sm" variant="outline" className="h-7 border-red-200 text-red-600 hover:bg-red-50 px-2 text-[11px]"
+                              title="Transaction delete — approved entry par ledger reverse + receipt void hoga"
+                              onClick={() => { setDeleting(r); setDelReason('') }}>
+                              <Trash2 className="h-3 w-3 mr-1" /> Delete
+                            </Button>
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-slate-400">—</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+            <div className="px-3 py-2 border-t flex items-center justify-between shrink-0">
+              <p className="text-xs text-slate-500">{txTotal} transactions — page {txPage}/{txPages}</p>
+              <div className="flex gap-1.5">
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" disabled={txPage <= 1 || txLoading} onClick={() => loadTx(txPage - 1)}>Pichla</Button>
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" disabled={txPage >= txPages || txLoading} onClick={() => loadTx(txPage + 1)}>Agla</Button>
+              </div>
+            </div>
+          </Card>
+
+          {/* Edit dialog — amount correction */}
+          <Dialog open={!!editing} onOpenChange={(v) => { if (!v) setEditing(null) }}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2"><Pencil className="h-4 w-4 text-blue-600" /> Amount Edit — {editing?.recoveryNo}</DialogTitle>
+                <DialogDescription>{editing?.shopName} • maujooda amount: {editing ? fmtPKR(editing.amount) : ''}</DialogDescription>
+              </DialogHeader>
+              {editing?.status === 'APPROVED' && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-[11px] text-amber-800 leading-relaxed">
+                  Ye entry <b>approved</b> hai (ledger mein ja chuki) — save par sirf <b>farq</b> ki correction entry post hogi (RECOVERY_EDIT). Poori entry dobara nahi banti, receipt bhi naye amount par update ho jayegi. Udhaar se ziada amount nahi lag sakti.
+                </div>
+              )}
+              <div className="grid gap-2.5">
+                <div className="grid gap-1.5">
+                  <Label className="text-xs font-semibold text-slate-600">Nayi Amount (Rs)</Label>
+                  <Input type="number" min="1" step="0.01" value={editAmount} onChange={(e) => setEditAmount(e.target.value)} className="h-9" autoFocus />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label className="text-xs font-semibold text-slate-600">Wajah (optional — audit log mein likhi jayegi)</Label>
+                  <Input value={editReason} onChange={(e) => setEditReason(e.target.value)} placeholder="jaise: galti se 300 likh diya tha, asli 200 hai" className="h-9" />
+                </div>
+              </div>
+              <DialogFooter className="flex-row gap-2">
+                <Button variant="outline" className="flex-1" onClick={() => setEditing(null)}>Band Karein</Button>
+                <Button className="flex-1 bg-blue-600 hover:bg-blue-700" disabled={txBusy} onClick={submitEdit}>
+                  {txBusy && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />} Save Karein
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Delete dialog — confirm + reverse explanation */}
+          <Dialog open={!!deleting} onOpenChange={(v) => { if (!v) setDeleting(null) }}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-red-700"><Trash2 className="h-4 w-4" /> Delete — {deleting?.recoveryNo}</DialogTitle>
+                <DialogDescription>{deleting?.shopName} • {deleting ? fmtPKR(deleting.amount) : ''} • {deleting ? (METHOD_LABELS[deleting.method] ?? deleting.method) : ''}</DialogDescription>
+              </DialogHeader>
+              <div className="rounded-lg border border-red-200 bg-red-50 p-2.5 text-[11px] text-red-800 space-y-1 leading-relaxed">
+                {deleting?.status === 'APPROVED' ? (
+                  <>
+                    <p className="font-bold">Ye approved entry hai — delete par:</p>
+                    <p>&bull; Shop ledger mein <b>Rs {deleting ? fmtPKR(deleting.amount) : ''} wapas DEBIT</b> hogi (RECOVERY_CANCEL) — shop ka udhaar pehli wali state par aa jayega</p>
+                    <p>&bull; RCP receipt <b>void</b> ho jayegi — Day Book Cash-In theek rahega</p>
+                  </>
+                ) : (
+                  <p>Ye {deleting?.status === 'PENDING' ? 'pending' : 'rejected'} entry hai — ledger/receipt bani hi nahi, sirf record delete mark hoga.</p>
+                )}
+                <p>&bull; Record poora delete nahi hota — DELETED badge ke sath history mein rehta hai (audit ke liye)</p>
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs font-semibold text-slate-600">Wajah (optional)</Label>
+                <Input value={delReason} onChange={(e) => setDelReason(e.target.value)} placeholder="jaise: orderbooker ne galti se double entry kar di" className="h-9" />
+              </div>
+              <DialogFooter className="flex-row gap-2">
+                <Button variant="outline" className="flex-1" onClick={() => setDeleting(null)}>Rok Jayein</Button>
+                <Button className="flex-1 bg-red-600 hover:bg-red-700" disabled={txBusy} onClick={submitDelete}>
+                  {txBusy && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />} Delete Confirm
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         {/* ==================== TAB 4: OB RECOVERY REPORT (Task 100 — cash tally) ==================== */}

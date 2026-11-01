@@ -787,7 +787,10 @@ model Recovery {
   recoveredAt    DateTime  @default(now()) // wasooli ki date (editable)
   postedByName   String? // kis ne entry post ki (admin/distributor)
   // Approval workflow — booker ki wasooli sirf APPROVE ke baad ledger mein jati hai
-  status         String    @default("APPROVED") // PENDING | APPROVED | REJECTED (admin direct post = APPROVED)
+  status         String    @default("APPROVED") // PENDING | APPROVED | REJECTED | DELETED (admin direct post = APPROVED; DELETED = galti se post/approve, ledger reverse ho chuki)
+  // Task 133: RCP receipt link — delete/edit par receipt void/update ho sake
+  // (pehle bani APPROVED entries ka receiptNo null hoga — legacy, heuristics se handle hota hai)
+  receiptNo      String?
   originalAmount Float? // admin ne amount edit kiya to booker ki asli entry (audit)
   editedAmount   Boolean   @default(false) // admin ne amount change kiya?
   approvedById   String? // kis ne approve/reject kiya
