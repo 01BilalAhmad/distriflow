@@ -19,7 +19,7 @@ jobs:
     name: Lint (eslint)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
@@ -32,7 +32,7 @@ jobs:
     name: Typecheck (tsc --noEmit)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
@@ -45,7 +45,7 @@ jobs:
     name: Unit tests (vitest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
@@ -62,7 +62,7 @@ jobs:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
       AUTH_SECRET: ci-only-not-a-secret
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
@@ -77,7 +77,7 @@ jobs:
     # Task 95 ke baad known-critical advisories fix ho gaye (next 16.4.3, dompurify chain,
     # next-auth REMOVE) — high+ par fail hona ab signal hai, noise nahi.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
