@@ -26,21 +26,58 @@ export interface DashboardData {
   kpis: {
     todaySales: number
     todayOrders: number
+    yesterdaySales: number
+    salesDeltaPct: number | null
+    avgOrderValue: number
+    recoveryToday: number
+    recoveryCount: number
     monthSales: number
-    activeOutlets: number
-    pendingOrders: number
-    pendingReturns: number
-    pendingClaims: number
+    totalUdhaar: number
+    udhaarShops: number
+    udhaarDeltaPct: number | null
+    overdue31: number
+    overdue31Shops: number
     stockValue: number
     lowStockItems: number
+    pjpDone: number
+    pjpTotal: number
     salesmenOnField: number
+    fillRate: number
+    pendingOrders: number
+    pendingRecovery: number
+    pendingReturns: number
+    pendingClaims: number
   }
-  salesTrend: { date: string; sales: number; orders: number }[]
-  topProducts: { name: string; qty: number; value: number }[]
-  channelMix: { channel: string; value: number }[]
-  distributorPerf: { name: string; orders: number; sales: number; collection: number }[]
-  lowStock: { product: string; warehouse: string; qty: number; unitsPerCarton: number }[]
-  pjpToday: { salesman: string; total: number; completed: number; status: string }[]
+  trend14: { date: string; sales: number; recovery: number }[]
+  mini5: { date: string; sales: number; recovery: number; today: boolean }[]
+  aging: {
+    buckets: { bucket: string; amount: number; shops: number; prev: number }[]
+    total: number
+    shops: number
+  }
+  bookers: {
+    bookerId: string
+    name: string
+    outlets: number
+    orders: number
+    sales: number
+    recovery: number
+    fillPct: number
+    pjpPct: number | null
+    overdue: number
+  }[]
+  bookerTotals: {
+    outlets: number
+    orders: number
+    sales: number
+    recovery: number
+    fillPct: number
+    pjpPct: number | null
+    overdue: number
+  }
+  topOverdue: { shop: string; zone: string; amount: number; days: number; lastPay: string }[]
+  noVisit: { shop: string; zone: string; booker: string; days: number | null }[]
+  daybook: { sales: number; recovery: number; orders: number; receipts: number; cash: number; returns: number }
 }
 
 /** Task 57: OrderItem.schemeStack Json row — booking par freeze hui har scheme ki
