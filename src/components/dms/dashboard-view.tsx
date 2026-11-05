@@ -18,9 +18,15 @@ import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 
+// Task 135 — ink/mut/line/hair ab CSS var() references hain (globals.css 5b block):
+// light par wahi hex values (Task 134 look), .dark par khud flip — pehle hardcoded
+// #151a26 dark background par ghayab ho jata tha (user: "dark mode main text visible nai").
+// blue/green/amber/red saturated chart colors hain — dono themes par visible, recharts
+// SVG attributes mein bhi chalte hain.
 const C = {
   blue: '#1d4ed8', green: '#15803d', amber: '#b45309', red: '#b91c1c',
-  ink: '#151a26', mut: '#586073', line: '#e2e5ec', hair: '#edf0f5',
+  ink: 'var(--foreground)', mut: 'var(--muted-foreground)',
+  line: 'var(--df-line)', hair: 'var(--df-hair)',
 }
 
 /** compact paisa — Rs 8.42M style (>=10 lakh par), warna full fmtPKR */
@@ -39,11 +45,11 @@ function TrendArrow({ now, prev }: { now: number; prev: number }) {
   const improving = now < prev
   return improving ? (
     <svg aria-label="improving" width="10" height="10" viewBox="0 0 10 10" className="inline">
-      <path d="M5 8.8.8 1.6h8.4Z" fill={C.green} />
+      <path d="M5 8.8.8 1.6h8.4Z" fill={C.green} className="fill-[#15803d] dark:fill-[#4ade80]" />
     </svg>
   ) : (
     <svg aria-label="worsening" width="10" height="10" viewBox="0 0 10 10" className="inline">
-      <path d="M5 1.2 9.2 8.4H.8Z" fill={C.red} />
+      <path d="M5 1.2 9.2 8.4H.8Z" fill={C.red} className="fill-[#b91c1c] dark:fill-[#f87171]" />
     </svg>
   )
 }
@@ -63,7 +69,7 @@ function CardHead({ icon, title, right }: { icon: React.ReactNode; title: string
   return (
     <div className="flex items-center gap-1.5 border-b px-3 py-2" style={{ borderColor: C.hair }}>
       <span className="flex text-slate-400">{icon}</span>
-      <h2 className="text-[11px] font-bold uppercase tracking-wider" style={{ color: '#3f4757' }}>{title}</h2>
+      <h2 className="text-[11px] font-bold uppercase tracking-wider" style={{ color: C.mut }}>{title}</h2>
       {right && <div className="ml-auto flex items-center gap-2 text-[11px] text-slate-500">{right}</div>}
     </div>
   )
@@ -151,7 +157,7 @@ export function DashboardView() {
   ]
 
   return (
-    <div className="space-y-3 text-[13px]" style={{ color: C.ink, fontVariantNumeric: 'tabular-nums' }}>
+    <div className="df-dash space-y-3 text-[13px]" style={{ color: C.ink, fontVariantNumeric: 'tabular-nums' }}>
       {/* ============ KPI STRIP ============ */}
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8" aria-label="Key KPIs">
         {tiles.map((t) => (
@@ -191,7 +197,11 @@ export function DashboardView() {
                   <Tooltip
                     formatter={(v, n) => [fmtPKR(Number(v)), n === 'sales' ? 'Sales' : 'Recovery (Wasooli)']}
                     labelStyle={{ fontWeight: 700 }}
-                    contentStyle={{ borderRadius: 8, border: `1px solid ${C.line}`, fontSize: 12 }} />
+                    contentStyle={{
+                      borderRadius: 8, border: `1px solid ${C.line}`, fontSize: 12,
+                      // Task 135: recharts default white bg + inherit light text dark par invisible hota tha
+                      background: 'var(--popover)', color: 'var(--popover-foreground)',
+                    }} />
                   <Bar dataKey="sales" fill={C.blue} radius={[3, 3, 0, 0]} maxBarSize={26} name="sales" />
                   <Line dataKey="recovery" stroke={C.green} strokeWidth={2.2} dot={{ r: 2.2, fill: C.green, strokeWidth: 0 }} name="recovery" />
                 </ComposedChart>
@@ -292,8 +302,10 @@ export function DashboardView() {
                 {data.bookers.length === 0 && (
                   <tr><td colSpan={8} className="px-2.5 py-6 text-center text-slate-400">Abhi koi order booker add nahi hua</td></tr>
                 )}
+                {/* Task 135: odd row literal #f8fafc dark par white block ban jata tha —
+                    slate-50 ka dark remap (#1a2029) globals 5b se aata hai, light same */}
                 {data.bookers.map((b) => (
-                  <tr key={b.bookerId} className="odd:bg-[#f8fafc]">
+                  <tr key={b.bookerId} className="odd:bg-slate-50">
                     <td className="px-2.5 py-1.5 font-semibold">{b.name}</td>
                     <td className="px-2.5 py-1.5 text-right">{b.outlets}</td>
                     <td className="px-2.5 py-1.5 text-right">{b.orders}</td>

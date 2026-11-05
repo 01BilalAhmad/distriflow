@@ -703,6 +703,29 @@
     outline-color: rgba(142, 166, 255, 0.55);
   }
 
+  /* ---- 5b) Task 135 — Dashboard v2 (Ops Dense) dark-mode tokens ----
+     dashboard-view.tsx ke inline C.ink/C.line/C.hair ab var() reference hain —
+     light hex values bilkul same (Task 134 approved look), .dark par surfaces
+     ke sath flip. .df-dash scope mein recharts ki light-theme green line/bars
+     dark par bright brand tints par switch (screenshot: recovery line dim thi). */
+  :root {
+    --df-line: #e2e5ec;
+    --df-hair: #edf0f5;
+  }
+  .dark {
+    --df-line: rgba(255, 255, 255, 0.10);
+    --df-hair: rgba(255, 255, 255, 0.07);
+  }
+  .dark .df-dash .recharts-bar-rectangle path {
+    fill: var(--chart-1);
+  }
+  .dark .df-dash .recharts-line-curve {
+    stroke: var(--chart-3);
+  }
+  .dark .df-dash .recharts-line-dot {
+    fill: var(--chart-3);
+  }
+
   /* ---- 6) PRINT PREVIEW protection — cbl-print-root portal ke andar vars wapas
      light (screen preview == print output). Sirf remap KIYE GAYE vars. ---- */
   .cbl-print-root {
