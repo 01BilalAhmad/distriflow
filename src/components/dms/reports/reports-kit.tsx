@@ -589,56 +589,115 @@ export function CSVButton(props: { onClick: () => void; label?: string }) {
 }
 
 // ---------------- Print (naye window mein — app CSS se azad) ----------------
-export function printReport(opts: {
-  title: string
-  subtitle?: string
-  distributor: string
-  period: string
-  cols: { label: string; align?: 'left' | 'right' | 'center' }[]
-  rows: (string | number)[][]
-  totalsRow?: (string | number)[]
-  sections?: { heading: string; cols: { label: string; align?: 'left' | 'right' | 'center' }[]; rows: (string | number)[][]; totalsRow?: (string | number)[] }[]
-  footerNote?: string
-}) {
-  const w = window.open('', '_blank', 'width=1200,height=800')
+// Task 137 — ONE-PAGE AUTO-FIT print (user: "ek page par print ho skta thabut nai hua,
+// neeche khali jaga nai choro"):
+// Wajah jo pata chali: phone ka Chrome (Android) @page landscape IGNORE karta hai →
+// 16-column table portrait Letter mein squeeze hui, 1 row page 2 par chali gayi aur
+// Chrome har page par thead + tfoot (TOTAL) dobara chap deta → duplicate TOTAL +
+// aadhi khali page. Naya system:
+//   • Fixed 700px design width = Letter/A4 portrait printable box (10mm margins) —
+//     desktop / phone / tablet SAB par ek hi predictable layout (orientation jhagda khatam)
+//   • Auto-fit zoom: print se pehle content measure kar ke paper box (700×950px) par
+//     scale — jo report ek page mein aa sakti hai wo HAMESHA ek page par. Scale floor
+//     0.62 — us se zyada chhoti lagti (bohat lambi report) to normal paginate hoti hai.
+//   • tfoot { display: table-row-group } → TOTAL sirf table ke END par chapta hai,
+//     Chrome ab har page par TOTAL repeat NAHI karta; thead repeat rehta hai (lambi
+//     report ka column header har page par — wo sahi aur chahiye hota hai).
+//   • Money cells ab fmtMoney se (9108 → 9,108) — PDF/Excel export jaisa hi look.
+export function printReport(opts: ReportExportOpts) {
+  const w = window.open('', '_blank', 'width=880,height=960')
   if (!w) { alert('Print window block ho gaya — popup allow karein'); return }
-  const th = (c: { label: string; align?: string }) => `<th style="text-align:${c.align === 'right' ? 'right' : c.align === 'center' ? 'center' : 'left'}">${c.label}</th>`
-  const tr = (r: (string | number)[], tds: { align?: string }[], bold = false) =>
-    `<tr${bold ? ' class="tot"' : ''}>${r.map((v, i) => `<td style="text-align:${tds[i]?.align === 'right' ? 'right' : tds[i]?.align === 'center' ? 'center' : 'left'}">${v ?? ''}</td>`).join('')}</tr>`
-  const table = (cols: { label: string; align?: string }[], rows: (string | number)[][], totals?: (string | number)[]) => `
+  const esc = (v: unknown) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const alignOf = (a?: string) => (a === 'right' ? 'right' : a === 'center' ? 'center' : 'left')
+  const cellStr = (v: string | number | undefined, money?: boolean) => {
+    if (v === '' || v === undefined || v === null) return ''
+    if (!money) return String(v)
+    const n = toNum(v)
+    return Number.isFinite(n) ? fmtMoney(n) : String(v)
+  }
+  const th = (c: ExportCol) => `<th style="text-align:${alignOf(c.align)}">${esc(c.label)}</th>`
+  const tr = (r: (string | number)[], cols: ExportCol[], bold = false) =>
+    `<tr${bold ? ' class="tot"' : ''}>${r.map((v, i) => `<td style="text-align:${alignOf(cols[i]?.align)}">${esc(cellStr(v, cols[i]?.money))}</td>`).join('')}</tr>`
+  const table = (cols: ExportCol[], rows: (string | number)[][], totals?: (string | number)[]) => `
     <table>
       <thead><tr>${cols.map(th).join('')}</tr></thead>
       <tbody>${rows.map((r) => tr(r, cols)).join('')}</tbody>
       ${totals ? `<tfoot>${tr(totals, cols, true)}</tfoot>` : ''}
     </table>`
-  const sectionsHtml = opts.sections?.map((s) => `<h3>${s.heading}</h3>${table(s.cols, s.rows, s.totalsRow)}`).join('') ?? ''
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${opts.title} — DistriFlow</title>
+  const sectionsHtml = exportSections(opts)
+    .map((s) => `${s.heading ? `<h3>${esc(s.heading)}</h3>` : ''}${table(s.cols, s.rows, s.totalsRow)}`)
+    .join('')
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(opts.title)} — DistriFlow</title>
   <style>
-    * { box-sizing: border-box; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 24px; color: #0f172a; }
-    .hdr { border-bottom: 3px solid #059669; padding-bottom: 10px; margin-bottom: 14px; }
-    .hdr h1 { margin: 0; font-size: 20px; color: #065f46; }
-    .hdr .biz { font-size: 15px; font-weight: 700; margin-top: 2px; }
-    .hdr .meta { font-size: 11px; color: #64748b; margin-top: 3px; }
-    h3 { font-size: 13px; color: #065f46; margin: 18px 0 6px; border-left: 3px solid #10b981; padding-left: 8px; }
-    table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
-    th { background: #ecfdf5; color: #065f46; border: 1px solid #d1d5db; padding: 5px 7px; }
-    td { border: 1px solid #e5e7eb; padding: 4px 7px; }
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    html, body { margin: 0; padding: 0; }
+    body { width: 700px; font-family: 'Segoe UI', Arial, sans-serif; color: #0f172a; background: #fff; }
+    .hdr { border-bottom: 2.5px solid #059669; padding-bottom: 6px; margin-bottom: 10px; }
+    .hdr h1 { margin: 0; font-size: 16px; color: #065f46; }
+    .hdr .biz { font-size: 12.5px; font-weight: 700; margin-top: 2px; }
+    .hdr .meta { font-size: 9.5px; color: #64748b; margin-top: 3px; }
+    h3 { font-size: 11.5px; color: #065f46; margin: 10px 0 4px; border-left: 3px solid #10b981; padding-left: 7px; }
+    table { width: 100%; border-collapse: collapse; font-size: 9.5px; }
+    th { background: #ecfdf5; color: #065f46; border: 1px solid #d1d5db; padding: calc(var(--df-rowpad, 0px) + 3px) 4.5px; font-size: 8.5px; line-height: 1.15; white-space: nowrap; vertical-align: bottom; }
+    td { border: 1px solid #e5e7eb; padding: calc(var(--df-rowpad, 0px) + 2.5px) 4.5px; white-space: nowrap; }
+    th:first-child, td:first-child { white-space: normal; }
     tbody tr:nth-child(even) { background: #f8fafc; }
     .tot td { background: #ecfdf5; font-weight: 700; border-top: 2px solid #059669; }
-    .foot { margin-top: 26px; display: flex; justify-content: space-between; font-size: 10px; color: #64748b; }
-    .note { margin-top: 10px; font-size: 10.5px; color: #475569; font-style: italic; }
-    @page { size: A4 ${opts.cols.length > 9 ? 'landscape' : 'portrait'}; margin: 12mm; }
+    .foot { margin-top: 10px; display: flex; justify-content: space-between; font-size: 9px; color: #64748b; }
+    .note { margin-top: 6px; font-size: 9px; color: #475569; font-style: italic; }
+    thead { display: table-header-group; }
+    tfoot { display: table-row-group; }
+    tr { page-break-inside: avoid; }
+    @page { size: A4 portrait; margin: 10mm; }
   </style></head><body>
   <div class="hdr">
-    <h1>${opts.title}</h1>
-    <div class="biz">${opts.distributor}</div>
-    <div class="meta">Period: ${opts.period}${opts.subtitle ? ` • ${opts.subtitle}` : ''} • Generated: ${new Date().toLocaleString('en-PK')} — DistriFlow</div>
+    <h1>${esc(opts.title)}</h1>
+    <div class="biz">${esc(opts.distributor)}</div>
+    <div class="meta">Period: ${esc(opts.period)}${opts.subtitle ? ` • ${esc(opts.subtitle)}` : ''} • Generated: ${stampStr()} — DistriFlow</div>
   </div>
-  ${opts.sections ? sectionsHtml : table(opts.cols, opts.rows, opts.totalsRow)}
-  ${opts.footerNote ? `<div class="note">${opts.footerNote}</div>` : ''}
+  ${sectionsHtml}
+  ${opts.footerNote ? `<div class="note">${esc(opts.footerNote)}</div>` : ''}
   <div class="foot"><span>DistriFlow — FMCG Distribution Management</span><span>Signature: ____________________</span></div>
-  <script>window.onload = () => setTimeout(() => window.print(), 300)</script>
+  <script>
+    (function () {
+      var BOX_W = 700, BOX_H = 950, FLOOR = 0.62;
+      function fit() {
+        try {
+          var b = document.body;
+          b.style.zoom = 'normal';
+          b.style.width = '700px';
+          b.style.setProperty('--df-rowpad', '0px');
+          var W = Math.max(b.scrollWidth, document.documentElement.scrollWidth);
+          var H = Math.max(b.scrollHeight, document.documentElement.scrollHeight);
+          var sW = Math.min(1, BOX_W / W), sH = Math.min(1, BOX_H / H), s = Math.min(sW, sH);
+          if (s < 1 && s >= FLOOR) {
+            b.style.zoom = s;
+            if (sH < sW) b.style.width = Math.round(BOX_W / s) + 'px';
+          }
+          // Task 137 — vertical fill: chhoti report par neeche khali jaga na chhorein —
+          // rows ko symmetric extra padding de kar content ko page par phaila do
+          // (font size NAHI badalta, sirf row height barhti hai — Excel jaisi airy look).
+          var effH = b.getBoundingClientRect().height;
+          if (effH < BOX_H * 0.72) {
+            var rows = document.querySelectorAll('tr').length || 1;
+            // pad pre-zoom px mein lagta hai — post-zoom target ke liye s se divide karo
+            var sEff = (s < 1 && s >= FLOOR) ? s : 1;
+            var cap = rows <= 6 ? 18 : 12; // chhoti report (day-book 1-2 rows) zyada saans le
+            var pad = Math.min(cap, (BOX_H * 0.94 - effH) / (rows * 2 * sEff));
+            if (pad > 1) {
+              b.style.setProperty('--df-rowpad', pad.toFixed(2) + 'px');
+              var h2 = b.getBoundingClientRect().height;
+              if (h2 > BOX_H * 0.98) {
+                pad = Math.max(0, pad - (h2 - BOX_H * 0.94) / (rows * 2));
+                b.style.setProperty('--df-rowpad', pad.toFixed(2) + 'px');
+              }
+            }
+          }
+        } catch (e) {}
+      }
+      window.onload = function () { fit(); setTimeout(function () { window.print(); }, 250); };
+    })();
+  </script>
   </body></html>`)
   w.document.close()
 }
