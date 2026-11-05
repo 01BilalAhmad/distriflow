@@ -150,6 +150,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (tm) return tm
 
     if (action === 'CANCEL') {
+      // Task 136: cancel ka GUARD — user report: cancel ki gayi bill ab bhi sales mein
+      // gin rahi thi (dashboard filter fix alag hai). Yahan state-machine guard:
+      //   CONFIRMED (unprocessed)  -> cancel OK (stock/ledger par koi asar nahi tha)
+      //   PROCESSING (van-out)     -> stock deduct + challan ban chuke — pehle UN-PROCESS
+      //   DELIVERED / PARTIALLY    -> sale ho chuki — returns se reverse hoti hai
+      //   CANCELLED                -> double cancel block
+      if (order.status === 'CANCELLED') return jsonError(`Bill ${order.orderNo} pehle se cancel hai`)
+      if (order.status === 'PROCESSING') return jsonError(`Bill ${order.orderNo} van-out summary mein hai — pehle Delivery Summary UN-PROCESS karein, phir cancel karein`)
+      if (order.status !== 'CONFIRMED') return jsonError(`Bill ${order.orderNo} (${order.status}) cancel nahi ho sakti — delivered/goods nikli hui bill Returns module se reverse hoti hai`)
       const updated = await db.order.update({ where: { id }, data: { status: 'CANCELLED' } })
       // Task 35: ORDER_CANCEL — bill cancel ka record
       await audit(

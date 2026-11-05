@@ -48,6 +48,11 @@ export async function GET(req: Request) {
     // ---- scope filters (purane dashboard jaisa hi) ----
     const orderWhere = role === 'SALESMAN' ? { salesmanId: user.id } : { distributorId: profileId! }
     const outletWhere = orderWhere
+    // Task 136: CANCELLED bill SALE NAHI hai — user report: process -> un-process -> cancel
+    // ki gayi bill phir bhi Aaj ki Sales / Month Sales / 14-day chart mein gin rahi thi.
+    // Tamam SALES aggregates (today/yesterday/month/trend) par ye filter lagta hai;
+    // pendingOrders/fill-rate/bookers jaisi queries apne status filters khud rakhti hain.
+    const salesWhere = { ...orderWhere, status: { not: 'CANCELLED' } }
     const claimWhere = profileId ? { distributorId: profileId } : { id: { in: [] as string[] } }
     const salesmanIds =
       role === 'SALESMAN'
@@ -78,11 +83,11 @@ export async function GET(req: Request) {
       recoveryTodayAgg, pendingRecovery, collectionsTodayAgg, returnsToday, claimsToday,
       trendOrders, recoveries14, orders30, outlets, visitsWindow, bookers,
     ] = await Promise.all([
-      db.order.aggregate({ where: { ...orderWhere, orderDate: { gte: today0 } }, _sum: { total: true }, _count: true }),
-      db.order.aggregate({ where: { ...orderWhere, orderDate: { gte: yest0, lt: today0 } }, _sum: { total: true } }),
+      db.order.aggregate({ where: { ...salesWhere, orderDate: { gte: today0 } }, _sum: { total: true }, _count: true }),
+      db.order.aggregate({ where: { ...salesWhere, orderDate: { gte: yest0, lt: today0 } }, _sum: { total: true } }),
       db.order.groupBy({
         by: ['channel'],
-        where: { ...orderWhere, orderDate: { gte: mStart } },
+        where: { ...salesWhere, orderDate: { gte: mStart } },
         _sum: { total: true },
         _count: true,
       }),
@@ -110,9 +115,9 @@ export async function GET(req: Request) {
       }),
       db.saleReturn.count({ where: { outlet: outletWhere, createdAt: { gte: today0 } } }),
       db.claim.count({ where: { ...claimWhere, createdAt: { gte: today0 } } }),
-      // 14-day sales trend
+      // 14-day sales trend (CANCELLED excluded — Task 136)
       db.order.findMany({
-        where: { ...orderWhere, orderDate: { gte: d13 } },
+        where: { ...salesWhere, orderDate: { gte: d13 } },
         select: { total: true, orderDate: true },
       }),
       // 14-day recovery trend (APPROVED)
