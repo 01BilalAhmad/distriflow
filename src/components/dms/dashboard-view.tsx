@@ -62,15 +62,19 @@ function DaysBadge({ days }: { days: number | null }) {
       : days > 30
         ? 'bg-amber-50 text-amber-700'
         : 'bg-emerald-50 text-emerald-700'
-  return <span className={`inline-block rounded-full px-2 py-[1px] text-[10.5px] font-bold ${cls}`}>{days == null ? '—' : `${days}d`}</span>
+  // Task 139: px-1.5 (pehle px-2) — 349px narrow card mein overdue table ko bina
+  // scroll ke fit rakhne ke liye 4px ki jagah
+  return <span className={`inline-block rounded-full px-1.5 py-[1px] text-[10.5px] font-bold ${cls}`}>{days == null ? '—' : `${days}d`}</span>
 }
 
 function CardHead({ icon, title, right }: { icon: React.ReactNode; title: string; right?: React.ReactNode }) {
   return (
     <div className="flex items-center gap-1.5 border-b px-3 py-2" style={{ borderColor: C.hair }}>
-      <span className="flex text-slate-400">{icon}</span>
-      <h2 className="text-[11px] font-bold uppercase tracking-wider" style={{ color: C.mut }}>{title}</h2>
-      {right && <div className="ml-auto flex items-center gap-2 text-[11px] text-slate-500">{right}</div>}
+      <span className="flex shrink-0 text-slate-400">{icon}</span>
+      {/* Task 139: narrow card (1024-1279px) par title + right link takrate the —
+          title truncate hota hai, right link shrink nahi hota */}
+      <h2 className="min-w-0 truncate text-[11px] font-bold uppercase tracking-wider" style={{ color: C.mut }}>{title}</h2>
+      {right && <div className="ml-auto flex shrink-0 items-center gap-2 text-[11px] text-slate-500">{right}</div>}
     </div>
   )
 }
@@ -284,18 +288,20 @@ export function DashboardView() {
               <span className="inline-block h-2.5 w-2.5 rounded-sm bg-emerald-100" /><span>best sales / fill %</span>
               <span className="inline-block h-2.5 w-2.5 rounded-sm bg-red-100" /><span>overdue &gt; Rs 4 lac</span>
             </>} />
+          {/* Task 139: min-w 760 -> 680 (px-2 cells + PJP% hidden below xl) — 1024px
+              viewport par bhi poora matrix bina scroll fit, phone par contained scroll */}
           <div className="overflow-x-auto p-1">
-            <table className="w-full min-w-[760px] border-collapse">
+            <table className="w-full min-w-[680px] border-collapse">
               <thead>
                 <tr>
-                  <th className="px-2.5 py-1.5 text-left text-[10px] font-bold uppercase tracking-wider text-slate-500">Order Booker</th>
-                  <th className="px-2.5 py-1.5 text-right text-[10px] font-bold uppercase tracking-wider text-slate-500">Outlets</th>
-                  <th className="px-2.5 py-1.5 text-right text-[10px] font-bold uppercase tracking-wider text-slate-500">Orders</th>
-                  <th className="px-2.5 py-1.5 text-right text-[10px] font-bold uppercase tracking-wider text-slate-500">Sales</th>
-                  <th className="px-2.5 py-1.5 text-right text-[10px] font-bold uppercase tracking-wider text-slate-500">Recovery</th>
-                  <th className="px-2.5 py-1.5 text-right text-[10px] font-bold uppercase tracking-wider text-slate-500">Fill %</th>
-                  <th className="px-2.5 py-1.5 text-right text-[10px] font-bold uppercase tracking-wider text-slate-500">PJP %</th>
-                  <th className="px-2.5 py-1.5 text-right text-[10px] font-bold uppercase tracking-wider text-slate-500">Overdue Carried</th>
+                  <th className="px-2 py-1.5 text-left text-[10px] font-bold uppercase tracking-wider text-slate-500">Order Booker</th>
+                  <th className="px-2 py-1.5 text-right text-[10px] font-bold uppercase tracking-wider text-slate-500">Outlets</th>
+                  <th className="px-2 py-1.5 text-right text-[10px] font-bold uppercase tracking-wider text-slate-500">Orders</th>
+                  <th className="px-2 py-1.5 text-right text-[10px] font-bold uppercase tracking-wider text-slate-500">Sales</th>
+                  <th className="px-2 py-1.5 text-right text-[10px] font-bold uppercase tracking-wider text-slate-500">Recovery</th>
+                  <th className="px-2 py-1.5 text-right text-[10px] font-bold uppercase tracking-wider text-slate-500">Fill %</th>
+                  <th className="hidden px-2 py-1.5 text-right text-[10px] font-bold uppercase tracking-wider text-slate-500 xl:table-cell">PJP %</th>
+                  <th className="px-2 py-1.5 text-right text-[10px] font-bold uppercase tracking-wider text-slate-500">Overdue Carried</th>
                 </tr>
               </thead>
               <tbody>
@@ -306,26 +312,26 @@ export function DashboardView() {
                     slate-50 ka dark remap (#1a2029) globals 5b se aata hai, light same */}
                 {data.bookers.map((b) => (
                   <tr key={b.bookerId} className="odd:bg-slate-50">
-                    <td className="px-2.5 py-1.5 font-semibold">{b.name}</td>
-                    <td className="px-2.5 py-1.5 text-right">{b.outlets}</td>
-                    <td className="px-2.5 py-1.5 text-right">{b.orders}</td>
-                    <td className={`px-2.5 py-1.5 text-right font-semibold ${b.sales > 0 && b.sales === bestSales ? 'bg-emerald-50 font-bold text-emerald-700' : ''}`}>{fmtM(b.sales)}</td>
-                    <td className="px-2.5 py-1.5 text-right">{fmtM(b.recovery)}</td>
-                    <td className={`px-2.5 py-1.5 text-right ${b.fillPct > 0 && b.fillPct === bestFill ? 'bg-emerald-50 font-bold text-emerald-700' : ''}`}>{b.fillPct}%</td>
-                    <td className="px-2.5 py-1.5 text-right">{b.pjpPct == null ? '—' : `${b.pjpPct}%`}</td>
-                    <td className={`px-2.5 py-1.5 text-right ${b.overdue > OVERDUE_TINT ? 'bg-red-50 font-bold text-red-700' : ''}`}>{fmtM(b.overdue)}</td>
+                    <td className="px-2 py-1.5 font-semibold">{b.name}</td>
+                    <td className="px-2 py-1.5 text-right">{b.outlets}</td>
+                    <td className="px-2 py-1.5 text-right">{b.orders}</td>
+                    <td className={`px-2 py-1.5 text-right font-semibold ${b.sales > 0 && b.sales === bestSales ? 'bg-emerald-50 font-bold text-emerald-700' : ''}`}>{fmtM(b.sales)}</td>
+                    <td className="px-2 py-1.5 text-right">{fmtM(b.recovery)}</td>
+                    <td className={`px-2 py-1.5 text-right ${b.fillPct > 0 && b.fillPct === bestFill ? 'bg-emerald-50 font-bold text-emerald-700' : ''}`}>{b.fillPct}%</td>
+                    <td className="hidden px-2 py-1.5 text-right xl:table-cell">{b.pjpPct == null ? '—' : `${b.pjpPct}%`}</td>
+                    <td className={`px-2 py-1.5 text-right ${b.overdue > OVERDUE_TINT ? 'bg-red-50 font-bold text-red-700' : ''}`}>{fmtM(b.overdue)}</td>
                   </tr>
                 ))}
                 {data.bookers.length > 0 && (
                   <tr>
-                    <td className="bg-slate-100 px-2.5 py-1.5 font-bold">TOTAL</td>
-                    <td className="bg-slate-100 px-2.5 py-1.5 text-right font-bold">{data.bookerTotals.outlets}</td>
-                    <td className="bg-slate-100 px-2.5 py-1.5 text-right font-bold">{data.bookerTotals.orders}</td>
-                    <td className="bg-slate-100 px-2.5 py-1.5 text-right font-bold">{fmtM(data.bookerTotals.sales)}</td>
-                    <td className="bg-slate-100 px-2.5 py-1.5 text-right font-bold">{fmtM(data.bookerTotals.recovery)}</td>
-                    <td className="bg-slate-100 px-2.5 py-1.5 text-right font-bold">{data.bookerTotals.fillPct}%</td>
-                    <td className="bg-slate-100 px-2.5 py-1.5 text-right font-bold">{data.bookerTotals.pjpPct == null ? '—' : `${data.bookerTotals.pjpPct}%`}</td>
-                    <td className="bg-slate-100 px-2.5 py-1.5 text-right font-bold">{fmtM(data.bookerTotals.overdue)}</td>
+                    <td className="bg-slate-100 px-2 py-1.5 font-bold">TOTAL</td>
+                    <td className="bg-slate-100 px-2 py-1.5 text-right font-bold">{data.bookerTotals.outlets}</td>
+                    <td className="bg-slate-100 px-2 py-1.5 text-right font-bold">{data.bookerTotals.orders}</td>
+                    <td className="bg-slate-100 px-2 py-1.5 text-right font-bold">{fmtM(data.bookerTotals.sales)}</td>
+                    <td className="bg-slate-100 px-2 py-1.5 text-right font-bold">{fmtM(data.bookerTotals.recovery)}</td>
+                    <td className="bg-slate-100 px-2 py-1.5 text-right font-bold">{data.bookerTotals.fillPct}%</td>
+                    <td className="hidden bg-slate-100 px-2 py-1.5 text-right font-bold xl:table-cell">{data.bookerTotals.pjpPct == null ? '—' : `${data.bookerTotals.pjpPct}%`}</td>
+                    <td className="bg-slate-100 px-2 py-1.5 text-right font-bold">{fmtM(data.bookerTotals.overdue)}</td>
                   </tr>
                 )}
               </tbody>
@@ -333,18 +339,27 @@ export function DashboardView() {
           </div>
         </section>
 
-        {/* ============ TOP OVERDUE SHOPS ============ */}
-        <section className="rounded-lg border bg-white shadow-sm lg:col-span-4" style={{ borderColor: C.line }}>
+        {/* ============ TOP OVERDUE SHOPS ============
+            Task 139: pehle lg:col-span-4 tha — 1024-1279px viewport par card sirf ~240px
+            ka banta tha aur 5-column table ka min-width ~270px chahiye tha -> table card
+            se bahar nikal kar PENDING APPROVALS card par OVERLAP karti thi (user: 'text
+            overlap kew ho rhy hn', LAST PAY header 'LAST PA' clip). Table ka min-width
+            (full amounts, ~400px) 3-up card mein kabhi fit nahi hota — ab bottom row
+            HAMESHA 2-up (lg:col-span-6, ~350-560px card); wrapper overflow-x-auto sirf
+            safety (worst case card ke andar scroll, kabhi padosi card par overlap nahi);
+            Zone narrow lg par hidden + xl se visible; th nowrap + no tracking taake
+            'LAST PAY' header kabhi clip na ho. */}
+        <section className="rounded-lg border bg-white shadow-sm lg:col-span-6" style={{ borderColor: C.line }}>
           <CardHead icon={I.alert} title="Top Overdue Shops" right={<Link href="/ledgers" className="font-bold text-blue-700 hover:underline">Shop Ledgers →</Link>} />
-          <div className="p-1">
+          <div className="overflow-x-auto p-1">
             <table className="w-full border-collapse">
               <thead>
                 <tr>
-                  <th className="px-2 py-1.5 text-left text-[10px] font-bold uppercase tracking-wider text-slate-500">Shop</th>
-                  <th className="px-2 py-1.5 text-left text-[10px] font-bold uppercase tracking-wider text-slate-500">Zone</th>
-                  <th className="px-2 py-1.5 text-right text-[10px] font-bold uppercase tracking-wider text-slate-500">Amount</th>
-                  <th className="px-2 py-1.5 text-right text-[10px] font-bold uppercase tracking-wider text-slate-500">Days</th>
-                  <th className="px-2 py-1.5 text-right text-[10px] font-bold uppercase tracking-wider text-slate-500">Last Pay</th>
+                  <th className="px-1.5 py-1.5 text-left text-[10px] font-bold uppercase text-slate-500">Shop</th>
+                  <th className="hidden px-1.5 py-1.5 text-left text-[10px] font-bold uppercase text-slate-500 xl:table-cell">Zone</th>
+                  <th className="whitespace-nowrap px-1.5 py-1.5 text-right text-[10px] font-bold uppercase text-slate-500">Amount</th>
+                  <th className="whitespace-nowrap px-1.5 py-1.5 text-right text-[10px] font-bold uppercase text-slate-500">Days</th>
+                  <th className="whitespace-nowrap px-1.5 py-1.5 text-right text-[10px] font-bold uppercase text-slate-500">Last Pay</th>
                 </tr>
               </thead>
               <tbody>
@@ -353,11 +368,13 @@ export function DashboardView() {
                 )}
                 {data.topOverdue.map((r) => (
                   <tr key={r.shop}>
-                    <td className="px-2 py-1.5 text-[12px] font-semibold">{r.shop}</td>
-                    <td className="px-2 py-1.5 text-[12px] text-slate-500">{r.zone}</td>
-                    <td className="px-2 py-1.5 text-right text-[12px] font-semibold">{fmtPKR(r.amount)}</td>
-                    <td className="px-2 py-1.5 text-right"><DaysBadge days={r.days} /></td>
-                    <td className="px-2 py-1.5 text-right text-[12px] text-slate-500">{r.lastPay}</td>
+                    <td className="px-1.5 py-1.5 text-[12px] font-semibold">{r.shop}</td>
+                    <td className="hidden px-1.5 py-1.5 text-[12px] text-slate-500 xl:table-cell">
+                      <span className="block max-w-[64px] truncate" title={r.zone}>{r.zone}</span>
+                    </td>
+                    <td className="whitespace-nowrap px-1.5 py-1.5 text-right text-[12px] font-semibold">{fmtPKR(r.amount)}</td>
+                    <td className="px-1.5 py-1.5 text-right"><DaysBadge days={r.days} /></td>
+                    <td className="whitespace-nowrap px-1.5 py-1.5 text-right text-[12px] text-slate-500">{r.lastPay}</td>
                   </tr>
                 ))}
               </tbody>
@@ -365,8 +382,11 @@ export function DashboardView() {
           </div>
         </section>
 
-        {/* ============ PENDING APPROVALS ============ */}
-        <section className="rounded-lg border bg-white shadow-sm lg:col-span-4" style={{ borderColor: C.line }}>
+        {/* ============ PENDING APPROVALS ============
+            Task 139: row flex-wrap + label min-w-0 — narrow card par Review button
+            apni line par gracefully shift hota hai, label/icon squeeze ya overlap
+            nahi karta. Span bhi 2-up (upar Overdue card ke sath row banata hai) */}
+        <section className="rounded-lg border bg-white shadow-sm lg:col-span-6" style={{ borderColor: C.line }}>
           <CardHead icon={I.check} title="Pending Approvals" />
           <div className="p-3">
             {[
@@ -374,11 +394,11 @@ export function DashboardView() {
               { label: 'Orders', count: k.pendingOrders, href: '/orders', icon: I.doc },
               { label: 'Returns + claims', count: k.pendingReturns + k.pendingClaims, href: '/returns', icon: I.undo },
             ].map((row) => (
-              <div key={row.label} className="flex items-center gap-2.5 border-b py-2.5 last:border-0" style={{ borderColor: C.hair }}>
-                <span className="flex text-slate-400">{row.icon}</span>
-                <b className="text-[12.5px] font-semibold">{row.label}</b>
-                <span className="rounded-full bg-blue-50 px-2 py-[1px] text-[11px] font-bold text-blue-700">{row.count}</span>
-                <Link href={row.href} className="ml-auto rounded border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-blue-700 hover:bg-blue-100">
+              <div key={row.label} className="flex flex-wrap items-center gap-x-2.5 gap-y-1 border-b py-2.5 last:border-0" style={{ borderColor: C.hair }}>
+                <span className="flex shrink-0 text-slate-400">{row.icon}</span>
+                <b className="min-w-0 text-[12.5px] font-semibold">{row.label}</b>
+                <span className="shrink-0 rounded-full bg-blue-50 px-2 py-[1px] text-[11px] font-bold text-blue-700">{row.count}</span>
+                <Link href={row.href} className="ml-auto shrink-0 rounded border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-blue-700 hover:bg-blue-100">
                   Review →
                 </Link>
               </div>
@@ -387,8 +407,10 @@ export function DashboardView() {
           </div>
         </section>
 
-        {/* ============ NO VISIT 7+ DAYS ============ */}
-        <section className="rounded-lg border bg-white shadow-sm lg:col-span-4" style={{ borderColor: C.line }}>
+        {/* ============ NO VISIT 7+ DAYS ============
+            Task 139: teeno bottom cards lg:col-span-6 — Overdue+Pending upar wali row,
+            No Visit neeche (sab cards ko hamesha kaafi space milta hai) */}
+        <section className="rounded-lg border bg-white shadow-sm lg:col-span-6" style={{ borderColor: C.line }}>
           <CardHead icon={I.pin} title="No Visit — 7+ Days" right={<Link href="/pjp" className="font-bold text-blue-700 hover:underline">PJP →</Link>} />
           <div className="p-3">
             {data.noVisit.length === 0 && <p className="py-6 text-center text-slate-400">Sab shops cover ho rahi hain ✓</p>}
