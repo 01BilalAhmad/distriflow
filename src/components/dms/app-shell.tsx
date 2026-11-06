@@ -133,8 +133,10 @@ function SidebarNav({ modules, activeKey, collapsed, itemClick, openGroups, togg
     <>
       {modules.map((m) => {
         // Task 72 — FOLDER/ACCORDION groups (user request): header click se group ka
-        // drop-down khulta/band hota hai (smooth grid-rows animation). Folder ke andar
-        // active page ho aur folder band ho to header par emerald DOT nazar aata hai.
+        // drop-down khulta/band hota hai (smooth grid-rows animation). Task 138 —
+        // SINGLE-OPEN accordion: ek waqt mein sirf EK folder khula rehta hai, doosra
+        // kholte hi pehla apne aap band/shrink ho jata hai. Folder ke andar active page
+        // ho aur folder band ho to header par emerald DOT nazar aata hai.
         const hasActive = m.items.some((i) => i.key === activeKey)
         if (collapsed) {
           // Icon-only rail — folders yahan apply nahi hote, group divider + icons
@@ -263,9 +265,10 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
     [highlightView]
   )
 
-  // Task 72: pehli mount par localStorage se folders restore — jo user ne khud khole/
-  // band kiye the wahi state wapis. Kuch save nahi to sab folders band (default),
-  // active folder neeche wale effect se auto-open hoga.
+  // Task 72: pehli mount par localStorage se folders restore. Task 138 — SINGLE-OPEN
+  // migration: purana data (Task 72 multi-open) mein 2+ folders true ho sakte hain —
+  // sirf pehla khula folder rakhte hain, baqi band. Kuch save nahi to sab folders band
+  // (default), active folder neeche wale effect se auto-open hoga.
   useEffect(() => {
     let saved: Record<string, boolean> | null = null
     try {
@@ -273,24 +276,39 @@ export function DMSApp({ children }: { children: React.ReactNode }) {
       if (raw) saved = JSON.parse(raw) as Record<string, boolean>
     } catch { /* corrupt JSON — default par gir jao */ }
     queueMicrotask(() => {
-      setOpenGroups(saved ?? {})
+      const firstOpen = saved ? Object.keys(saved).find((k) => saved?.[k]) : undefined
+      setOpenGroups(firstOpen ? { [firstOpen]: true } : {})
       setGroupsInit(true)
     })
   }, [])
 
   // Task 72: jis module ki page khuli hai uska folder HAMESHA khula (navigation par
-  // auto-open). Baqi folders user ki apni choice par rehte hain. (queueMicrotask —
-  // set-state-in-effect lint rule ke mutabiq, codebase ka established pattern)
+  // auto-open). Task 138 — strict accordion: naya folder khulte hi pehla wala apne aap
+  // band ho jata hai, sirf jis par kaam ho raha hai wohi khula rehta hai.
+  // (queueMicrotask — set-state-in-effect lint rule ke mutabiq, codebase ka established pattern)
   useEffect(() => {
     if (!groupsInit) return
     queueMicrotask(() => {
-      setOpenGroups((prev) => (prev[activeModuleName] ? prev : { ...prev, [activeModuleName]: true }))
+      setOpenGroups((prev) => (prev[activeModuleName] ? prev : { [activeModuleName]: true }))
     })
   }, [activeModuleName, groupsInit])
 
-  // Folder header click — state + localStorage dono update (user ki choice yaad rehti hai)
+  // Task 138 — openGroups ka har change localStorage se SYNC rakhna: nav effect ka
+  // folder-flip bhi persist hota hai (warna stored value purana folder dikhati rehti
+  // thi — reload par pehle galat folder khulta, phir effect theek karta tha). groupsInit
+  // ke baad hi chalta hai taake restore se pehle {} likh kar saved data ura na de.
+  useEffect(() => {
+    if (!groupsInit) return
+    const openName = Object.keys(openGroups).find((k) => openGroups[k])
+    try { localStorage.setItem('dms_sidebar_groups', JSON.stringify(openName ? { [openName]: true } : {})) } catch {}
+  }, [openGroups, groupsInit])
+
+  // Folder header click — Task 138 SINGLE-OPEN accordion: folder khula to pehle se
+  // khula wala apne aap band (sirf ek hi khula rehta hai); khule folder par click
+  // karne se wo band ho jata hai (sab band — emerald dot active page dikhata rehta hai).
+  // State + localStorage dono update (open folder naya reload par wahi milega).
   function toggleGroup(name: string) {
-    const next = { ...openGroups, [name]: !openGroups[name] }
+    const next: Record<string, boolean> = openGroups[name] ? {} : { [name]: true }
     setOpenGroups(next)
     try { localStorage.setItem('dms_sidebar_groups', JSON.stringify(next)) } catch {}
   }
