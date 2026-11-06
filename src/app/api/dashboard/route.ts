@@ -177,6 +177,14 @@ export async function GET(req: Request) {
       : []
     const lowOf = (pid: string) => (stockByProduct.get(pid) ?? 0) < 30 * Math.max(1, allProducts.find((p) => p.id === pid)?.unitsPerCarton ?? 1)
     const lowStockItems = allProducts.filter((p) => lowOf(p.id)).length
+    // ---- T140: Low Stock list (No Visit card ke sath khali slot wala card) ----
+    // koi NAYI DB query nahi — batches + allProducts upar hi load hue hain.
+    // Sab se pehle sab se kam stock wala item (stock-out risk) — top 5.
+    const lowStock = allProducts
+      .filter((p) => lowOf(p.id))
+      .map((p) => ({ name: p.name, qty: stockByProduct.get(p.id) ?? 0, unitsPerCarton: p.unitsPerCarton }))
+      .sort((a, b) => a.qty / Math.max(1, a.unitsPerCarton) - b.qty / Math.max(1, b.unitsPerCarton))
+      .slice(0, 5)
 
     // ---- PJP today ----
     let pjpDone = 0
@@ -408,6 +416,7 @@ export async function GET(req: Request) {
       bookerTotals,
       topOverdue,
       noVisit,
+      lowStock,
       daybook: {
         sales: r2(todaySales), recovery: recoveryToday, orders: todayOrders,
         receipts: receiptsToday, cash: cashToday,

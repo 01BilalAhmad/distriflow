@@ -77,6 +77,8 @@ export interface DashboardData {
   }
   topOverdue: { shop: string; zone: string; amount: number; days: number; lastPay: string }[]
   noVisit: { shop: string; zone: string; booker: string; days: number | null }[]
+  // T140 — Low Stock card (No Visit card ke sath wali khali slot ke liye)
+  lowStock: { name: string; qty: number; unitsPerCarton: number }[]
   daybook: { sales: number; recovery: number; orders: number; receipts: number; cash: number; returns: number }
 }
 

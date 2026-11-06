@@ -14,6 +14,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useDMS } from '@/lib/dms-store'
 import { api, fmtPKR } from '@/lib/dms-api'
 import type { DashboardData } from '@/lib/dms-types'
+import { fmtQty } from '@/components/dms/unit-qty'
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
@@ -67,6 +68,14 @@ function DaysBadge({ days }: { days: number | null }) {
   return <span className={`inline-block rounded-full px-1.5 py-[1px] text-[10.5px] font-bold ${cls}`}>{days == null ? '—' : `${days}d`}</span>
 }
 
+/** T140 — stock badge Low Stock card ke liye: 0 = OUT (red), <10 ctn = kam (red ctn
+ * count), warna amber ctn count (reorder level 30 ctn se kam hai hi list mein) */
+function StockBadge({ qty, upc }: { qty: number; upc: number }) {
+  const ctn = Math.floor(qty / Math.max(1, upc))
+  const cls = qty <= 0 ? 'bg-red-50 text-red-700' : ctn < 10 ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'
+  return <span className={`inline-block whitespace-nowrap rounded-full px-1.5 py-[1px] text-[10.5px] font-bold ${cls}`}>{qty <= 0 ? 'OUT' : `${ctn} ctn`}</span>
+}
+
 function CardHead({ icon, title, right }: { icon: React.ReactNode; title: string; right?: React.ReactNode }) {
   return (
     <div className="flex items-center gap-1.5 border-b px-3 py-2" style={{ borderColor: C.hair }}>
@@ -87,6 +96,7 @@ const I = {
   alert: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 4.5 21 19.5H3z" /><path d="M12 10v4.2" /><path d="M12 17.2h.01" /></svg>,
   check: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="8.5" /><path d="M8.3 12.4l2.5 2.5 4.9-5.2" /></svg>,
   pin: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 21s-6.5-5.4-6.5-10.2a6.5 6.5 0 0 1 13 0C18.5 15.6 12 21 12 21z" /><circle cx="12" cy="10.6" r="2.3" /></svg>,
+  box: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M21 8.5v7a2 2 0 0 1-1 1.73l-7 4a2 2 0 0 1-2 0l-7-4A2 2 0 0 1 3 15.5v-7a2 2 0 0 1 1-1.73l7-4a2 2 0 0 1 2 0l7 4a2 2 0 0 1 1 1.73z" /><path d="M3.3 7 12 12l8.7-5" /><path d="M12 22V12" /></svg>,
   book: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>,
   cash: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="2.5" y="6.5" width="19" height="11" rx="1.5" /><circle cx="12" cy="12" r="2.6" /><path d="M5.8 9.8h.01" /><path d="M18.2 14.2h.01" /></svg>,
   doc: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M7 3.5h6.5L18 8v12.5H7z" /><path d="M13.5 3.5V8H18" /><path d="M9.8 12.5h4.4" /><path d="M9.8 15.8h4.4" /></svg>,
@@ -109,8 +119,10 @@ export function DashboardView() {
 
   if (loading || !data) {
     return (
-      <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
+      // T140: main overflow-hidden hai (har view apna scroll manage karta hai) —
+      // skeleton bhi apna internal scroll rakhta hai warna chhoti viewport par kat jata hai
+      <div className="h-full space-y-3 overflow-y-auto pr-1">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 2xl:grid-cols-8">
           {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-[74px] rounded-lg" />)}
         </div>
         <Skeleton className="h-10 rounded-lg" />
@@ -161,9 +173,18 @@ export function DashboardView() {
   ]
 
   return (
-    <div className="df-dash space-y-3 text-[13px]" style={{ color: C.ink, fontVariantNumeric: 'tabular-nums' }}>
+    // T140 FIX — 'Pura scroll nai ho rha' (user screen recording, tablet 1280px):
+    // main app-shell mein overflow-hidden hai (har view apna internal layout manage
+    // karta hai) magar dashboard koi internal scroll container rakhta hi nahi tha →
+    // viewport se lamba content (Day Book / No Visit card ka aadha nichla hissa)
+    // KABHI scroll nahi ho sakta tha. pjp-view jaisa hi pattern: h-full +
+    // overflow-y-auto + pr-1 (scrollbar ke liye jagah).
+    <div
+      className="df-dash h-full space-y-3 overflow-y-auto overscroll-contain pr-1 text-[13px]"
+      style={{ color: C.ink, fontVariantNumeric: 'tabular-nums' }}
+    >
       {/* ============ KPI STRIP ============ */}
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8" aria-label="Key KPIs">
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 2xl:grid-cols-8" aria-label="Key KPIs">
         {tiles.map((t) => (
           <div key={t.label} className="rounded-lg border bg-white p-3 shadow-sm" style={{ borderColor: C.line }}>
             <div className="whitespace-nowrap text-[10px] font-bold uppercase tracking-wider text-slate-500">{t.label}</div>
@@ -424,6 +445,30 @@ export function DashboardView() {
                 <DaysBadge days={r.days} />
               </div>
             ))}
+          </div>
+        </section>
+
+        {/* ============ LOW STOCK — REORDER (T140) ============
+            User: 'No Visit card ke sath jagah buch gayi hai — koi zaroori card add karo'
+            → Low Stock reorder list (FMCG distributor ke liye sab se actionable:
+            stock-out = lost sales). KPI tile 'Stock Value' ka lowStockItems count isi
+            ki drill-in hai. No naya DB query — batches/allProducts API mein pehle se.
+            lg:col-span-6 — No Visit ke sath balanced 2-up row. */}
+        <section className="rounded-lg border bg-white shadow-sm lg:col-span-6" style={{ borderColor: C.line }}>
+          <CardHead icon={I.box} title="Low Stock — Reorder" right={<Link href="/inventory" className="font-bold text-blue-700 hover:underline">Inventory →</Link>} />
+          <div className="p-3">
+            {data.lowStock.length === 0 && <p className="py-6 text-center text-slate-400">Sab items stock mein hain ✓</p>}
+            {data.lowStock.map((r) => (
+              <div key={r.name} className="flex items-center gap-2 border-b py-2 last:border-0" style={{ borderColor: C.hair }}>
+                <div className="min-w-0 flex-1">
+                  <b className="block truncate text-[12.5px] font-semibold">{r.name}</b>
+                  <span className="text-[11px] text-slate-500">1 Ctn = {r.unitsPerCarton} Pcs</span>
+                </div>
+                <span className="whitespace-nowrap text-[11.5px] text-slate-500">{fmtQty(r.qty, r.unitsPerCarton)}</span>
+                <StockBadge qty={r.qty} upc={r.unitsPerCarton} />
+              </div>
+            ))}
+            <p className="mt-2 text-[11px] text-slate-500">Reorder level: 30 crtn se kam — Inventory se naya stock add karein</p>
           </div>
         </section>
 
